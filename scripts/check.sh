@@ -44,5 +44,9 @@ test -f "${root}/examples/systemd/vps-terminal.service"
 test -f "${root}/examples/caddy/Caddyfile.snippet"
 test -f "${root}/docs/configuration.md"
 test -f "${root}/docs/reverse-proxy.md"
+test -f "${root}/docs/auth-google.md"
+grep -Fq 'Recommended auth: Google' "${root}/README.md"
+grep -Fq 'oauth2-proxy' "${root}/docs/auth-google.md"
+grep -Fq 'X-Vps-Authenticated-Email' "${root}/SECURITY.md"
 
 printf '%s\n' 'check.sh: PASS'

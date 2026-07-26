@@ -1,27 +1,29 @@
-# Example: terminate TLS + authenticate, then reverse-proxy to the Unix socket.
-# Replace terminal.example.com and wire your real auth (oauth2-proxy, Authelia, etc.).
+# Recommended simplest edge: Google login via oauth2-proxy, then the Unix socket.
+# Full walkthrough: docs/auth-google.md
 #
-# Critical: never forward a client-supplied X-Vps-Authenticated-Email.
-# Strip it, authenticate, then set the header from the verified identity.
+# Critical:
+# - Never forward a client-supplied X-Vps-Authenticated-Email.
+# - Authenticate first, then set the header from the verified identity only.
+# - Mount only the socket dir into the proxy if containerized, e.g.
+#     /home/YOU/.local/share/vps-terminal/run -> /run/vps-terminal:ro
 
-terminal.example.com {
-	# Example using an auth subrequest (oauth2-proxy / similar):
-	# forward_auth http://127.0.0.1:4180 {
-	# 	uri /oauth2/auth
-	# 	copy_headers X-Auth-Request-Email
-	# }
-
-	# After auth succeeds, map identity into the header the app trusts:
-	# (pseudo — adapt to your auth module)
-	# header_up X-Vps-Authenticated-Email {http.request.header.X-Auth-Request-Email}
-
-	reverse_proxy unix//run/vps-terminal/terminal.sock {
-		# Ensure the app never sees a spoofed identity header from the client:
-		header_up -X-Vps-Authenticated-Email
-		# Set from your verified auth result only, e.g.:
-		# header_up X-Vps-Authenticated-Email {http.request.header.X-Auth-Request-Email}
-	}
+# oauth2-proxy (Google) on loopback — see docs/auth-google.md
+# reverse_proxy target for the OAuth UI / callbacks:
+auth.example.com {
+	reverse_proxy 127.0.0.1:4180
 }
 
-# Mount the socket directory read-only into the proxy process, for example:
-#   /home/YOU/.local/share/vps-terminal/run -> /run/vps-terminal:ro
+terminal.example.com {
+	# Require a valid oauth2-proxy session before any terminal traffic.
+	forward_auth 127.0.0.1:4180 {
+		uri /oauth2/auth
+		copy_headers X-Auth-Request-Email
+	}
+
+	reverse_proxy unix//run/vps-terminal/terminal.sock {
+		# Drop anything the browser tried to send:
+		header_up -X-Vps-Authenticated-Email
+		# Inject verified email from oauth2-proxy (--set-xauthrequest=true):
+		header_up X-Vps-Authenticated-Email {http.request.header.X-Auth-Request-Email}
+	}
+}

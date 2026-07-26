@@ -5,21 +5,42 @@ Mobile-first **tmux terminal** Progressive Web App for a Linux host.
 Attach a phone or laptop browser to real tmux sessions, with a touch-friendly
 keyboard/snippets bar, reconnect, scrollback find, and a jailed file browser.
 
-**Authentication is not built in.** You put a reverse proxy (Caddy, nginx,
-Traefik, …) with real login in front. The proxy injects a trusted email header;
-everyone who passes auth gets a shell as the service Unix user.
+## Security (read this first)
 
-## Security warning
+**Authentication is not built into the app.** You put TLS + login on a reverse
+proxy; the proxy injects a trusted email header. Anyone who passes that login
+gets a shell as the **same Unix user** that runs `vps-terminal` — treat it like
+an unlocked SSH session for that account.
 
-An authenticated browser session is equivalent to an **unlocked SSH session**
-for the account that runs `vps-terminal`. Do not expose the app without:
+Before you expose anything publicly:
 
-1. TLS termination
-2. Strong authentication at the edge
-3. A private backend channel (Unix socket recommended)
-4. Exact public origin configuration (`VPS_TERMINAL_ORIGIN`)
+1. Terminate TLS at the edge
+2. Require strong authentication (see recommended Google setup below)
+3. Keep the app on a private channel (Unix socket recommended)
+4. Set `VPS_TERMINAL_ORIGIN` to the exact public HTTPS origin
+5. Keep independent recovery access (SSH / Tailscale / console)
 
-Read [SECURITY.md](SECURITY.md) before deploying.
+Full threat model, header rules, and limits: **[SECURITY.md](SECURITY.md)**.
+
+## Recommended auth: Google (Gmail) sign-in
+
+Simplest production pattern for most people:
+
+```text
+Browser → Caddy/nginx + oauth2-proxy → Google login → Unix socket → vps-terminal
+```
+
+- You create a Google Cloud OAuth client
+- [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) handles the
+  redirect and cookies
+- You **allowlist** only your Gmail addresses
+- The proxy sets `X-Vps-Authenticated-Email` after a successful login
+
+Step-by-step: **[docs/auth-google.md](docs/auth-google.md)**
+Proxy contract (any IdP): **[docs/reverse-proxy.md](docs/reverse-proxy.md)**
+
+Other providers (Authelia, Keycloak, Cloudflare Access, …) work the same way.
+The app only cares about the verified email header.
 
 ## Requirements
 
@@ -27,7 +48,7 @@ Read [SECURITY.md](SECURITY.md) before deploying.
 - Node.js ≥ 18, npm
 - Build tools for native `node-pty` (`python3`, `make`, `g++` on Debian/Ubuntu)
 - `tmux`
-- Reverse proxy + authentication for production
+- Reverse proxy + authentication for production (Google + oauth2-proxy recommended)
 - Non-root Unix user whose shell you intend to expose
 
 ## Quick install (host + user systemd)
@@ -45,18 +66,19 @@ export VPS_TERMINAL_ORIGIN=https://terminal.example.com
 
 Then:
 
-1. Point your reverse proxy at
+1. Put **Google + oauth2-proxy** (or another IdP) in front of the Unix socket
    `$HOME/.local/share/vps-terminal/run/terminal.sock`
-   (see [docs/reverse-proxy.md](docs/reverse-proxy.md) and `examples/`).
-2. After auth, inject **`X-Vps-Authenticated-Email`** (and strip any client value).
-3. Open the site, create/attach a tmux session, install the PWA.
+   → [docs/auth-google.md](docs/auth-google.md)
+2. After auth, inject **`X-Vps-Authenticated-Email`** (and strip any client value)
+3. Open the site, create/attach a tmux session, install the PWA
 
 ## Architecture
 
 ```text
 Browser ──HTTPS──▶ Reverse proxy + auth ──Unix socket──▶ vps-terminal
-                                                              │
-                                                         node-pty + tmux
+                         │                                    │
+                    e.g. Google                          node-pty + tmux
+                    via oauth2-proxy
 ```
 
 | Header | Role |
@@ -104,6 +126,17 @@ Details: [docs/development.md](docs/development.md).
 - Hardware keyboard bridge when focus is on chrome
 - Files browser with path jail (home / projects / paste + extras)
 - Installable PWA manifest
+
+## Docs map
+
+| Doc | Topic |
+|-----|--------|
+| [SECURITY.md](SECURITY.md) | Threat model and hard requirements |
+| [docs/auth-google.md](docs/auth-google.md) | Recommended Google / Gmail setup |
+| [docs/reverse-proxy.md](docs/reverse-proxy.md) | Header contract for any proxy |
+| [docs/configuration.md](docs/configuration.md) | Full environment reference |
+| [docs/docker.md](docs/docker.md) | Optional container notes |
+| [docs/development.md](docs/development.md) | LOCAL_DEV workflow |
 
 ## License
 

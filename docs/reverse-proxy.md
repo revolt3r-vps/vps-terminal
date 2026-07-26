@@ -8,6 +8,17 @@
 4. Forward HTTP and WebSocket to the app (Unix socket preferred).
 5. Ensure `Origin` seen by the app matches `VPS_TERMINAL_ORIGIN`.
 
+## Simplest recommended setup
+
+For most self-hosters, use **Google (Gmail) sign-in** via **oauth2-proxy** in
+front of Caddy or nginx:
+
+→ **[auth-google.md](auth-google.md)** (step-by-step)
+
+Security model: **[../SECURITY.md](../SECURITY.md)**
+
+Any other IdP is fine if it ends with the same header contract.
+
 ## Recommended topology
 
 ```text
@@ -24,11 +35,9 @@ Socket mode is `0660`. Ensure the proxy user/group can connect.
 
 ## Examples
 
+- [Google + oauth2-proxy walkthrough](auth-google.md)
 - [Caddy sketch](../examples/caddy/Caddyfile.snippet)
 - [nginx + auth_request sketch](../examples/nginx/nginx.snippet.conf)
-
-These are templates. Wire them to **your** oauth2-proxy, Authelia, Keycloak,
-or other identity layer.
 
 ## WebSockets
 
