@@ -14,10 +14,10 @@ everyone who passes auth gets a shell as the service Unix user.
 An authenticated browser session is equivalent to an **unlocked SSH session**
 for the account that runs `vps-terminal`. Do not expose the app without:
 
-1. TLS termination  
-2. Strong authentication at the edge  
-3. A private backend channel (Unix socket recommended)  
-4. Exact public origin configuration (`VPS_TERMINAL_ORIGIN`)  
+1. TLS termination
+2. Strong authentication at the edge
+3. A private backend channel (Unix socket recommended)
+4. Exact public origin configuration (`VPS_TERMINAL_ORIGIN`)
 
 Read [SECURITY.md](SECURITY.md) before deploying.
 
@@ -45,8 +45,8 @@ export VPS_TERMINAL_ORIGIN=https://terminal.example.com
 
 Then:
 
-1. Point your reverse proxy at  
-   `$HOME/.local/share/vps-terminal/run/terminal.sock`  
+1. Point your reverse proxy at
+   `$HOME/.local/share/vps-terminal/run/terminal.sock`
    (see [docs/reverse-proxy.md](docs/reverse-proxy.md) and `examples/`).
 2. After auth, inject **`X-Vps-Authenticated-Email`** (and strip any client value).
 3. Open the site, create/attach a tmux session, install the PWA.
@@ -97,13 +97,13 @@ Details: [docs/development.md](docs/development.md).
 
 ## Features
 
-- tmux session list, create, rename, kill  
-- xterm.js terminal with fit, truecolor-friendly options, reconnect  
-- Mobile footer: keys, snippets, pins, paste/copy helpers  
-- Scrollback find  
-- Hardware keyboard bridge when focus is on chrome  
-- Files browser with path jail (home / projects / paste + extras)  
-- Installable PWA manifest  
+- tmux session list, create, rename, kill
+- xterm.js terminal with fit, truecolor-friendly options, reconnect
+- Mobile footer: keys, snippets, pins, paste/copy helpers
+- Scrollback find
+- Hardware keyboard bridge when focus is on chrome
+- Files browser with path jail (home / projects / paste + extras)
+- Installable PWA manifest
 
 ## License
 

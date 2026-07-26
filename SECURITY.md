@@ -34,12 +34,12 @@ unlocked SSH client for that account.
 
 ## Limits (defense in depth, not multi-tenant isolation)
 
-- WebSocket lifetime: 1 hour  
-- Max concurrent WS connections: 10  
-- Session name charset and length limits  
-- Path jail for the file browser  
-- Upload / preview size caps  
-- CSP without inline scripts  
+- WebSocket lifetime: 1 hour
+- Max concurrent WS connections: 10
+- Session name charset and length limits
+- Path jail for the file browser
+- Upload / preview size caps
+- CSP without inline scripts
 
 ## Reporting issues
 

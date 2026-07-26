@@ -38,8 +38,8 @@ WebSockets after one hour anyway).
 
 ## Checklist
 
-- [ ] Unauthenticated HTTPS request is rejected or redirected to login  
-- [ ] Client cannot spoof `X-Vps-Authenticated-Email`  
-- [ ] App is not listening on a public TCP interface  
-- [ ] `VPS_TERMINAL_ORIGIN` equals the browser origin exactly  
-- [ ] Independent SSH/Tailscale recovery still works  
+- [ ] Unauthenticated HTTPS request is rejected or redirected to login
+- [ ] Client cannot spoof `X-Vps-Authenticated-Email`
+- [ ] App is not listening on a public TCP interface
+- [ ] `VPS_TERMINAL_ORIGIN` equals the browser origin exactly
+- [ ] Independent SSH/Tailscale recovery still works
