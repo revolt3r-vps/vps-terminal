@@ -45,8 +45,12 @@ test -f "${root}/examples/caddy/Caddyfile.snippet"
 test -f "${root}/docs/configuration.md"
 test -f "${root}/docs/reverse-proxy.md"
 test -f "${root}/docs/auth-google.md"
-grep -Fq 'Recommended auth: Google' "${root}/README.md"
+test -f "${root}/docs/install.md"
+test -f "${root}/docs/faq.md"
+grep -Fq 'docs/install.md' "${root}/README.md"
+grep -Fq 'First SSH login' "${root}/docs/install.md"
 grep -Fq 'oauth2-proxy' "${root}/docs/auth-google.md"
 grep -Fq 'X-Vps-Authenticated-Email' "${root}/SECURITY.md"
+grep -Fq 'Start here' "${root}/README.md"
 
 printf '%s\n' 'check.sh: PASS'

@@ -1,14 +1,20 @@
 # Recommended simplest edge: Google login via oauth2-proxy, then the Unix socket.
-# Full walkthrough: docs/auth-google.md
+#
+# First-time VPS:  docs/install.md
+# Google steps:    docs/auth-google.md
+#
+# Replace:
+#   example.com           → your domain
+#   /home/deploy/...sock  → your $HOME path (run: echo $HOME)
 #
 # Critical:
 # - Never forward a client-supplied X-Vps-Authenticated-Email.
 # - Authenticate first, then set the header from the verified identity only.
-# - Mount only the socket dir into the proxy if containerized, e.g.
-#     /home/YOU/.local/share/vps-terminal/run -> /run/vps-terminal:ro
+# - Caddy must be allowed to connect to the socket (same user or shared group).
+# - If Caddy runs in Docker, mount only the socket dir, e.g.
+#     /home/deploy/.local/share/vps-terminal/run -> /run/vps-terminal:ro
 
-# oauth2-proxy (Google) on loopback — see docs/auth-google.md
-# reverse_proxy target for the OAuth UI / callbacks:
+# oauth2-proxy (Google) on loopback — docs/auth-google.md
 auth.example.com {
 	reverse_proxy 127.0.0.1:4180
 }
@@ -20,7 +26,8 @@ terminal.example.com {
 		copy_headers X-Auth-Request-Email
 	}
 
-	reverse_proxy unix//run/vps-terminal/terminal.sock {
+	# Use the real socket path for your user (not a generic /run path unless you bind-mounted it).
+	reverse_proxy unix//home/deploy/.local/share/vps-terminal/run/terminal.sock {
 		# Drop anything the browser tried to send:
 		header_up -X-Vps-Authenticated-Email
 		# Inject verified email from oauth2-proxy (--set-xauthrequest=true):

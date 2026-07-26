@@ -1,5 +1,8 @@
 # Development
 
+For a **public VPS**, use [install.md](install.md) instead. This page is for
+hacking on the code on a laptop with **no authentication**.
+
 ## Local no-auth server
 
 ```bash
@@ -14,7 +17,8 @@ node server.js
 Open `http://127.0.0.1:3099/`. Identity is `dev@localhost.test` (override with
 `VPS_TERMINAL_DEV_EMAIL`).
 
-**Never** enable `LOCAL_DEV` on a publicly reachable interface.
+**Never** enable `LOCAL_DEV` on a publicly reachable interface or a real VPS
+you care about.
 
 ## Checks
 

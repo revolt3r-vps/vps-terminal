@@ -25,7 +25,9 @@ Optional:
   VPS_TERMINAL_APP_NAME     UI title (default: VPS Terminal)
   VPS_TERMINAL_PROJECT_ROOT new-session cwd / projects root
 
-See README.md and docs/configuration.md.
+First-time VPS guide: docs/install.md
+Google login guide:  docs/auth-google.md
+Config reference:    docs/configuration.md
 EOF
 }
 
@@ -139,8 +141,14 @@ install.sh: PASS
 Listening on: ${state_root}/run/terminal.sock
 Origin:       ${origin_required}
 
-Next:
-  1. Point your reverse proxy at the Unix socket (docs/reverse-proxy.md).
-  2. Inject X-Vps-Authenticated-Email only after successful authentication.
-  3. Open ${origin_required} and install the PWA on your phone.
+The app is private until you put TLS + login in front of the socket.
+
+Next (first-time VPS path):
+  1. Read docs/install.md (SSH, DNS, firewall overview).
+  2. Put Google login in front: docs/auth-google.md
+     (Caddy sketch: examples/caddy/Caddyfile.snippet).
+  3. Inject X-Vps-Authenticated-Email only after successful authentication.
+  4. Open ${origin_required} on your phone and install the PWA.
+
+Keep SSH working as recovery. See SECURITY.md.
 EOF

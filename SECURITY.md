@@ -1,10 +1,12 @@
 # Security
 
+If you are installing for the first time, also read **[docs/install.md](docs/install.md)**.
+
 ## One-line summary
 
 Anyone who can complete your reverse-proxy login can run shell commands as the
 **service Unix user**. Design the edge (TLS + identity + allowlist) as carefully
-as you would an SSH account.
+as you would hand out an SSH account.
 
 ## What the app does and does not do
 
@@ -58,6 +60,7 @@ Untrusted Internet
 | Over-broad Google allowlist | Explicit email list; treat each address as an admin of that Unix user. |
 | `LOCAL_DEV` exposed | Skips auth; loopback only; forbidden with `VPS_TERMINAL_SOCKET`. |
 | Compromised proxy | Compromised shell — isolate host, minimize proxy attack surface. |
+| Lost SSH after firewall change | Keep provider console; open SSH before locking yourself out. |
 
 ## Google / Gmail specific notes
 
@@ -86,6 +89,7 @@ different OS accounts:
 - [ ] App listens only on Unix socket or loopback
 - [ ] `VPS_TERMINAL_ORIGIN` matches the browser origin exactly
 - [ ] Independent SSH/Tailscale recovery still works after stopping the unit
+- [ ] You did not disable SSH before proving the web path
 
 ## Reporting issues
 

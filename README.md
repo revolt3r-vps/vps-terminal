@@ -1,143 +1,132 @@
 # vps-terminal
 
-Mobile-first **tmux terminal** Progressive Web App for a Linux host.
+A **mobile-friendly terminal** for your Linux VPS: open a browser (or install
+the PWA), sign in, and attach to real **tmux** sessions on the server.
 
-Attach a phone or laptop browser to real tmux sessions, with a touch-friendly
-keyboard/snippets bar, reconnect, scrollback find, and a jailed file browser.
+Built for phones and tablets, with an on-screen keys/snippets bar, reconnect,
+scrollback search, and a simple file browser.
 
-## Security (read this first)
+---
 
-**Authentication is not built into the app.** You put TLS + login on a reverse
-proxy; the proxy injects a trusted email header. Anyone who passes that login
-gets a shell as the **same Unix user** that runs `vps-terminal` — treat it like
-an unlocked SSH session for that account.
+## Start here (first VPS?)
 
-Before you expose anything publicly:
+If this is your first time SSHing into a VPS, use the full walkthrough:
 
-1. Terminate TLS at the edge
-2. Require strong authentication (see recommended Google setup below)
-3. Keep the app on a private channel (Unix socket recommended)
-4. Set `VPS_TERMINAL_ORIGIN` to the exact public HTTPS origin
-5. Keep independent recovery access (SSH / Tailscale / console)
+### → **[docs/install.md](docs/install.md)** — SSH → install → Google login → phone
 
-Full threat model, header rules, and limits: **[SECURITY.md](SECURITY.md)**.
+That guide covers:
 
-## Recommended auth: Google (Gmail) sign-in
+1. First SSH login and a non-root user
+2. Installing Node, tmux, and tools
+3. DNS and HTTPS hostnames
+4. Installing this app
+5. Recommended **Gmail / Google** login in front
+6. Firewall, first visit, and troubleshooting
 
-Simplest production pattern for most people:
+---
+
+## Security (short version)
+
+| Fact | What it means for you |
+|------|------------------------|
+| This app has **no built-in login** | You add Google (or another login) on a reverse proxy |
+| Login success = **full shell** | Same power as SSH for that Linux user |
+| Keep SSH working | Recovery if the website or auth breaks |
+| Do not expose Node publicly | Only the proxy should reach the app (Unix socket) |
+
+Full details: **[SECURITY.md](SECURITY.md)**
+Recommended login: **[docs/auth-google.md](docs/auth-google.md)** (Gmail + oauth2-proxy)
 
 ```text
-Browser → Caddy/nginx + oauth2-proxy → Google login → Unix socket → vps-terminal
+Phone browser
+    │ HTTPS + “Sign in with Google”
+    ▼
+Caddy (or nginx) + oauth2-proxy
+    │ private Unix socket
+    ▼
+vps-terminal  →  your tmux sessions on the VPS
 ```
 
-- You create a Google Cloud OAuth client
-- [oauth2-proxy](https://oauth2-proxy.github.io/oauth2-proxy/) handles the
-  redirect and cookies
-- You **allowlist** only your Gmail addresses
-- The proxy sets `X-Vps-Authenticated-Email` after a successful login
+---
 
-Step-by-step: **[docs/auth-google.md](docs/auth-google.md)**
-Proxy contract (any IdP): **[docs/reverse-proxy.md](docs/reverse-proxy.md)**
+## Requirements (checklist)
 
-Other providers (Authelia, Keycloak, Cloudflare Access, …) work the same way.
-The app only cares about the verified email header.
+You need:
 
-## Requirements
+- [ ] A Linux VPS you can reach with **SSH**
+- [ ] A **domain name** (for HTTPS + Google OAuth)
+- [ ] **Node.js 18+**, **npm**, **tmux**, build tools (`g++`, `python3`, …)
+- [ ] A reverse proxy with real auth (Google + oauth2-proxy is the documented path)
+- [ ] A **non-root** Linux user to run the app
 
-- Linux host (primary target)
-- Node.js ≥ 18, npm
-- Build tools for native `node-pty` (`python3`, `make`, `g++` on Debian/Ubuntu)
-- `tmux`
-- Reverse proxy + authentication for production (Google + oauth2-proxy recommended)
-- Non-root Unix user whose shell you intend to expose
+Exact package commands: [docs/install.md](docs/install.md).
 
-## Quick install (host + user systemd)
+---
+
+## Quick install (if you already know VPS basics)
 
 ```bash
+# on the VPS, as a normal user (not root)
 git clone https://github.com/revolt3r-vps/vps-terminal.git
 cd vps-terminal
 
+# exact public URL you will open in the browser (https, no trailing slash)
 export VPS_TERMINAL_ORIGIN=https://terminal.example.com
-# optional: export VPS_TERMINAL_APP_NAME='My Terminal'
-# optional: export VPS_TERMINAL_PROJECT_ROOT="$HOME/projects"
 
 ./scripts/install.sh
 ```
 
-Then:
-
-1. Put **Google + oauth2-proxy** (or another IdP) in front of the Unix socket
-   `$HOME/.local/share/vps-terminal/run/terminal.sock`
-   → [docs/auth-google.md](docs/auth-google.md)
-2. After auth, inject **`X-Vps-Authenticated-Email`** (and strip any client value)
-3. Open the site, create/attach a tmux session, install the PWA
-
-## Architecture
+Then put **TLS + Google login** in front of:
 
 ```text
-Browser ──HTTPS──▶ Reverse proxy + auth ──Unix socket──▶ vps-terminal
-                         │                                    │
-                    e.g. Google                          node-pty + tmux
-                    via oauth2-proxy
+$HOME/.local/share/vps-terminal/run/terminal.sock
 ```
 
-| Header | Role |
-|--------|------|
-| `X-Vps-Authenticated-Email` | Required in production; set only by your proxy after login |
-| `Origin` | Must match `VPS_TERMINAL_ORIGIN` for mutating HTTP and WebSockets |
+See [docs/auth-google.md](docs/auth-google.md) and
+[examples/caddy/Caddyfile.snippet](examples/caddy/Caddyfile.snippet).
 
-## Configuration
-
-Short list:
-
-| Variable | Purpose |
-|----------|---------|
-| `VPS_TERMINAL_ORIGIN` | Public origin (required outside LOCAL_DEV) |
-| `VPS_TERMINAL_SOCKET` | Unix socket path (recommended production) |
-| `VPS_TERMINAL_HOST` / `PORT` | TCP bind when not using a socket |
-| `VPS_TERMINAL_APP_NAME` | UI title |
-| `VPS_TERMINAL_PROJECT_ROOT` | Default projects path / new session cwd |
-| `VPS_TERMINAL_LOCAL_DEV=1` | Local no-auth mode (loopback only) |
-
-Full table: [docs/configuration.md](docs/configuration.md).
-
-## Docker
-
-Optional demo path only — see [docs/docker.md](docs/docker.md) and
-`examples/docker-compose.yml`. Host install is preferred for real host tmux.
-
-## Development
-
-```bash
-npm ci
-npm run vendor
-export VPS_TERMINAL_LOCAL_DEV=1
-npm start
-```
-
-Details: [docs/development.md](docs/development.md).
+---
 
 ## Features
 
 - tmux session list, create, rename, kill
-- xterm.js terminal with fit, truecolor-friendly options, reconnect
-- Mobile footer: keys, snippets, pins, paste/copy helpers
-- Scrollback find
-- Hardware keyboard bridge when focus is on chrome
-- Files browser with path jail (home / projects / paste + extras)
-- Installable PWA manifest
+- xterm.js terminal, reconnect, scrollback find
+- Mobile footer: keys, snippets, pins, paste helpers
+- Hardware keyboard support when focus is on chrome
+- Files browser with path jail
+- Installable PWA
+
+---
+
+## Configuration
+
+| Variable | Purpose |
+|----------|---------|
+| `VPS_TERMINAL_ORIGIN` | Public HTTPS origin (**required** in production) |
+| `VPS_TERMINAL_SOCKET` | Unix socket path (set by install script) |
+| `VPS_TERMINAL_APP_NAME` | UI title |
+| `VPS_TERMINAL_PROJECT_ROOT` | Default projects folder / new session cwd |
+| `VPS_TERMINAL_LOCAL_DEV=1` | Laptop testing only — **no auth**, loopback only |
+
+Full list: [docs/configuration.md](docs/configuration.md).
+
+---
 
 ## Docs map
 
-| Doc | Topic |
-|-----|--------|
-| [SECURITY.md](SECURITY.md) | Threat model and hard requirements |
-| [docs/auth-google.md](docs/auth-google.md) | Recommended Google / Gmail setup |
-| [docs/reverse-proxy.md](docs/reverse-proxy.md) | Header contract for any proxy |
-| [docs/configuration.md](docs/configuration.md) | Full environment reference |
-| [docs/docker.md](docs/docker.md) | Optional container notes |
-| [docs/development.md](docs/development.md) | LOCAL_DEV workflow |
+| Doc | Audience |
+|-----|----------|
+| **[docs/install.md](docs/install.md)** | **First-time VPS install (start here)** |
+| [SECURITY.md](SECURITY.md) | Security model and checklist |
+| [docs/auth-google.md](docs/auth-google.md) | Gmail / Google + oauth2-proxy |
+| [docs/reverse-proxy.md](docs/reverse-proxy.md) | Any reverse proxy / IdP |
+| [docs/configuration.md](docs/configuration.md) | Environment variables |
+| [docs/development.md](docs/development.md) | Local development without auth |
+| [docs/docker.md](docs/docker.md) | Optional Docker (advanced) |
+| [docs/faq.md](docs/faq.md) | Common questions |
+
+---
 
 ## License
 
-MIT — see [LICENSE](LICENSE). Third-party notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT — [LICENSE](LICENSE). Notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
