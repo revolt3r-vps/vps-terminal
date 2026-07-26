@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#202336">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="VPS Terminal">
+    <title>VPS Terminal</title>
+    <link rel="icon" href="/terminal.svg" type="image/svg+xml">
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="stylesheet" href="/vendor/xterm.css">
+    <link rel="stylesheet" href="/app.css">
+    <script src="/vendor/xterm.js" defer></script>
+    <script src="/vendor/addon-fit.js" defer></script>
+    <script src="/vendor/addon-search.js" defer></script>
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header id="app-header">
+      <div class="header-row">
+        <button id="header-summary" type="button" aria-expanded="false" title="Show sessions">
+          <span id="connection-dot" aria-hidden="true"></span>
+          <span id="current-session">No session</span>
+          <span class="header-chevron" aria-hidden="true">⌄</span>
+        </button>
+        <button
+          id="create-collapsed"
+          class="icon-button header-create-collapsed"
+          type="button"
+          title="Create session"
+          aria-label="Create session"
+        >
+          ＋
+        </button>
+        <div id="header-expanded">
+          <nav id="sessions" aria-label="tmux sessions"></nav>
+          <button id="create" class="icon-button" type="button" title="Create session">＋</button>
+          <button id="collapse-header" class="icon-button" type="button" title="Hide session bar">⌃</button>
+        </div>
+        <div id="view-mode" role="tablist" aria-label="Main view">
+          <button
+            type="button"
+            class="view-mode-btn"
+            data-view-mode="term"
+            role="tab"
+            aria-selected="true"
+            title="Terminal"
+          >
+            Term
+          </button>
+          <button
+            type="button"
+            class="view-mode-btn"
+            data-view-mode="files"
+            role="tab"
+            aria-selected="false"
+            title="Files"
+          >
+            Files
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <div id="empty">
+        <p>Select or create a tmux session from the session bar.</p>
+      </div>
+      <div id="files-panel" hidden>
+        <div id="files-toolbar">
+          <nav id="files-breadcrumb" aria-label="Path" aria-live="polite"></nav>
+        </div>
+        <div id="files-roots" role="tablist" aria-label="File roots"></div>
+        <ul id="files-list" aria-label="Directory listing"></ul>
+        <p id="files-empty-hint" hidden>Empty folder</p>
+      </div>
+      <dialog id="files-actions-dialog" aria-label="File actions">
+        <div class="settings-heading">
+          <strong id="files-actions-title">File</strong>
+          <button id="files-actions-close" class="icon-button" type="button" title="Close">×</button>
+        </div>
+        <p id="files-actions-path" class="settings-hint"></p>
+        <div class="files-actions-buttons">
+          <button id="files-action-preview" type="button">Preview</button>
+          <button id="files-action-download" type="button">Download</button>
+          <button id="files-action-insert" type="button">Insert path</button>
+          <button id="files-action-delete" type="button" class="files-action-danger">Delete</button>
+        </div>
+      </dialog>
+      <dialog id="files-preview-dialog" aria-label="File preview">
+        <div class="settings-heading">
+          <strong id="files-preview-title">Preview</strong>
+          <button id="files-preview-close" class="icon-button" type="button" title="Close">×</button>
+        </div>
+        <pre id="files-preview-body"></pre>
+      </dialog>
+      <div id="terminal" hidden></div>
+      <!-- Stable scroll hit target above xterm (keeps iOS swipes reliable). -->
+      <div id="scroll-catcher" hidden aria-hidden="true"></div>
+      <div id="scroll-position" hidden aria-hidden="true"></div>
+      <div id="scroll-thumb" aria-hidden="true"></div>
+      <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
+      <button id="selection-copy-chip" type="button" hidden>Copy</button>
+      <div id="find-bar" hidden>
+        <input
+          id="find-input"
+          type="search"
+          enterkeyhint="search"
+          autocomplete="off"
+          autocorrect="off"
+          autocapitalize="off"
+          spellcheck="false"
+          placeholder="Find in scrollback"
+          aria-label="Find in scrollback"
+        >
+        <button id="find-prev" type="button" title="Previous">↑</button>
+        <button id="find-next" type="button" title="Next">↓</button>
+        <button id="find-close" type="button" title="Close find">×</button>
+      </div>
+    </main>
+
+    <div id="status" role="status" aria-live="polite"></div>
+
+    <dialog id="settings-dialog" aria-labelledby="settings-title">
+      <div class="settings-heading">
+        <strong id="settings-title">Terminal settings</strong>
+        <button id="settings-close" class="icon-button" type="button" title="Close settings">×</button>
+      </div>
+      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="true">Theme</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="keys" aria-selected="false">Keys</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="snips" aria-selected="false">Snips</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
+      </div>
+      <div class="settings-panels">
+        <section
+          class="settings-panel"
+          data-settings-panel="theme"
+          role="tabpanel"
+          aria-label="Theme"
+        >
+          <label class="settings-field" for="terminal-theme">
+            <span>Terminal theme</span>
+            <select id="terminal-theme">
+              <option value="matrix">Matrix</option>
+              <option value="groknight">Grok Night</option>
+              <option value="tokyonight">Tokyo Night</option>
+              <option value="rosepine">Rosé Pine Moon</option>
+              <option value="oscura">Oscura Midnight</option>
+              <option value="dracula">Dracula</option>
+              <option value="solarized">Solarized Dark</option>
+              <option value="nord">Nord</option>
+              <option value="monokai">Monokai</option>
+              <option value="gruvbox">Gruvbox Dark</option>
+            </select>
+          </label>
+          <p class="settings-hint">Per-session theme is remembered when you change it.</p>
+        </section>
+        <section
+          class="settings-panel"
+          data-settings-panel="keys"
+          role="tabpanel"
+          aria-label="Keys"
+          hidden
+        >
+          <p class="settings-hint">
+            Chips in the Keys drawer. Reorder, add built-ins, or create custom
+            keys. Saved in this browser only. Find stays on the footer bar
+            (and Ctrl/Cmd+F).
+          </p>
+          <ul id="shortcut-editor-list"></ul>
+          <div class="settings-shortcut-add">
+            <select id="shortcut-add-select" aria-label="Shortcut to add"></select>
+            <button id="shortcut-add" type="button">Add</button>
+          </div>
+          <div class="settings-custom-key" aria-label="Custom key">
+            <p class="settings-hint settings-hint-tight">
+              Custom key — Ctrl+letter, scroll, or a sequence
+              (<code>\e</code> <code>\x1b</code> <code>\n</code>).
+            </p>
+            <input
+              id="custom-key-label"
+              type="text"
+              maxlength="16"
+              placeholder="Label (optional for Ctrl)"
+              autocomplete="off"
+              enterkeyhint="done"
+            />
+            <div class="settings-custom-key-row">
+              <select id="custom-key-type" aria-label="Custom key type">
+                <option value="ctrl">Ctrl+letter</option>
+                <option value="scroll">Scroll</option>
+                <option value="text">Sequence</option>
+              </select>
+              <input
+                id="custom-key-value"
+                type="text"
+                maxlength="64"
+                placeholder="letter (a–z)"
+                autocomplete="off"
+                spellcheck="false"
+                aria-label="Ctrl letter"
+              />
+              <select id="custom-key-scroll" aria-label="Scroll action" hidden>
+                <option value="up">Page up</option>
+                <option value="down">Page down</option>
+                <option value="bottom">Bottom</option>
+              </select>
+            </div>
+            <button id="custom-key-add" type="button">Add custom key</button>
+          </div>
+          <button id="shortcut-reset" type="button" class="settings-secondary">
+            Reset defaults
+          </button>
+        </section>
+        <section
+          class="settings-panel"
+          data-settings-panel="snips"
+          role="tabpanel"
+          aria-label="Snips"
+          hidden
+        >
+          <p class="settings-hint">
+            Chips in Snips mode. Saved on this VPS for every device.
+            <strong>Run</strong> = execute (send Enter). Off = insert only.
+            Hold a chip to invert for one tap.
+          </p>
+          <ul id="snippet-editor-list"></ul>
+          <div class="settings-snippet-edit">
+            <input
+              id="snippet-label-input"
+              type="text"
+              maxlength="32"
+              placeholder="Label"
+              autocomplete="off"
+              spellcheck="false"
+            >
+            <textarea
+              id="snippet-body-input"
+              rows="3"
+              maxlength="4000"
+              placeholder="Command body"
+              spellcheck="false"
+            ></textarea>
+            <label class="settings-check" for="snippet-run-input">
+              <input id="snippet-run-input" type="checkbox" checked>
+              <span>Run</span>
+              <span class="settings-check-hint">send Enter after insert</span>
+            </label>
+            <button id="snippet-save" type="button">Add snippet</button>
+          </div>
+          <button id="snippet-reset" type="button" class="settings-secondary">
+            Reset presets
+          </button>
+        </section>
+        <section
+          class="settings-panel"
+          data-settings-panel="app"
+          role="tabpanel"
+          aria-label="App"
+          hidden
+        >
+          <p id="app-help-text" class="settings-hint"></p>
+          <div class="settings-install">
+            <button id="install-app" type="button">Install web app</button>
+            <p id="install-help"></p>
+          </div>
+        </section>
+      </div>
+    </dialog>
+
+    <footer aria-label="App shortcuts">
+      <!-- Term mode footer: drawer lives in #footer-main so landscape can
+           swap it into the middle rail (replacing paste/keys/snips scroll). -->
+      <div id="footer-term">
+        <div id="footer-main">
+          <button
+            id="keyboard"
+            class="shortcut-icon"
+            type="button"
+            aria-pressed="false"
+            title="Show keyboard"
+            aria-label="Show keyboard"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="2.5" y="6" width="19" height="12" rx="2" />
+              <path d="M6 10h1.5M10 10h1.5M14 10h1.5M18 10h.5M6 13h1.5M10 13h4M16 13h2M8 16h8" />
+            </svg>
+          </button>
+          <div id="footer-drawer" hidden aria-label="Keys or snippets drawer"></div>
+          <div id="footer-scroll">
+            <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
+              </svg>
+            </button>
+            <button id="drawer-find" class="footer-fixed shortcut-icon" type="button" title="Find" aria-label="Find in scrollback">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="6.5" />
+                <path d="M16 16l5 5" />
+              </svg>
+            </button>
+            <button id="drawer-keys" class="footer-fixed" type="button" aria-pressed="false" title="Keys">Keys</button>
+            <button id="drawer-snips" class="footer-fixed" type="button" aria-pressed="false" title="Snips">Snips</button>
+            <div id="footer-pins" aria-label="Pinned shortcuts"></div>
+          </div>
+          <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <!-- Files mode footer (session/keyboard chrome stays Term-only) -->
+      <div id="footer-files" hidden>
+        <div id="footer-files-main">
+          <button id="files-up" type="button" title="Parent directory" disabled>Up</button>
+          <button id="files-refresh" type="button" title="Refresh listing">Refresh</button>
+          <label class="files-upload-label footer-files-upload" title="Upload into this folder">
+            <span>Upload</span>
+            <input id="files-upload" type="file" hidden>
+          </label>
+          <button id="files-settings" class="footer-fixed shortcut-icon" type="button" title="Settings" aria-label="Settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </footer>
+  </body>
+</html>

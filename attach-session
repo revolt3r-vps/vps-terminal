@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Replay existing tmux history into browser scrollback, then attach exactly to
+# the requested session. Adapted from AgentPeek's MIT-licensed attach wrapper.
+set -Eeuo pipefail
+
+readonly name="${1:-}"
+if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$ ]]; then
+  printf '%s\n' 'vps-terminal: invalid session name' >&2
+  exit 1
+fi
+
+if ! tmux has-session -t "=${name}" 2>/dev/null; then
+  printf '%s\n' 'vps-terminal: session does not exist' >&2
+  exit 1
+fi
+
+# The attach redraw supplies the visible screen. Replay only history above it.
+tmux capture-pane -p -e -S -10000 -E -1 -t "=${name}:" 2>/dev/null || true
+
+# Move the replay completely into xterm's scrollback before attach redraws.
+rows=$(stty size 2>/dev/null || true)
+rows=${rows%% *}
+if [[ "$rows" =~ ^[0-9]+$ ]] && (( rows > 0 && rows <= 300 )); then
+  for ((line = 0; line < rows; line += 1)); do
+    printf '\n'
+  done
+fi
+
+exec tmux attach-session -t "=${name}"

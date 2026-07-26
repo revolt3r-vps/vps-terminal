@@ -1,0 +1,18 @@
+# Demo-oriented compose. Binds loopback only. LOCAL_DEV skips auth — do not
+# expose this to untrusted networks.
+services:
+  vps-terminal:
+    build: ..
+    image: vps-terminal:local
+    environment:
+      VPS_TERMINAL_LOCAL_DEV: "1"
+      VPS_TERMINAL_HOST: "0.0.0.0"
+      VPS_TERMINAL_PORT: "3001"
+      VPS_TERMINAL_APP_NAME: "VPS Terminal (demo)"
+      # Optional mounts for real host files:
+      # VPS_TERMINAL_PROJECT_ROOT: /home/node/projects
+    ports:
+      - "127.0.0.1:3001:3001"
+    # volumes:
+    #   - ${HOME}/projects:/home/node/projects
+    restart: unless-stopped

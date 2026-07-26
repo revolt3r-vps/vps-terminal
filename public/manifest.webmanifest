@@ -1,0 +1,20 @@
+{
+  "name": "VPS Terminal",
+  "short_name": "Terminal",
+  "description": "Mobile-first tmux terminal for your Linux host",
+  "start_url": "/",
+  "id": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["fullscreen", "standalone"],
+  "background_color": "#202336",
+  "theme_color": "#202336",
+  "icons": [
+    {
+      "src": "/terminal.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

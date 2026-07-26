@@ -1,0 +1,27 @@
+# Example: terminate TLS + authenticate, then reverse-proxy to the Unix socket.
+# Replace terminal.example.com and wire your real auth (oauth2-proxy, Authelia, etc.).
+#
+# Critical: never forward a client-supplied X-Vps-Authenticated-Email.
+# Strip it, authenticate, then set the header from the verified identity.
+
+terminal.example.com {
+	# Example using an auth subrequest (oauth2-proxy / similar):
+	# forward_auth http://127.0.0.1:4180 {
+	# 	uri /oauth2/auth
+	# 	copy_headers X-Auth-Request-Email
+	# }
+
+	# After auth succeeds, map identity into the header the app trusts:
+	# (pseudo — adapt to your auth module)
+	# header_up X-Vps-Authenticated-Email {http.request.header.X-Auth-Request-Email}
+
+	reverse_proxy unix//run/vps-terminal/terminal.sock {
+		# Ensure the app never sees a spoofed identity header from the client:
+		header_up -X-Vps-Authenticated-Email
+		# Set from your verified auth result only, e.g.:
+		# header_up X-Vps-Authenticated-Email {http.request.header.X-Auth-Request-Email}
+	}
+}
+
+# Mount the socket directory read-only into the proxy process, for example:
+#   /home/YOU/.local/share/vps-terminal/run -> /run/vps-terminal:ro

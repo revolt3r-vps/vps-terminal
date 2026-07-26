@@ -1,0 +1,22 @@
+[Unit]
+Description=vps-terminal (mobile tmux PWA)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=NODE_ENV=production
+Environment=VPS_TERMINAL_SOCKET=@STATE_ROOT@/run/terminal.sock
+Environment=VPS_TERMINAL_ORIGIN=@ORIGIN@
+Environment=VPS_TERMINAL_PROJECT_ROOT=@PROJECT_ROOT@
+Environment="VPS_TERMINAL_APP_NAME=@APP_NAME@"
+WorkingDirectory=@STATE_ROOT@
+ExecStart=/usr/bin/node @STATE_ROOT@/server.js
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+KillMode=process
+UMask=0077
+
+[Install]
+WantedBy=default.target
