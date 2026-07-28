@@ -840,12 +840,41 @@ function shouldUseNativeTouchSelection() {
 
 let lastConnectionDetail = '';
 
+// Most callers just pass a message; this infers a tone from the same
+// wording they already use consistently (failure verbs vs. past-tense
+// completion verbs) so error/success get a second, non-color-only cue
+// without every call site needing to opt in individually.
+// Covers this app's actual failure vocabulary (every user-facing
+// server error string plus the client's own), not just a few examples —
+// checked against the full list in server.js/fs-jail.js/preferences-store.js.
+// Residual risk: a future error string that matches none of these still
+// renders neutral; call sites that already know they're reporting a
+// failure can pass {tone: 'error'} explicitly instead of relying on this.
+const statusErrorPattern =
+  /\b(failed|error|could not|cannot|invalid|expired|rejected|unavailable|too large|too many|limit|required|already exists|does not exist|not found|not a (directory|file)|permission denied|read-only|forbidden|not allowed|unsupported|empty)\b/i;
+const statusSuccessPattern =
+  /^(Copied|Saved|Created|Duplicated|Renamed|Deleted|Uploaded|Downloaded|Inserted|Loaded latest|Connected to|Pinned|Unpinned|Ran:|Added:|Shared setup (enabled|replaced)|Snippets (saved|reset)|(Created|Duplicated|Renamed|Deleted|Default) profile)/;
+
+function inferStatusTone(message) {
+  if (typeof message !== 'string') {
+    return 'neutral';
+  }
+  if (statusErrorPattern.test(message)) {
+    return 'error';
+  }
+  if (statusSuccessPattern.test(message)) {
+    return 'success';
+  }
+  return 'neutral';
+}
+
 function setStatus(message, options = {}) {
   clearTimeout(statusTimer);
   statusTimer = null;
   statusElement.textContent = message;
   statusElement.classList.add('visible');
   statusElement.classList.toggle('sticky', Boolean(options.sticky));
+  statusElement.dataset.tone = options.tone || inferStatusTone(message);
   if (options.sticky) {
     return;
   }
@@ -2584,11 +2613,9 @@ function updateAppHelpPanel() {
   }
   help.textContent = [
     `${appDisplayName}.`,
-    'Hold a Keys/Snips chip to pin it on the main bar.',
-    'Menu holds the session profile, Find, rename, and reconnect.',
-    'Find needs an active session (scrollback search).',
-    'Hardware keyboard: when focus is on chrome, keys route to the session;',
-    'browser reload chords (Ctrl/Cmd+R, etc.) stay with the browser when not focused in the terminal.'
+    'Hold a Keys/Snips chip to pin it to the main bar.',
+    'Menu holds Find, rename, reconnect, and session profile.',
+    'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
   ].join(' ');
 }
 
@@ -2871,7 +2898,7 @@ async function saveSnippetFromForm() {
 }
 
 async function resetSnippetsToPresets() {
-  if (!window.confirm('Reset snippets to built-in presets?')) {
+  if (!window.confirm('Reset snippets to their built-in defaults?')) {
     return;
   }
   try {
@@ -3088,7 +3115,7 @@ function createKeyProfile() {
     setStatus(`Profile limit ${maximumKeyProfiles}`);
     return;
   }
-  const proposed = window.prompt('New Key Profile name:', 'New profile');
+  const proposed = window.prompt('New profile name:', 'New profile');
   if (proposed === null) {
     return;
   }
@@ -3127,7 +3154,7 @@ function duplicateKeyProfile() {
     return;
   }
   const proposed = window.prompt(
-    'Duplicate Key Profile as:',
+    'Duplicate profile as:',
     `${source.name} copy`
   );
   if (proposed === null) {
@@ -3167,7 +3194,7 @@ function duplicateKeyProfile() {
 
 function renameKeyProfile() {
   const profile = editorKeyProfile();
-  const proposed = window.prompt('Rename Key Profile:', profile.name);
+  const proposed = window.prompt('Rename profile:', profile.name);
   if (proposed === null) {
     return;
   }
@@ -3191,7 +3218,9 @@ function deleteKeyProfile() {
   const documentValue = loadKeyProfilesDocument();
   if (
     documentValue.profiles.length <= 1 ||
-    !window.confirm(`Delete Key Profile “${profile.name}”?`)
+    !window.confirm(
+      `Delete profile “${profile.name}”? Sessions using it will fall back to the default profile.`
+    )
   ) {
     return;
   }
@@ -4290,6 +4319,25 @@ function handleNativeTerminalKeyEvent(event) {
   ) {
     event.preventDefault();
     openFindBar();
+    return false;
+  }
+  // Ctrl/Cmd+C copies an active selection instead of sending SIGINT. xterm's
+  // selection is its own internal model, not a native browser Selection —
+  // the DOM renderer only *looks* selected — so the browser's native copy
+  // shortcut has nothing to act on by itself. Desktop/fine-pointer chrome
+  // also has no footer, so the mobile copy button/chip aren't reachable
+  // here either; reuse the same copyTerminalSelection() they call so the
+  // clipboard-write path (and its iOS-safe fallback) stays in one place.
+  if (
+    event.type === 'keydown' &&
+    !event.isComposing &&
+    (event.key === 'c' || event.key === 'C') &&
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    terminalHasCopyableSelection()
+  ) {
+    event.preventDefault();
+    void copyTerminalSelection({ source: 'keyboard' });
     return false;
   }
   if (event.type === 'keydown' && event.key === 'Escape' && isFindBarOpen()) {
@@ -5522,8 +5570,8 @@ function updatePreferencesSyncUi() {
     local: {
       label: 'Not enabled',
       help:
-        'This browser is local-only. Enable once to make profiles, pins, ' +
-        'session assignments, and themes follow your login.'
+        'This browser is local-only. Enable to sync profiles, pins, ' +
+        'sessions, and themes to your login.'
     },
     saving: {
       label: 'Saving…',
@@ -5532,20 +5580,18 @@ function updatePreferencesSyncUi() {
     synced: {
       label: 'Synced',
       help:
-        'Profiles, pins, session assignments, and themes follow your login. ' +
-        'Active view, file path, font size, and layout stay on this device.'
+        'Profiles, pins, sessions, and themes follow your login; view, path, ' +
+        'font size, and layout stay on this device.'
     },
     offline: {
       label: 'Local fallback',
       help:
-        'Shared setup is temporarily unavailable. This login’s cached setup ' +
-        'remains active; changes stay in this browser until retry.'
+        'Shared setup is temporarily unavailable. Changes stay on this ' +
+        'device until it reconnects.'
     },
     conflict: {
       label: 'Needs choice',
-      help:
-        'Another browser saved a newer setup. Load it, or explicitly keep ' +
-        'this browser’s setup.'
+      help: 'Another browser saved a newer setup — load it, or keep this browser’s.'
     }
   };
   const current = states[preferencesSyncState] || states.offline;
@@ -5823,7 +5869,7 @@ async function replaceSharedPreferences() {
       preferencesSyncIdentityConfirmed
     ) ||
     !window.confirm(
-      'Replace the newer shared setup with this browser’s profiles and themes?'
+      'Replace the newer shared setup with this browser’s? This can’t be undone.'
     )
   ) {
     return;
@@ -5872,7 +5918,7 @@ async function loadLatestSharedPreferences() {
   if (
     preferencesSyncState !== 'conflict' ||
     !window.confirm(
-      'Discard this browser’s unsynced profile and theme changes and load the latest shared setup?'
+      'Load the latest shared setup? This browser’s unsynced changes will be discarded.'
     )
   ) {
     return;
@@ -6140,7 +6186,7 @@ function activateFilesEntry(entry, options = {}) {
   }
   if (filesPrimaryPointerIsFine() && !options.directTouch) {
     void previewFilesTarget(target).catch((error) => {
-      setStatus(error.message || 'Preview failed');
+      setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
     });
     return;
   }
@@ -6211,7 +6257,7 @@ function handleFilesListKeydown(event) {
       void deleteFilesTarget(
         filesEntryTarget(filesVisibleEntries[filesSelectedIndex])
       ).catch((error) => {
-        setStatus(error.message || 'Delete failed');
+        setStatus(error.message || FILES_DELETE_FAILED_MESSAGE);
       });
     }
     return;
@@ -6560,8 +6606,6 @@ function renderFilesListing(listing) {
       if (rawEntries.length > 0 && !filesShowHidden) {
         filesEmptyHintElement.textContent =
           `No visible items (${hiddenCount} hidden). Enable “Show hidden files” in File options.`;
-      } else if (rawEntries.length === 0) {
-        filesEmptyHintElement.textContent = 'Empty folder';
       } else {
         filesEmptyHintElement.textContent = 'Empty folder';
       }
@@ -6588,9 +6632,10 @@ function renderFilesListing(listing) {
     name.textContent = entry.name;
     const meta = document.createElement('span');
     meta.className = 'files-entry-meta';
+    // The folder icon already says "folder"; don't spend a line restating it.
     meta.textContent =
       entry.type === 'dir'
-        ? 'folder'
+        ? ''
         : `${formatFilesSize(entry.size)} · ${formatFilesMtime(entry.mtime)}`;
     const modified = document.createElement('span');
     modified.className = 'files-entry-modified';
@@ -7124,6 +7169,12 @@ async function submitFilesName() {
   }
 }
 
+// Shared with both the desktop context menu and the mobile action sheet,
+// which each fall back to these when the server gives no error detail.
+const FILES_PREVIEW_FAILED_MESSAGE = 'Preview failed';
+const FILES_DOWNLOAD_FAILED_MESSAGE = 'Download failed';
+const FILES_DELETE_FAILED_MESSAGE = 'Delete failed';
+
 async function previewFilesTarget(target) {
   const targetDirectory = target.path
     .split('/')
@@ -7190,7 +7241,7 @@ async function downloadFilesTarget(target) {
     throw new Error('Authentication expired');
   }
   if (!response.ok) {
-    let message = 'Download failed';
+    let message = FILES_DOWNLOAD_FAILED_MESSAGE;
     try {
       const value = await response.json();
       message = value.error || message;
@@ -7235,7 +7286,12 @@ function insertFilesPath(target) {
 }
 
 async function deleteFilesTarget(target) {
-  const ok = window.confirm(`Delete ${filesDisplayPath(target.root, target.path)}?`);
+  // The server only ever removes an empty directory (no recursive rm), so
+  // there is no extra "and its contents" consequence to describe here —
+  // both files and directories get the same plain, undoable-consequence text.
+  const ok = window.confirm(
+    `Delete ${filesDisplayPath(target.root, target.path)}? This can’t be undone.`
+  );
   if (!ok) {
     return;
   }
@@ -7406,8 +7462,8 @@ function renderSessions() {
       closeButton.innerHTML =
         '<svg viewBox="0 0 16 16" aria-hidden="true">' +
         '<path d="m4 4 8 8M12 4l-8 8" /></svg>';
-      closeButton.title = `Kill ${session.name}`;
-      closeButton.setAttribute('aria-label', `Kill session ${session.name}`);
+      closeButton.title = `Delete ${session.name}`;
+      closeButton.setAttribute('aria-label', `Delete session ${session.name}`);
       closeButton.addEventListener('click', () => killSession(session.name));
       item.append(closeButton);
     }
@@ -7438,7 +7494,7 @@ async function refreshSessions(selectFirst = false, quiet = false) {
       connect(selected.name);
     }
     if (!quiet) {
-      setStatus(`${sessions.length} tmux session${sessions.length === 1 ? '' : 's'}`);
+      setStatus(`${sessions.length} session${sessions.length === 1 ? '' : 's'}`);
     }
   } catch (error) {
     setStatus(error.message);
@@ -8549,7 +8605,7 @@ async function connect(name) {
 }
 
 async function createSession() {
-  const proposed = window.prompt('New tmux session name:');
+  const proposed = window.prompt('New session name:');
   if (proposed === null) {
     return;
   }
@@ -8570,7 +8626,7 @@ async function createSession() {
 async function killSession(name = activeSession) {
   if (
     !name ||
-    !window.confirm(`Kill tmux session “${name}”? Processes in it will stop.`)
+    !window.confirm(`Delete session “${name}”? Its processes will stop.`)
   ) {
     return;
   }
@@ -8589,7 +8645,7 @@ async function renameSession(name) {
   if (!name) {
     return;
   }
-  const proposed = window.prompt('Rename tmux session:', name);
+  const proposed = window.prompt('Rename session:', name);
   if (proposed === null) {
     return;
   }
@@ -9156,7 +9212,7 @@ filesActionPreview?.addEventListener('click', () => {
     return;
   }
   void previewFilesTarget(filesActionTarget).catch((error) => {
-    setStatus(error.message || 'Preview failed');
+    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
   });
 });
 filesActionDownload?.addEventListener('click', () => {
@@ -9164,7 +9220,7 @@ filesActionDownload?.addEventListener('click', () => {
     return;
   }
   void downloadFilesTarget(filesActionTarget).catch((error) => {
-    setStatus(error.message || 'Download failed');
+    setStatus(error.message || FILES_DOWNLOAD_FAILED_MESSAGE);
   });
 });
 filesActionRename?.addEventListener('click', () => {
@@ -9184,7 +9240,7 @@ filesActionDelete?.addEventListener('click', () => {
     return;
   }
   void deleteFilesTarget(filesActionTarget).catch((error) => {
-    setStatus(error.message || 'Delete failed');
+    setStatus(error.message || FILES_DELETE_FAILED_MESSAGE);
   });
 });
 filesPreviewClose?.addEventListener('click', () => {

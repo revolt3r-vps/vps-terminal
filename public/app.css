@@ -33,6 +33,7 @@
   --surface-raised: #1a2029;
   --surface-deep: #0f1319;
   --surface-pressed: #242c37;
+  --surface-hover: #1f2631;
   --border: #29313b;
   --muted: #98a3b2;
   --text: #eef1f5;
@@ -43,6 +44,10 @@
   --danger: #f87171;
   --danger-surface: #3a1c22;
   --focus-ring: #7dd3fc;
+  /* Shared by every stroke-based control icon. Icon *size* stays per-context
+     (touch target vs. compact chip vs. header rail), but stroke weight was
+     drifting (1.5/1.6/1.8) with no single source of truth — one value here. */
+  --icon-stroke-width: 1.8;
   /* Footer / thumb zone — keep roomy for one-handed use. */
   --control-size: 44px;
   --control-gap: 5px;
@@ -301,7 +306,7 @@ header.collapsed #view-mode {
   height: 17px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.6;
+  stroke-width: var(--icon-stroke-width);
   stroke-linecap: round;
   stroke-linejoin: round;
 }
@@ -580,7 +585,7 @@ body.files-view #files-name-dialog {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: var(--icon-stroke-width);
 }
 
 .files-toolbar-button:active {
@@ -752,6 +757,7 @@ body.files-view #files-name-dialog {
   border-bottom: 1px solid #232a33;
   outline: none;
   cursor: pointer;
+  transition: background-color 120ms ease;
 }
 
 #files-list li:active {
@@ -787,20 +793,25 @@ body.files-view #files-name-dialog {
 }
 
 .files-entry-icon.dir::before {
+  /* Body starts exactly where the tab (below) ends, and shares its fill
+     with no top border, so the two pieces read as one folder silhouette
+     instead of two stacked outlined boxes (which looked like a bag/basket). */
   inset: 5px 1px 2px;
-  border-radius: 2px;
+  border-top: none;
+  border-radius: 0 2px 2px 2px;
   background: color-mix(in srgb, currentColor 14%, transparent);
 }
 
 .files-entry-icon.dir::after {
   position: absolute;
   top: 2px;
-  left: 2px;
+  left: 1px;
   width: 8px;
-  height: 5px;
+  height: 3px;
   border: 1.5px solid currentColor;
   border-bottom: 0;
   border-radius: 2px 2px 0 0;
+  background: color-mix(in srgb, currentColor 14%, transparent);
   content: '';
 }
 
@@ -1340,7 +1351,7 @@ header.collapsed #connection-dot {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: var(--icon-stroke-width);
 }
 
 nav {
@@ -1370,6 +1381,19 @@ button {
   font-weight: 600;
   touch-action: manipulation;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+  /* Baseline feedback for every button; a component with its own hover/press
+     styling (lower specificity conflicts are avoided by keeping this a bare
+     element selector) simply overrides these defaults. */
+  transition: background-color 120ms ease, border-color 120ms ease,
+    color 120ms ease, transform 80ms ease;
+}
+
+/* Hover only where a real pointer can hover (design-principles.md §5) — a
+   touch tap must not get stuck showing a "hovered" look. */
+@media (hover: hover) and (pointer: fine) {
+  button:hover {
+    background: var(--surface-hover);
+  }
 }
 
 button:focus-visible,
@@ -1476,7 +1500,7 @@ button.active {
   height: 14px;
   fill: none;
   stroke: currentColor;
-  stroke-width: 1.8;
+  stroke-width: var(--icon-stroke-width);
   stroke-linecap: round;
 }
 
@@ -1757,6 +1781,35 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   border-color: #8a6a2a;
   background: rgba(55, 44, 20, 0.96);
   color: #f0d59a;
+}
+
+/* Color is never the only cue here: each tone also gets its own glyph and
+   the wording itself already differs (failure vs. completion verbs). */
+#status[data-tone='error'] {
+  border-color: var(--danger);
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+#status[data-tone='success'] {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+#status[data-tone='error']::before,
+#status[data-tone='success']::before {
+  display: inline-block;
+  margin-right: 6px;
+  font-weight: 700;
+}
+
+#status[data-tone='error']::before {
+  content: '\2715';
+}
+
+#status[data-tone='success']::before {
+  content: '\2713';
 }
 
 #settings-dialog {
@@ -2153,13 +2206,13 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 .settings-profile-pin svg {
+  /* This path is a solid pin silhouette, not a stroke-drawn line icon —
+     fill it instead of stroking it, or it renders as a barely-visible
+     outline. */
   width: 17px;
   height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 1.5;
+  fill: currentColor;
+  stroke: none;
 }
 
 .settings-profile-pin.active {
@@ -2509,7 +2562,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #keyboard.shortcut-icon svg {
   width: 24px;
   height: 24px;
-  stroke-width: 1.65;
+  stroke-width: var(--icon-stroke-width);
 }
 
 #drawer-keys,
@@ -2663,7 +2716,7 @@ footer button {
   stroke: currentColor;
   stroke-linecap: round;
   stroke-linejoin: round;
-  stroke-width: 1.8;
+  stroke-width: var(--icon-stroke-width);
 }
 
 @media (orientation: landscape) and (pointer: coarse) {

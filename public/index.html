@@ -56,7 +56,7 @@
         <!-- Portrait renders this as a vertical menu under the header row;
              landscape keeps it inline in the rail. -->
         <div id="header-expanded">
-          <nav id="sessions" aria-label="tmux sessions"></nav>
+          <nav id="sessions" aria-label="Sessions"></nav>
           <div id="header-picker-actions">
             <button
               id="create"
@@ -131,7 +131,7 @@
 
     <main>
       <div id="empty">
-        <p>Select or create a tmux session from the session bar.</p>
+        <p>Select or create a session from the session bar.</p>
       </div>
       <div id="files-panel" hidden>
         <div id="files-toolbar">
@@ -329,7 +329,7 @@
            target: the terminal reads touch events, so cancelling pointer
            events cannot keep a dismissing tap out of the session. -->
       <div id="picker-scrim" hidden aria-hidden="true"></div>
-      <div id="scroll-position" hidden aria-hidden="true"></div>
+      <div id="scroll-position" hidden aria-hidden="true" title="Scroll position"></div>
       <div id="scroll-thumb" aria-hidden="true"></div>
       <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
       <button id="selection-copy-chip" type="button" hidden>Copy</button>
@@ -371,7 +371,7 @@
           role="tabpanel"
           aria-label="Profiles"
         >
-          <div class="settings-key-profiles" aria-label="Key Profiles">
+          <div class="settings-key-profiles" aria-label="Profiles">
             <div class="settings-profile-picker">
               <label class="settings-field" for="key-profile-select">
                 <span>Edit profile</span>
@@ -396,9 +396,8 @@
             <p id="key-profile-summary" class="settings-profile-summary"></p>
           </div>
           <p class="settings-hint">
-            Profiles control Keys, visible Snippets, and pinned main bar.
-            Assign the active session from the Menu button. Use pin buttons
-            here; holding a live chip is the fast shortcut.
+            Profiles control Keys, Snippets, and pins on the main bar. Assign
+            a session from Menu; pin here, or hold a live chip as a shortcut.
           </p>
           <section class="settings-profile-section" aria-labelledby="profile-keys-heading">
             <div class="settings-profile-section-heading">
@@ -474,9 +473,8 @@
           hidden
         >
           <p class="settings-hint">
-            Shared on this VPS for every device. Profiles choose which items
-            they show.
-            <strong>Run</strong> = execute (send Enter). Off = insert only.
+            Shared across devices; profiles choose which items to show.
+            <strong>Run</strong> = execute, off = insert only.
           </p>
           <ul id="snippet-editor-list"></ul>
           <div class="settings-snippet-edit">
@@ -503,7 +501,7 @@
             <button id="snippet-save" type="button">Add snippet</button>
           </div>
           <button id="snippet-reset" type="button" class="settings-secondary">
-            Reset presets
+            Reset snippet defaults
           </button>
         </section>
         <section
