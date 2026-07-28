@@ -55,7 +55,8 @@ You need:
 
 - [ ] A Linux VPS you can reach with **SSH**
 - [ ] A **domain name** (for HTTPS + Google OAuth)
-- [ ] **Node.js 18+**, **npm**, **tmux**, build tools (`g++`, `python3`, …)
+- [ ] **Node.js 18+**, **npm**, **tmux**, GNU coreutils (`mv`), and build tools
+      (`g++`, `python3`, …)
 - [ ] A reverse proxy with real auth (Google + oauth2-proxy is the documented path)
 - [ ] A **non-root** Linux user to run the app
 
@@ -92,8 +93,12 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - tmux session list, create, rename, kill
 - xterm.js terminal, reconnect, scrollback find
 - Mobile footer: keys, snippets, pins, paste helpers
+- Terminal/Codex/Claude/Grok profiles with per-session keys, shared-snippet
+  selection, visible assignment, adaptive pin layouts, and optional per-login
+  setup sync across browsers
+- App-wide adaptive terminal themes
 - Hardware keyboard support when focus is on chrome
-- Files browser with path jail
+- Files workspace with jailed Locations, preview, rename, and new folders
 - Installable PWA
 
 ---

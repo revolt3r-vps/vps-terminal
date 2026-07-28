@@ -10,11 +10,20 @@ const { promisify } = require('node:util');
 const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
 const {
+  appendBoundedClientDebugEntries
+} = require('./diagnostics');
+const {
   normalizeRelativePath,
   resolveJailedPath,
   parentRelativePath,
+  createJailedDirectory,
+  renameJailedEntry,
   toDisplayPath
 } = require('./fs-jail');
+const {
+  PreferencesStore,
+  preferencesIdentity
+} = require('./preferences-store');
 
 const execFileAsync = promisify(execFile);
 const socketPath = process.env.VPS_TERMINAL_SOCKET || null;
@@ -81,11 +90,17 @@ const attachSessionPath = path.join(__dirname, 'attach-session');
 const stateRoot = path.join(homeDirectory, '.local/share/vps-terminal');
 const clientDebugLogPath = path.join(stateRoot, 'client-debug.log');
 const snippetsStorePath = path.join(stateRoot, 'snippets.json');
+const preferencesStore = new PreferencesStore(stateRoot);
+const clientDebugEnabled =
+  process.env.VPS_TERMINAL_CLIENT_DEBUG === '1';
 // Short path so AI prompts stay readable: ~/paste/a1b2c3d4.png
 const pasteImageRoot =
   process.env.VPS_TERMINAL_PASTE_ROOT || path.join(homeDirectory, 'paste');
 const maximumBodyBytes = 4096;
 const maximumSnippetsBodyBytes = 64 * 1024;
+// The client permits 12 profiles with 24 custom keys and 50 snippet
+// selections each; a valid maximum-size snapshot is about 125 KiB.
+const maximumPreferencesBodyBytes = 256 * 1024;
 const maximumSnippetCount = 50;
 const maximumSnippetLabelLength = 32;
 const maximumSnippetBodyLength = 4000;
@@ -233,6 +248,7 @@ const safeUploadFileNamePattern =
 const pasteImageTtlMs = 30 * 60 * 1000;
 const pasteImagePruneIntervalMs = 10 * 60 * 1000;
 const maximumClientDebugEntries = 20;
+const maximumClientDebugLogBytes = 256 * 1024;
 const maximumConnections = 10;
 const maximumInputLength = 32768;
 const maximumSessionNameLength = 32;
@@ -503,49 +519,12 @@ async function savePasteImage(buffer) {
   };
 }
 
-function sanitizeClientDebugEntry(entry) {
-  if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
-    return null;
-  }
-  const event =
-    typeof entry.event === 'string' ? entry.event.slice(0, 64) : 'unknown';
-  const t = typeof entry.t === 'string' ? entry.t.slice(0, 40) : new Date().toISOString();
-  let detail = entry.detail;
-  if (detail && typeof detail === 'object' && !Array.isArray(detail)) {
-    // Keep only shallow JSON-safe debug fields; never store secrets.
-    detail = JSON.parse(JSON.stringify(detail, (key, value) => {
-      if (typeof value === 'string' && value.length > 200) {
-        return `${value.slice(0, 200)}…`;
-      }
-      if (key.toLowerCase().includes('token') || key.toLowerCase().includes('password')) {
-        return '[redacted]';
-      }
-      return value;
-    }));
-  } else {
-    detail = {};
-  }
-  return { t, event, detail };
-}
-
 async function appendClientDebugEntries(entries) {
-  const lines = entries
-    .map((entry) => sanitizeClientDebugEntry(entry))
-    .filter(Boolean)
-    .map((entry) => JSON.stringify(entry));
-  if (lines.length === 0) {
-    return 0;
-  }
-  await fs.promises.mkdir(path.dirname(clientDebugLogPath), {
-    recursive: true,
-    mode: 0o700
-  });
-  await fs.promises.appendFile(
+  return appendBoundedClientDebugEntries(
     clientDebugLogPath,
-    `${lines.join('\n')}\n`,
-    { encoding: 'utf8', mode: 0o600 }
+    entries,
+    { maximumBytes: maximumClientDebugLogBytes }
   );
-  return lines.length;
 }
 
 function validatedSessionName(value) {
@@ -908,6 +887,47 @@ async function deleteFsEntry(rootId, relativePath) {
   };
 }
 
+async function createFsDirectory(rootId, relativeParent, name) {
+  const root = fsRootFromQuery(rootId);
+  if (!root.writable) {
+    const error = new Error('root is read-only');
+    error.statusCode = 403;
+    throw error;
+  }
+  const relativePath = await createJailedDirectory(
+    root.rootPath,
+    relativeParent,
+    name
+  );
+  return {
+    root: root.id,
+    path: relativePath,
+    displayPath: toDisplayPath(rootDisplayPrefix(root), relativePath),
+    created: true
+  };
+}
+
+async function renameFsEntry(rootId, relativePath, nextName) {
+  const root = fsRootFromQuery(rootId);
+  if (!root.writable) {
+    const error = new Error('root is read-only');
+    error.statusCode = 403;
+    throw error;
+  }
+  const renamedPath = await renameJailedEntry(
+    root.rootPath,
+    relativePath,
+    nextName
+  );
+  return {
+    root: root.id,
+    path: renamedPath,
+    displayPath: toDisplayPath(rootDisplayPrefix(root), renamedPath),
+    name: path.posix.basename(renamedPath),
+    renamed: true
+  };
+}
+
 async function listSessions() {
   try {
     // Use '|' not tab: tmux 3.3.x can rewrite \t to '_' in -F output, which
@@ -1042,6 +1062,7 @@ const mimeTypes = new Map([
   ['.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['.woff2', 'font/woff2']
 ]);
+const preferencesSubjectPlaceholder = '__VPS_PREFERENCES_SUBJECT__';
 
 async function serveStatic(request, response) {
   const url = new URL(request.url, publicOrigin);
@@ -1057,7 +1078,19 @@ async function serveStatic(request, response) {
     return;
   }
   try {
-    const body = await fs.promises.readFile(filePath);
+    let body = await fs.promises.readFile(filePath);
+    if (normalizedPath === '/index.html') {
+      const email = authenticatedEmail(request);
+      body = Buffer.from(
+        body
+          .toString('utf8')
+          .replaceAll(
+            preferencesSubjectPlaceholder,
+            email ? preferencesIdentity(email) : ''
+          ),
+        'utf8'
+      );
+    }
     setSecurityHeaders(response);
     response.statusCode = 200;
     response.setHeader(
@@ -1076,7 +1109,8 @@ async function serveStatic(request, response) {
 
 const server = http.createServer(async (request, response) => {
   try {
-    if (!authenticatedEmail(request)) {
+    const requestEmail = authenticatedEmail(request);
+    if (!requestEmail) {
       sendError(response, 401, 'authentication required');
       return;
     }
@@ -1085,7 +1119,8 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/config') {
       sendJson(response, 200, {
         appName: appDisplayName,
-        localDev: localDevMode
+        localDev: localDevMode,
+        clientDebug: clientDebugEnabled
       });
       return;
     }
@@ -1097,6 +1132,45 @@ const server = http.createServer(async (request, response) => {
 
     if (request.method === 'GET' && url.pathname === '/api/snippets') {
       sendJson(response, 200, await readSnippetsDocument());
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/preferences') {
+      sendJson(response, 200, await preferencesStore.read(requestEmail));
+      return;
+    }
+
+    if (request.method === 'PUT' && url.pathname === '/api/preferences') {
+      if (
+        !requestOriginIsValid(request) ||
+        request.headers['content-type'] !== 'application/json'
+      ) {
+        sendError(response, 403, 'request rejected');
+        return;
+      }
+      let value;
+      try {
+        value = JSON.parse(
+          await readBody(request, maximumPreferencesBodyBytes)
+        );
+      } catch (error) {
+        if (/too large/i.test(error.message)) {
+          sendError(response, 413, 'preferences document is too large');
+          return;
+        }
+        sendError(response, 400, 'invalid JSON body');
+        return;
+      }
+      if (value?.expectedSubject !== preferencesIdentity(requestEmail)) {
+        sendError(response, 412, 'authentication context changed; reload setup');
+        return;
+      }
+      const saved = await preferencesStore.write(
+        requestEmail,
+        value?.expectedRevision,
+        value?.preferences
+      );
+      sendJson(response, 200, saved);
       return;
     }
 
@@ -1125,6 +1199,10 @@ const server = http.createServer(async (request, response) => {
     }
 
     if (request.method === 'POST' && url.pathname === '/api/client-debug') {
+      if (!clientDebugEnabled) {
+        sendError(response, 404, 'not found');
+        return;
+      }
       if (
         !requestOriginIsValid(request) ||
         request.headers['content-type'] !== 'application/json'
@@ -1280,6 +1358,68 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (
+      request.method === 'POST' &&
+      url.pathname === '/api/fs/directory'
+    ) {
+      if (
+        !requestOriginIsValid(request) ||
+        request.headers['content-type'] !== 'application/json'
+      ) {
+        sendError(response, 403, 'request rejected');
+        return;
+      }
+      let value;
+      try {
+        value = JSON.parse(await readBody(request));
+      } catch {
+        sendError(response, 400, 'invalid JSON body');
+        return;
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        sendError(response, 400, 'JSON body must be an object');
+        return;
+      }
+      const result = await createFsDirectory(
+        value.root,
+        value.path || '',
+        value.name
+      );
+      sendJson(response, 201, result);
+      return;
+    }
+
+    if (
+      request.method === 'PATCH' &&
+      url.pathname === '/api/fs/entry'
+    ) {
+      if (
+        !requestOriginIsValid(request) ||
+        request.headers['content-type'] !== 'application/json'
+      ) {
+        sendError(response, 403, 'request rejected');
+        return;
+      }
+      let value;
+      try {
+        value = JSON.parse(await readBody(request));
+      } catch {
+        sendError(response, 400, 'invalid JSON body');
+        return;
+      }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        sendError(response, 400, 'JSON body must be an object');
+        return;
+      }
+      const result = await renameFsEntry(
+        value.root,
+        value.path || '',
+        value.name
+      );
+      sendJson(response, 200, result);
+      return;
+    }
+
     if (request.method === 'POST' && url.pathname === '/api/sessions') {
       if (
         !requestOriginIsValid(request) ||
@@ -1377,6 +1517,13 @@ const server = http.createServer(async (request, response) => {
     const status = error.statusCode || 500;
     if (status === 500) {
       console.error('request failed');
+    }
+    if (status === 409 && Number.isSafeInteger(error.revision)) {
+      sendJson(response, status, {
+        error: error.message,
+        revision: error.revision
+      });
+      return;
     }
     sendError(response, status, status === 500 ? 'internal error' : error.message);
   }

@@ -2,6 +2,10 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
+const { promisify } = require('node:util');
+
+const execFileAsync = promisify(execFile);
 
 /**
  * Normalize a client-supplied relative path inside a root.
@@ -164,6 +168,169 @@ function parentRelativePath(relativePath) {
   return rel.slice(0, idx);
 }
 
+function normalizeEntryName(name) {
+  if (
+    typeof name !== 'string' ||
+    name.length === 0 ||
+    name.length > 180 ||
+    Buffer.byteLength(name, 'utf8') > 255 ||
+    name !== name.trim() ||
+    name === '.' ||
+    name === '..' ||
+    /[\/\\\0-\x1f\x7f]/.test(name)
+  ) {
+    const error = new Error(
+      'name must fit within 180 characters and 255 bytes without slashes, control characters, or surrounding spaces'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+  return name;
+}
+
+function mapFsMutationError(error) {
+  if (error?.statusCode) {
+    return error;
+  }
+  if (error?.code === 'EEXIST' || error?.code === 'ENOTEMPTY') {
+    const conflict = new Error('an entry with that name already exists');
+    conflict.statusCode = 409;
+    return conflict;
+  }
+  if (error?.code === 'EACCES' || error?.code === 'EPERM') {
+    const denied = new Error('permission denied');
+    denied.statusCode = 403;
+    return denied;
+  }
+  return error;
+}
+
+async function lstatIfPresent(absolutePath) {
+  try {
+    return await fs.promises.lstat(absolutePath);
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      return null;
+    }
+    throw error;
+  }
+}
+
+async function createJailedDirectory(rootPath, relativeParent, name) {
+  const parent = normalizeRelativePath(relativeParent);
+  const safeName = normalizeEntryName(name);
+  const parentResolved = await resolveJailedPath(rootPath, parent, {
+    mustExist: true
+  });
+  if (!parentResolved.stats.isDirectory()) {
+    const error = new Error('parent is not a directory');
+    error.statusCode = 400;
+    throw error;
+  }
+  const targetRelative = parent ? `${parent}/${safeName}` : safeName;
+  const target = await resolveJailedPath(rootPath, targetRelative, {
+    mustExist: false
+  });
+  if (target.exists) {
+    const error = new Error('an entry with that name already exists');
+    error.statusCode = 409;
+    throw error;
+  }
+  try {
+    await fs.promises.mkdir(target.absolutePath, { mode: 0o700 });
+  } catch (error) {
+    throw mapFsMutationError(error);
+  }
+  return targetRelative;
+}
+
+async function renameJailedEntry(rootPath, relativePath, nextName) {
+  const sourceRelative = normalizeRelativePath(relativePath);
+  if (!sourceRelative) {
+    const error = new Error('cannot rename root');
+    error.statusCode = 400;
+    throw error;
+  }
+  const safeName = normalizeEntryName(nextName);
+  const parent = parentRelativePath(sourceRelative);
+  const targetRelative = parent ? `${parent}/${safeName}` : safeName;
+  if (sourceRelative === targetRelative) {
+    return targetRelative;
+  }
+  const source = await resolveJailedPath(rootPath, sourceRelative, {
+    mustExist: true
+  });
+  const sourceLexicalPath = path.join(
+    source.rootReal,
+    ...sourceRelative.split('/')
+  );
+  const sourceLeaf = await fs.promises.lstat(sourceLexicalPath);
+  if (sourceLeaf.isSymbolicLink()) {
+    const error = new Error('symlinks cannot be renamed');
+    error.statusCode = 403;
+    throw error;
+  }
+  const target = await resolveJailedPath(rootPath, targetRelative, {
+    mustExist: false
+  });
+  // realpath reports a broken destination symlink as missing. lstat closes
+  // that gap so it is treated as a conflict rather than silently replaced.
+  if (target.exists || (await lstatIfPresent(target.absolutePath))) {
+    const error = new Error('an entry with that name already exists');
+    error.statusCode = 409;
+    throw error;
+  }
+  try {
+    await fs.promises.access(
+      path.dirname(sourceLexicalPath),
+      fs.constants.W_OK
+    );
+  } catch (error) {
+    throw mapFsMutationError(error);
+  }
+  try {
+    // Node's fs.rename overwrites an entry that appears after the check above.
+    // GNU mv --no-clobber delegates to the platform no-replace operation and
+    // leaves the source intact on a conflict. --no-target-directory also keeps
+    // a concurrent destination directory from changing the operation's shape.
+    await execFileAsync(
+      'mv',
+      [
+        '--no-clobber',
+        '--no-target-directory',
+        '--',
+        sourceLexicalPath,
+        target.absolutePath
+      ],
+      { timeout: 30_000, maxBuffer: 16 * 1024 }
+    );
+  } catch (error) {
+    if (
+      (await lstatIfPresent(sourceLexicalPath)) &&
+      (await lstatIfPresent(target.absolutePath))
+    ) {
+      const conflict = new Error('an entry with that name already exists');
+      conflict.statusCode = 409;
+      throw conflict;
+    }
+    try {
+      await fs.promises.access(
+        path.dirname(sourceLexicalPath),
+        fs.constants.W_OK
+      );
+    } catch (accessError) {
+      throw mapFsMutationError(accessError);
+    }
+    throw mapFsMutationError(error);
+  }
+  if (await lstatIfPresent(sourceLexicalPath)) {
+    const error = new Error('an entry with that name already exists');
+    error.statusCode = 409;
+    throw error;
+  }
+  return targetRelative;
+}
+
 /**
  * @param {string} displayPrefix e.g. "~", "~/projects", "/data"
  * @param {string} relativePath path under that root
@@ -181,6 +348,9 @@ module.exports = {
   normalizeRelativePath,
   resolveJailedPath,
   parentRelativePath,
+  normalizeEntryName,
+  createJailedDirectory,
+  renameJailedEntry,
   toDisplayPath,
   assertInsideRoot
 };

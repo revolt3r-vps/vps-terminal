@@ -2,12 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="utf-8">
+    <meta
+      name="vps-preferences-subject"
+      content="__VPS_PREFERENCES_SUBJECT__"
+    >
+    <!-- Default cover for in-browser Safari; standalone drops cover ASAP (see script). -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="theme-color" content="#202336">
+    <meta name="theme-color" content="#11151b">
     <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VPS Terminal">
     <title>VPS Terminal</title>
+    <script src="/viewport-init.js"></script>
     <link rel="icon" href="/terminal.svg" type="image/svg+xml">
     <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="/vendor/xterm.css">
@@ -20,24 +27,62 @@
   <body>
     <header id="app-header">
       <div class="header-row">
-        <button id="header-summary" type="button" aria-expanded="false" title="Show sessions">
-          <span id="connection-dot" aria-hidden="true"></span>
-          <span id="current-session">No session</span>
-          <span class="header-chevron" aria-hidden="true">⌄</span>
-        </button>
         <button
-          id="create-collapsed"
-          class="icon-button header-create-collapsed"
+          id="connection-dot"
           type="button"
-          title="Create session"
-          aria-label="Create session"
+          title="No session"
+          aria-label="No session"
+        ></button>
+        <button
+          id="header-summary"
+          type="button"
+          aria-expanded="false"
+          aria-controls="header-expanded"
+          title="Show sessions"
         >
-          ＋
+          <span id="current-session">No session</span>
+          <span id="active-profile" class="active-profile-label" hidden></span>
+          <span
+            id="connection-state-label"
+            class="connection-state-label"
+            data-state="idle"
+          ></span>
+          <span class="header-chevron" aria-hidden="true">
+            <svg viewBox="0 0 16 16">
+              <path d="m4 6 4 4 4-4" />
+            </svg>
+          </span>
         </button>
+        <!-- Portrait renders this as a vertical menu under the header row;
+             landscape keeps it inline in the rail. -->
         <div id="header-expanded">
           <nav id="sessions" aria-label="tmux sessions"></nav>
-          <button id="create" class="icon-button" type="button" title="Create session">＋</button>
-          <button id="collapse-header" class="icon-button" type="button" title="Hide session bar">⌃</button>
+          <div id="header-picker-actions">
+            <button
+              id="create"
+              class="icon-button header-icon-button"
+              type="button"
+              title="New session"
+              aria-label="New session"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="M10 4v12M4 10h12" />
+              </svg>
+              <span class="header-picker-action-label">New session</span>
+            </button>
+            <button
+              id="collapse-header"
+              class="icon-button header-icon-button"
+              type="button"
+              title="Close session picker"
+              aria-label="Close session picker"
+            >
+              <svg viewBox="0 0 20 20" aria-hidden="true">
+                <path d="m5 12 5-5 5 5" />
+              </svg>
+              <span class="header-picker-action-label">Close</span>
+            </button>
+          </div>
         </div>
         <div id="view-mode" role="tablist" aria-label="Main view">
           <button
@@ -47,8 +92,12 @@
             role="tab"
             aria-selected="true"
             title="Terminal"
+            aria-label="Terminal"
           >
-            Term
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+              <path d="m5.5 7 2.5 2.5L5.5 12M10 12h4" />
+            </svg>
           </button>
           <button
             type="button"
@@ -57,10 +106,26 @@
             role="tab"
             aria-selected="false"
             title="Files"
+            aria-label="Files"
           >
-            Files
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M2.5 6.5h15v8a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z" />
+              <path d="M2.5 7V5.5a2 2 0 0 1 2-2h3l1.5 2h6.5a2 2 0 0 1 2 2" />
+            </svg>
           </button>
         </div>
+        <button
+          id="header-settings"
+          class="icon-button shortcut-icon desktop-header-action"
+          type="button"
+          title="Menu"
+          aria-label="Open menu"
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
+          </svg>
+        </button>
       </div>
     </header>
 
@@ -70,13 +135,122 @@
       </div>
       <div id="files-panel" hidden>
         <div id="files-toolbar">
+          <button
+            id="files-up-nav"
+            class="files-toolbar-button files-up-nav"
+            type="button"
+            title="Parent folder (Alt+Up)"
+            aria-label="Parent folder"
+            disabled
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M5 12h14M11 6l-6 6 6 6" />
+            </svg>
+          </button>
+          <label
+            id="files-location-select-wrap"
+            title="Switch file location"
+          >
+            <span class="sr-only">File location</span>
+            <select id="files-location-select" aria-label="File location"></select>
+          </label>
           <nav id="files-breadcrumb" aria-label="Path" aria-live="polite"></nav>
+          <div id="files-toolbar-actions" aria-label="Folder actions">
+            <button
+              id="files-new-folder-desktop"
+              class="files-toolbar-button"
+              data-files-command="new-folder"
+              type="button"
+              title="New folder (Ctrl+Shift+N)"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M3 6.5h7l2 2h9v10H3zM16 11v5M13.5 13.5h5" />
+              </svg>
+              <span>New folder</span>
+            </button>
+            <button
+              id="files-refresh-desktop"
+              class="files-toolbar-button"
+              data-files-command="refresh"
+              type="button"
+              title="Refresh folder"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
+              </svg>
+              <span>Refresh</span>
+            </button>
+            <label
+              class="files-toolbar-button files-toolbar-upload"
+              data-files-upload-trigger
+              role="button"
+              tabindex="0"
+              title="Upload into this folder"
+              aria-label="Upload into this folder"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
+              </svg>
+              <span>Upload</span>
+              <input id="files-upload-desktop" type="file" hidden>
+            </label>
+            <button
+              id="files-settings-desktop"
+              class="files-toolbar-button"
+              data-files-command="settings"
+              type="button"
+              title="Settings"
+              aria-label="Settings"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="12" cy="12" r="3" />
+                <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
+              </svg>
+            </button>
+          </div>
         </div>
-        <div id="files-roots" role="tablist" aria-label="File roots"></div>
-        <ul id="files-list" aria-label="Directory listing"></ul>
-        <p id="files-empty-hint" hidden>Empty folder</p>
+        <div id="files-workspace">
+          <aside id="files-sidebar" aria-label="File locations">
+            <p class="files-sidebar-heading">Locations</p>
+            <div id="files-roots" role="navigation" aria-label="File roots"></div>
+          </aside>
+          <section id="files-content" aria-label="Folder contents">
+            <div id="files-list-header" aria-hidden="true">
+              <span class="files-header-name">Name</span>
+              <span>Modified</span>
+              <span>Size</span>
+            </div>
+            <ul
+              id="files-list"
+              role="listbox"
+              tabindex="0"
+              aria-label="Directory listing"
+            ></ul>
+            <p id="files-empty-hint" hidden>Empty folder</p>
+            <p id="files-statusbar" aria-live="polite"></p>
+          </section>
+          <aside id="files-preview-pane" aria-labelledby="files-preview-pane-title" hidden>
+            <div class="files-preview-heading">
+              <strong id="files-preview-pane-title">Preview</strong>
+              <button
+                id="files-preview-pane-close"
+                class="icon-button"
+                type="button"
+                title="Close preview"
+                aria-label="Close preview"
+              >
+                ×
+              </button>
+            </div>
+            <pre id="files-preview-pane-body"></pre>
+          </aside>
+        </div>
       </div>
-      <dialog id="files-actions-dialog" aria-label="File actions">
+      <dialog
+        id="files-actions-dialog"
+        aria-labelledby="files-actions-title"
+        tabindex="-1"
+      >
         <div class="settings-heading">
           <strong id="files-actions-title">File</strong>
           <button id="files-actions-close" class="icon-button" type="button" title="Close">×</button>
@@ -85,6 +259,7 @@
         <div class="files-actions-buttons">
           <button id="files-action-preview" type="button">Preview</button>
           <button id="files-action-download" type="button">Download</button>
+          <button id="files-action-rename" type="button">Rename</button>
           <button id="files-action-insert" type="button">Insert path</button>
           <button id="files-action-delete" type="button" class="files-action-danger">Delete</button>
         </div>
@@ -96,9 +271,64 @@
         </div>
         <pre id="files-preview-body"></pre>
       </dialog>
+      <dialog
+        id="files-options-dialog"
+        aria-labelledby="files-options-title"
+        tabindex="-1"
+      >
+        <div class="settings-heading">
+          <strong id="files-options-title">File options</strong>
+          <button id="files-options-close" class="icon-button" type="button" title="Close">×</button>
+        </div>
+        <div class="files-actions-buttons">
+          <button id="files-option-new-folder" type="button">New folder</button>
+          <label class="files-checkbox-control">
+            <input id="files-option-hidden" type="checkbox">
+            <span>Show hidden files</span>
+          </label>
+          <button id="files-option-settings" type="button">Terminal settings</button>
+        </div>
+      </dialog>
+      <dialog id="files-name-dialog" aria-labelledby="files-name-title">
+        <form id="files-name-form">
+          <div class="settings-heading">
+            <strong id="files-name-title">New folder</strong>
+            <button
+              id="files-name-close"
+              class="icon-button"
+              type="button"
+              title="Close"
+              aria-label="Close"
+            >
+              ×
+            </button>
+          </div>
+          <label class="files-name-field">
+            <span id="files-name-label">Folder name</span>
+            <input
+              id="files-name-input"
+              type="text"
+              maxlength="180"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              required
+            >
+          </label>
+          <p id="files-name-error" role="alert" aria-live="polite"></p>
+          <div class="files-name-actions">
+            <button id="files-name-cancel" type="button">Cancel</button>
+            <button id="files-name-submit" type="submit">Create</button>
+          </div>
+        </form>
+      </dialog>
       <div id="terminal" hidden></div>
       <!-- Stable scroll hit target above xterm (keeps iOS swipes reliable). -->
       <div id="scroll-catcher" hidden aria-hidden="true"></div>
+      <!-- Dismiss layer for the open session picker. It must be a real hit
+           target: the terminal reads touch events, so cancelling pointer
+           events cannot keep a dismissing tap out of the session. -->
+      <div id="picker-scrim" hidden aria-hidden="true"></div>
       <div id="scroll-position" hidden aria-hidden="true"></div>
       <div id="scroll-thumb" aria-hidden="true"></div>
       <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
@@ -129,103 +359,124 @@
         <button id="settings-close" class="icon-button" type="button" title="Close settings">×</button>
       </div>
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="true">Theme</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="keys" aria-selected="false">Keys</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="snips" aria-selected="false">Snips</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Library</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Theme</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
       </div>
       <div class="settings-panels">
         <section
           class="settings-panel"
-          data-settings-panel="theme"
+          data-settings-panel="profiles"
           role="tabpanel"
-          aria-label="Theme"
+          aria-label="Profiles"
         >
-          <label class="settings-field" for="terminal-theme">
-            <span>Terminal theme</span>
-            <select id="terminal-theme">
-              <option value="matrix">Matrix</option>
-              <option value="groknight">Grok Night</option>
-              <option value="tokyonight">Tokyo Night</option>
-              <option value="rosepine">Rosé Pine Moon</option>
-              <option value="oscura">Oscura Midnight</option>
-              <option value="dracula">Dracula</option>
-              <option value="solarized">Solarized Dark</option>
-              <option value="nord">Nord</option>
-              <option value="monokai">Monokai</option>
-              <option value="gruvbox">Gruvbox Dark</option>
-            </select>
-          </label>
-          <p class="settings-hint">Per-session theme is remembered when you change it.</p>
-        </section>
-        <section
-          class="settings-panel"
-          data-settings-panel="keys"
-          role="tabpanel"
-          aria-label="Keys"
-          hidden
-        >
-          <p class="settings-hint">
-            Chips in the Keys drawer. Reorder, add built-ins, or create custom
-            keys. Saved in this browser only. Find stays on the footer bar
-            (and Ctrl/Cmd+F).
-          </p>
-          <ul id="shortcut-editor-list"></ul>
-          <div class="settings-shortcut-add">
-            <select id="shortcut-add-select" aria-label="Shortcut to add"></select>
-            <button id="shortcut-add" type="button">Add</button>
-          </div>
-          <div class="settings-custom-key" aria-label="Custom key">
-            <p class="settings-hint settings-hint-tight">
-              Custom key — Ctrl+letter, scroll, or a sequence
-              (<code>\e</code> <code>\x1b</code> <code>\n</code>).
-            </p>
-            <input
-              id="custom-key-label"
-              type="text"
-              maxlength="16"
-              placeholder="Label (optional for Ctrl)"
-              autocomplete="off"
-              enterkeyhint="done"
-            />
-            <div class="settings-custom-key-row">
-              <select id="custom-key-type" aria-label="Custom key type">
-                <option value="ctrl">Ctrl+letter</option>
-                <option value="scroll">Scroll</option>
-                <option value="text">Sequence</option>
-              </select>
-              <input
-                id="custom-key-value"
-                type="text"
-                maxlength="64"
-                placeholder="letter (a–z)"
-                autocomplete="off"
-                spellcheck="false"
-                aria-label="Ctrl letter"
-              />
-              <select id="custom-key-scroll" aria-label="Scroll action" hidden>
-                <option value="up">Page up</option>
-                <option value="down">Page down</option>
-                <option value="bottom">Bottom</option>
-              </select>
+          <div class="settings-key-profiles" aria-label="Key Profiles">
+            <div class="settings-profile-picker">
+              <label class="settings-field" for="key-profile-select">
+                <span>Edit profile</span>
+                <select id="key-profile-select"></select>
+              </label>
+              <details class="settings-key-profile-menu">
+                <summary title="Manage profiles" aria-label="Manage profiles">
+                  Manage
+                </summary>
+                <div class="settings-key-profile-actions">
+                  <button id="key-profile-new" type="button">New profile</button>
+                  <button id="key-profile-duplicate" type="button">Duplicate</button>
+                  <button id="key-profile-rename" type="button">Rename</button>
+                  <button id="key-profile-delete" type="button">Delete</button>
+                  <label class="settings-profile-default" for="key-profile-default-select">
+                    <span>Default for unassigned sessions</span>
+                    <select id="key-profile-default-select"></select>
+                  </label>
+                </div>
+              </details>
             </div>
-            <button id="custom-key-add" type="button">Add custom key</button>
+            <p id="key-profile-summary" class="settings-profile-summary"></p>
           </div>
-          <button id="shortcut-reset" type="button" class="settings-secondary">
-            Reset defaults
-          </button>
+          <p class="settings-hint">
+            Profiles control Keys, visible Snippets, and pinned main bar.
+            Assign the active session from the Menu button. Use pin buttons
+            here; holding a live chip is the fast shortcut.
+          </p>
+          <section class="settings-profile-section" aria-labelledby="profile-keys-heading">
+            <div class="settings-profile-section-heading">
+              <h3 id="profile-keys-heading">Keys</h3>
+              <span id="profile-key-count" class="settings-count"></span>
+            </div>
+            <ul id="shortcut-editor-list"></ul>
+            <div class="settings-shortcut-add">
+              <select id="shortcut-add-select" aria-label="Shortcut to add"></select>
+              <button id="shortcut-add" type="button">Add</button>
+            </div>
+            <details class="settings-custom-key" aria-label="Custom key">
+              <summary>Add custom key</summary>
+              <p class="settings-hint settings-hint-tight">
+                Ctrl+letter, scroll, or a sequence
+                (<code>\e</code> <code>\x1b</code> <code>\n</code>).
+              </p>
+              <input
+                id="custom-key-label"
+                type="text"
+                maxlength="16"
+                placeholder="Label (optional for Ctrl)"
+                autocomplete="off"
+                enterkeyhint="done"
+              />
+              <div class="settings-custom-key-row">
+                <select id="custom-key-type" aria-label="Custom key type">
+                  <option value="ctrl">Ctrl+letter</option>
+                  <option value="scroll">Scroll</option>
+                  <option value="text">Sequence</option>
+                </select>
+                <input
+                  id="custom-key-value"
+                  type="text"
+                  maxlength="64"
+                  placeholder="letter (a–z)"
+                  autocomplete="off"
+                  spellcheck="false"
+                  aria-label="Ctrl letter"
+                />
+                <select id="custom-key-scroll" aria-label="Scroll action" hidden>
+                  <option value="up">Page up</option>
+                  <option value="down">Page down</option>
+                  <option value="bottom">Bottom</option>
+                </select>
+              </div>
+              <button id="custom-key-add" type="button">Add custom key</button>
+            </details>
+            <button id="shortcut-reset" type="button" class="settings-secondary">
+              Reset key defaults
+            </button>
+          </section>
+          <section class="settings-profile-section" aria-labelledby="profile-snippets-heading">
+            <div class="settings-profile-section-heading">
+              <h3 id="profile-snippets-heading">Snippets</h3>
+              <span id="profile-snippet-count" class="settings-count"></span>
+            </div>
+            <p class="settings-hint">
+              Choose which shared Library items appear in this profile.
+            </p>
+            <div class="settings-profile-snippet-actions">
+              <button id="profile-snippets-all" type="button">Select all</button>
+              <button id="profile-snippets-none" type="button">Clear</button>
+            </div>
+            <div id="profile-snippet-list" class="settings-profile-snippet-list"></div>
+          </section>
         </section>
         <section
           class="settings-panel"
-          data-settings-panel="snips"
+          data-settings-panel="library"
           role="tabpanel"
-          aria-label="Snips"
+          aria-label="Snippet Library"
           hidden
         >
           <p class="settings-hint">
-            Chips in Snips mode. Saved on this VPS for every device.
+            Shared on this VPS for every device. Profiles choose which items
+            they show.
             <strong>Run</strong> = execute (send Enter). Off = insert only.
-            Hold a chip to invert for one tap.
           </p>
           <ul id="snippet-editor-list"></ul>
           <div class="settings-snippet-edit">
@@ -257,17 +508,106 @@
         </section>
         <section
           class="settings-panel"
+          data-settings-panel="theme"
+          role="tabpanel"
+          aria-label="Theme"
+          hidden
+        >
+          <label class="settings-field" for="terminal-theme">
+            <span>Terminal theme</span>
+            <select id="terminal-theme">
+              <option value="matrix">Matrix</option>
+              <option value="groknight">Grok Night</option>
+              <option value="tokyonight">Tokyo Night</option>
+              <option value="rosepine">Rosé Pine Moon</option>
+              <option value="oscura">Oscura Midnight</option>
+              <option value="dracula">Dracula</option>
+              <option value="solarized">Solarized Dark</option>
+              <option value="nord">Nord</option>
+              <option value="monokai">Monokai</option>
+              <option value="gruvbox">Gruvbox Dark</option>
+            </select>
+          </label>
+          <p class="settings-hint">Per-session theme is remembered when you change it.</p>
+        </section>
+        <section
+          class="settings-panel"
           data-settings-panel="app"
           role="tabpanel"
           aria-label="App"
           hidden
         >
+          <section class="settings-sync" aria-labelledby="preferences-sync-title">
+            <div class="settings-sync-heading">
+              <strong id="preferences-sync-title">Shared setup</strong>
+              <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
+            </div>
+            <p id="preferences-sync-help" class="settings-hint">
+              Profiles, session assignments, pins, and themes can follow your
+              login across browsers. Device layout stays local.
+            </p>
+            <div class="settings-sync-actions">
+              <button id="preferences-sync-enable" type="button" hidden>
+                Use this browser as shared setup
+              </button>
+              <button id="preferences-sync-load" type="button" hidden>
+                Load latest
+              </button>
+              <button id="preferences-sync-replace" type="button" class="settings-secondary" hidden>
+                Keep this browser
+              </button>
+              <button id="preferences-sync-retry" type="button" class="settings-secondary" hidden>
+                Retry sync
+              </button>
+            </div>
+          </section>
           <p id="app-help-text" class="settings-hint"></p>
           <div class="settings-install">
             <button id="install-app" type="button">Install web app</button>
             <p id="install-help"></p>
           </div>
         </section>
+      </div>
+    </dialog>
+
+    <!-- Session-scoped chrome that does not deserve permanent bar space:
+         opened by the Terminal footer's Settings button and, on desktop, the
+         header's. Files mode keeps its own folder-scoped options sheet. -->
+    <dialog id="quick-menu-dialog" aria-labelledby="quick-menu-title" tabindex="-1">
+      <div class="settings-heading">
+        <strong id="quick-menu-title">Menu</strong>
+        <button
+          id="quick-menu-close"
+          class="icon-button"
+          type="button"
+          title="Close menu"
+          aria-label="Close menu"
+        >
+          ×
+        </button>
+      </div>
+      <section
+        id="quick-menu-profile"
+        class="quick-menu-section"
+        aria-labelledby="quick-menu-profile-heading"
+      >
+        <div class="quick-menu-section-heading">
+          <h3 id="quick-menu-profile-heading">Session profile</h3>
+          <span id="quick-menu-profile-value" class="quick-menu-value"></span>
+        </div>
+        <p id="quick-menu-profile-hint" class="settings-hint"></p>
+        <div
+          id="quick-menu-profile-list"
+          class="quick-menu-profile-list"
+          role="menu"
+          aria-label="Session profile"
+        ></div>
+      </section>
+      <div class="quick-menu-actions">
+        <button id="quick-menu-find" type="button">Find in scrollback</button>
+        <button id="quick-menu-rename" type="button">Rename session</button>
+        <button id="quick-menu-reconnect" type="button">Reconnect session</button>
+        <button id="quick-menu-settings" type="button">Terminal settings</button>
       </div>
     </dialog>
 
@@ -290,24 +630,28 @@
               <path d="M6 10h1.5M10 10h1.5M14 10h1.5M18 10h.5M6 13h1.5M10 13h4M16 13h2M8 16h8" />
             </svg>
           </button>
-          <div id="footer-drawer" hidden aria-label="Keys or snippets drawer"></div>
+          <!-- Keys/Snips chips only; rare actions live in the Menu sheet. -->
+          <div id="footer-drawer" hidden aria-label="Terminal tools drawer"></div>
           <div id="footer-scroll">
             <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
               </svg>
             </button>
-            <button id="drawer-find" class="footer-fixed shortcut-icon" type="button" title="Find" aria-label="Find in scrollback">
-              <svg viewBox="0 0 24 24" aria-hidden="true">
-                <circle cx="10.5" cy="10.5" r="6.5" />
-                <path d="M16 16l5 5" />
-              </svg>
-            </button>
             <button id="drawer-keys" class="footer-fixed" type="button" aria-pressed="false" title="Keys">Keys</button>
             <button id="drawer-snips" class="footer-fixed" type="button" aria-pressed="false" title="Snips">Snips</button>
             <div id="footer-pins" aria-label="Pinned shortcuts"></div>
+            <button
+              id="footer-pin-overflow"
+              class="footer-fixed"
+              type="button"
+              aria-pressed="false"
+              title="More pinned shortcuts"
+              aria-label="More pinned shortcuts"
+              hidden
+            >+0</button>
           </div>
-          <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Settings" aria-label="Settings">
+          <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Menu" aria-label="Open menu">
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
@@ -318,10 +662,28 @@
       <!-- Files mode footer (session/keyboard chrome stays Term-only) -->
       <div id="footer-files" hidden>
         <div id="footer-files-main">
-          <button id="files-up" type="button" title="Parent directory" disabled>Up</button>
-          <button id="files-refresh" type="button" title="Refresh listing">Refresh</button>
-          <label class="files-upload-label footer-files-upload" title="Upload into this folder">
-            <span>Upload</span>
+          <button
+            id="files-refresh"
+            class="shortcut-icon"
+            type="button"
+            title="Refresh folder"
+            aria-label="Refresh folder"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6" />
+            </svg>
+          </button>
+          <label
+            class="files-upload-label footer-files-upload shortcut-icon"
+            data-files-upload-trigger
+            role="button"
+            tabindex="0"
+            title="Upload into this folder"
+            aria-label="Upload into this folder"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 16V4M7 9l5-5 5 5M5 20h14" />
+            </svg>
             <input id="files-upload" type="file" hidden>
           </label>
           <button id="files-settings" class="footer-fixed shortcut-icon" type="button" title="Settings" aria-label="Settings">

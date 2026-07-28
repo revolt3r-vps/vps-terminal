@@ -11,8 +11,11 @@ fail() {
 }
 
 node --check "$server"
+node --check "${root}/diagnostics.js"
 node --check "${root}/fs-jail.js"
+node --check "${root}/preferences-store.js"
 node --check "$client"
+node --check "${root}/public/viewport-init.js"
 bash -n "${root}/attach-session"
 bash -n "${root}/scripts/install.sh"
 bash -n "${root}/scripts/vendor-assets.sh"
@@ -21,6 +24,8 @@ grep -Fq "VPS_TERMINAL_LOCAL_DEV === '1'" "$server"
 grep -Fq "request.headers['x-vps-authenticated-email']" "$server"
 grep -Fq "request.headers.origin === publicOrigin" "$server"
 grep -Fq 'const defaultSnippetPresets' "$server"
+grep -Fq "VPS_TERMINAL_CLIENT_DEBUG === '1'" "$server"
+grep -Fq 'appendBoundedClientDebugEntries' "$server"
 grep -Fq 'VPS_TERMINAL_ORIGIN is required outside LOCAL_DEV' "$server"
 grep -Fq 'Set VPS_TERMINAL_SOCKET (recommended) or VPS_TERMINAL_HOST' "$server"
 

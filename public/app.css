@@ -16,48 +16,92 @@
 
 :root {
   color-scheme: dark;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
-  background: #202336;
-  color: #eef1f5;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+  background: #11151b;
+  color: #f2f5f7;
   --safe-top: env(safe-area-inset-top, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  /* Raw env() — often 0 in standalone without viewport-fit=cover. */
+  --safe-bottom-env: env(safe-area-inset-bottom, 0px);
+  /* JS may raise this when env is 0 but a home indicator still overlaps. */
+  --safe-bottom-effective: var(--safe-bottom-env);
+  --safe-bottom: var(--safe-bottom-effective);
   --safe-left: env(safe-area-inset-left, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --layout-safe-bottom: var(--safe-bottom);
-  --surface: #202336;
-  --surface-raised: #292d42;
-  --surface-pressed: #343950;
-  --border: #3b4057;
-  --muted: #9aa4b3;
-  --accent: #21b568;
+  --surface: #11151b;
+  --surface-raised: #1a2029;
+  --surface-deep: #0f1319;
+  --surface-pressed: #242c37;
+  --border: #29313b;
+  --muted: #98a3b2;
+  --text: #eef1f5;
+  --text-strong: #f6f8fa;
+  --accent: #33d17a;
+  --accent-surface: #174b3a;
+  --accent-text: #5ff0a4;
+  --danger: #f87171;
+  --danger-surface: #3a1c22;
+  --focus-ring: #7dd3fc;
   /* Footer / thumb zone — keep roomy for one-handed use. */
   --control-size: 44px;
   --control-gap: 5px;
   --control-radius: 9px;
   --control-font: 11px;
   --control-font-label: 13px;
-  --control-border: #46506a;
+  --control-border: #37414e;
   /* Top chrome — denser so the terminal keeps vertical space. */
   --header-control: 32px;
   --header-gap: 4px;
   --header-radius: 8px;
   --header-font: 11px;
   --footer-bottom-padding: max(6px, var(--layout-safe-bottom));
+  --footer-top-padding: 6px;
+  /* Measured footer height (JS keeps it live); the fallback assumes one row. */
+  --footer-height: calc(
+    var(--control-size) + var(--footer-top-padding) +
+      var(--footer-bottom-padding)
+  );
   --app-height: 100dvh;
   --app-top: 0px;
   --header-height: var(--header-control);
   --session-rail-width: 0px;
-  --terminal-bg: #141729;
+  --terminal-bg: #0b0e13;
 }
 
+/*
+ * No viewport-fit=cover (typical installed PWA): fill height correctly, then
+ * shift the footer by --safe-bottom-effective (env or JS fallback when iOS
+ * reports env safe-area-inset-bottom as 0).
+ * keyboard-open / reserved rules MUST come after this so they win.
+ */
+html.viewport-no-cover {
+  --layout-safe-bottom: var(--safe-bottom-effective);
+  --footer-bottom-padding: max(6px, var(--safe-bottom-effective));
+}
+
+/* Soft keyboard open: no home-indicator pad — keyboard already owns the bottom. */
 html.keyboard-open,
-html.standalone-reserved-bottom {
+html.standalone-reserved-bottom,
+html.keyboard-open.viewport-no-cover,
+html.standalone-reserved-bottom.viewport-no-cover {
   --layout-safe-bottom: 0px;
   --footer-bottom-padding: 4px;
 }
 
 * {
   box-sizing: border-box;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 html,
@@ -73,6 +117,8 @@ html {
   height: 100%;
   position: fixed;
   inset: 0;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
 
 body {
@@ -114,6 +160,7 @@ header:not(.collapsed) {
   z-index: 50;
   /* Compact session picker row — not footer-sized. */
   height: calc(var(--header-control) + 8px + var(--safe-top));
+  overflow: visible;
   padding-bottom: 4px;
 }
 
@@ -176,61 +223,47 @@ header.collapsed {
   font-size: 16px;
 }
 
+#header-picker-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--header-gap);
+  min-width: 0;
+}
+
+/* Icon-only everywhere except the portrait menu, which has room for words. */
+.header-picker-action-label {
+  display: none;
+}
+
+/* Styled once for both states; only `display` depends on the picker state. */
 #header-summary {
   display: none;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  min-height: var(--header-control);
+  padding: 0 2px 0 calc(8px + var(--safe-left));
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #cbd2dc;
+  font-size: var(--header-font);
+  text-align: left;
 }
 
 header.collapsed #header-expanded {
   display: none;
 }
 
-/* Collapsed: quick create without opening the full session picker. */
-.header-create-collapsed {
-  display: none;
-}
-
-header.collapsed .header-create-collapsed {
-  display: grid;
-  place-items: center;
-  flex: 0 0 var(--header-control);
-  width: var(--header-control);
-  min-width: var(--header-control);
-  min-height: var(--header-control);
-  margin-right: 2px;
-  font-size: 15px;
-}
-
-header:not(.collapsed) .header-create-collapsed {
-  display: none !important;
-}
-
-/* Files mode: no session create chrome. */
-body.files-view .header-create-collapsed {
-  display: none !important;
-}
-
 header.collapsed #header-summary {
   display: flex;
-  flex: 1 1 auto;
-  align-items: center;
-  min-width: 0;
-  min-height: var(--header-control);
-  padding: 0 2px 0 calc(8px + var(--safe-left));
-  border: 0;
-  border-radius: 0;
-  background: linear-gradient(180deg, #22253a 0%, var(--surface) 100%);
-  color: #cbd2dc;
-  font-size: var(--header-font);
-  text-align: left;
 }
 
 header.collapsed .header-row {
   min-height: var(--header-control);
-  background: linear-gradient(180deg, #22253a 0%, var(--surface) 100%);
-}
-
-header.collapsed #header-summary {
-  background: transparent;
+  background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
 }
 
 #view-mode {
@@ -243,7 +276,7 @@ header.collapsed #header-summary {
   padding: 2px;
   border: 1px solid var(--control-border);
   border-radius: var(--header-radius);
-  background: #252839;
+  background: var(--surface-raised);
 }
 
 header.collapsed #view-mode {
@@ -252,21 +285,169 @@ header.collapsed #view-mode {
 
 .view-mode-btn {
   flex: 0 0 auto;
-  min-width: 40px;
+  min-width: calc(var(--header-control) - 4px);
   min-height: calc(var(--header-control) - 4px);
-  padding: 0 8px;
+  padding: 0;
   border: 0;
   border-radius: 6px;
   background: transparent;
-  color: #9aa4b3;
-  font-size: 10px;
+  color: var(--muted);
   font-weight: 700;
   letter-spacing: 0.02em;
 }
 
+.view-mode-btn svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
 .view-mode-btn[aria-selected='true'] {
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+.desktop-header-action {
+  display: none;
+}
+
+/* Coarse-pointer top chrome keeps a real touch target without promoting
+ * session creation into the permanent bar. The expanded picker owns Create. */
+@media (orientation: portrait) and (pointer: coarse) {
+  body {
+    --header-control: 44px;
+    --header-height: 52px;
+  }
+
+  #view-mode {
+    padding: 0;
+  }
+
+  .view-mode-btn {
+    min-width: var(--header-control);
+    min-height: var(--header-control);
+  }
+
+  /* Portrait picker is a vertical menu: the header row itself never moves,
+   * so Term|Files and the active session stay put while sessions are listed. */
+  header:not(.collapsed) {
+    align-items: stretch;
+    padding: var(--safe-top) 0 0;
+  }
+
+  header:not(.collapsed) #header-summary,
+  header:not(.collapsed) #view-mode {
+    display: flex;
+  }
+
+  header .header-row {
+    min-height: var(--header-control);
+    background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
+  }
+
+  header #view-mode {
+    margin-right: calc(6px + var(--safe-right));
+  }
+
+  header:not(.collapsed) .header-chevron svg {
+    transform: rotate(180deg);
+  }
+
+  #header-expanded {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: calc(6px + var(--safe-left));
+    z-index: 60;
+    flex-direction: column;
+    align-items: stretch;
+    width: min(
+      320px,
+      calc(100vw - 12px - var(--safe-left) - var(--safe-right))
+    );
+    /* Leave the real footer — one row, or two while a drawer is open — and the
+     * home-indicator inset uncovered. The small floor keeps a viewport that a
+     * soft keyboard has shrunk from collapsing the menu to nothing; it is the
+     * one case where the menu can reach into the rail (see design-principles). */
+    max-height: max(
+      88px,
+      calc(
+        var(--app-height) - var(--header-height) - var(--safe-top)
+          - var(--footer-height) - 14px
+      )
+    );
+    gap: 5px;
+    overflow: hidden;
+    padding: 6px;
+    border: 1px solid var(--control-border);
+    border-radius: 12px;
+    background: var(--surface-raised);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+  }
+
+  /* This is the layout where the menu covers the session, so the dismissing
+   * tap needs a real hit target of its own. */
+  #picker-scrim:not([hidden]) {
+    display: block;
+  }
+
+  #header-expanded nav {
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+    gap: 5px;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
+  }
+
+  #header-expanded .session-item {
+    width: 100%;
+  }
+
+  #header-expanded .session {
+    flex: 1 1 auto;
+    max-width: none;
+    font-size: 12px;
+  }
+
+  #header-picker-actions {
+    flex: 0 0 auto;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+  }
+
+  #header-picker-actions .icon-button {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: auto;
+    padding: 0 10px;
+  }
+
+  #create.header-icon-button {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--control-border));
+    background: var(--accent-surface);
+    color: var(--accent-text);
+  }
+
+  .header-picker-action-label {
+    display: inline;
+    font-size: 12px;
+  }
+}
+
+@media (orientation: portrait) and (pointer: coarse) and (max-width: 350px) {
+  .connection-state-label[data-state="connected"] {
+    display: none;
+  }
 }
 
 /* Files mode panel */
@@ -274,13 +455,22 @@ header.collapsed #view-mode {
   position: absolute;
   inset: 0;
   z-index: 4;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   min-height: 0;
   overflow: hidden;
   background: var(--terminal-bg);
-  color: #e8ecf2;
+  color: var(--text);
   touch-action: pan-y;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+body.files-view #files-actions-dialog,
+body.files-view #files-options-dialog,
+body.files-view #files-name-dialog {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 #files-panel[hidden] {
@@ -291,13 +481,11 @@ header.collapsed #view-mode {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
-  gap: var(--header-gap);
-  min-height: var(--header-control);
-  padding: 4px 8px;
+  gap: 8px;
+  min-height: 54px;
+  padding: 5px 8px;
   border-bottom: 1px solid var(--border);
-  background: #1a1d2e;
-  overflow-x: auto;
-  scrollbar-width: none;
+  background: var(--surface-deep);
 }
 
 #files-breadcrumb {
@@ -306,28 +494,51 @@ header.collapsed #view-mode {
   align-items: center;
   gap: 1px;
   min-width: 0;
-  min-height: var(--header-control);
-  color: #c5cdd9;
-  font-size: var(--header-font);
+  min-height: 44px;
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
   font-weight: 600;
   white-space: nowrap;
+}
+
+#files-location-select-wrap {
+  position: relative;
+  flex: 0 1 124px;
+  min-width: 72px;
+}
+
+#files-location-select {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 26px 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--control-border);
+  border-radius: var(--header-radius);
+  background: var(--surface-raised);
+  color: inherit;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
 }
 
 #files-breadcrumb button {
   flex: 0 0 auto;
   min-width: auto;
-  min-height: var(--header-control);
+  min-height: 44px;
   padding: 0 8px;
   border: 0;
   border-radius: var(--header-radius);
   background: transparent;
-  color: #9ec9ff;
-  font-size: var(--header-font);
+  color: var(--accent);
+  font-family: inherit;
+  font-size: 11px;
   font-weight: 700;
 }
 
 #files-breadcrumb button:last-child {
-  color: #eef1f5;
+  color: var(--text);
 }
 
 #files-breadcrumb .crumb-sep {
@@ -335,6 +546,61 @@ header.collapsed #view-mode {
   color: #5c6578;
   font-weight: 500;
   user-select: none;
+}
+
+.files-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 32px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.files-up-nav {
+  flex: 0 0 44px;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-color: var(--control-border);
+}
+
+.files-toolbar-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.files-toolbar-button:active {
+  background: var(--surface-pressed);
+}
+
+.files-toolbar-upload {
+  touch-action: manipulation;
+}
+
+[data-files-upload-trigger][aria-disabled='true'] {
+  cursor: default;
+  opacity: 0.4;
+}
+
+#files-toolbar-actions {
+  display: none;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
 }
 
 .files-upload-label {
@@ -345,8 +611,8 @@ header.collapsed #view-mode {
   padding: 0 12px;
   border: 1px solid #46506a;
   border-radius: 9px;
-  background: #2d3044;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text-strong);
   font-size: 13px;
   font-weight: 700;
   cursor: pointer;
@@ -373,6 +639,7 @@ header.collapsed #view-mode {
 #footer-files-main {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: var(--control-gap);
   width: 100%;
   min-height: var(--control-size);
@@ -380,18 +647,17 @@ header.collapsed #view-mode {
 
 #footer-files-main > button,
 #footer-files-main > .files-upload-label {
-  flex: 1 1 0;
-  min-width: 0;
+  flex: 0 0 var(--control-size);
+  width: var(--control-size);
+  min-width: var(--control-size);
+  max-width: var(--control-size);
   min-height: var(--control-size);
 }
 
-#footer-files-main #files-settings {
-  flex: 0 0 var(--control-size);
-  width: var(--control-size);
-  max-width: var(--control-size);
+.footer-files-upload {
+  padding: 0;
 }
 
-#files-up,
 #files-refresh {
   border-radius: var(--control-radius);
   border-color: var(--control-border);
@@ -399,12 +665,35 @@ header.collapsed #view-mode {
   font-weight: 700;
 }
 
+#files-workspace {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#files-preview-pane {
+  display: none;
+}
+
+#files-sidebar {
+  display: none;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface-deep);
+}
+
+.files-sidebar-heading {
+  display: none;
+}
+
 #files-roots {
   display: flex;
   flex: 0 0 auto;
   gap: var(--header-gap);
   padding: 5px 8px;
-  border-bottom: 1px solid #2c3044;
+  border-bottom: 1px solid var(--border);
   overflow-x: auto;
   scrollbar-width: none;
 }
@@ -416,18 +705,32 @@ header.collapsed #view-mode {
   padding: 0 12px;
   border-radius: 999px;
   border-color: var(--control-border);
-  font-size: var(--header-font);
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 #files-roots button.active {
   border-color: var(--accent);
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+#files-content {
+  position: relative;
+  display: grid;
+  grid-row: 1;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+#files-list-header {
+  display: none;
 }
 
 #files-list {
-  flex: 1 1 auto;
+  grid-row: 2;
   min-height: 0;
   margin: 0;
   padding: 0 0 12px;
@@ -441,44 +744,130 @@ header.collapsed #view-mode {
 
 #files-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 4px 10px;
-  min-height: var(--control-size);
-  padding: 10px 12px;
-  border-bottom: 1px solid #2a2e42;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: 4px 8px;
+  align-items: center;
+  min-height: 56px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #232a33;
+  outline: none;
   cursor: pointer;
 }
 
 #files-list li:active {
-  background: #252839;
+  background: var(--surface-pressed);
+}
+
+#files-list li[aria-selected='true'] {
+  background: var(--accent-surface);
+}
+
+#files-list:focus-visible li[aria-selected='true'] {
+  box-shadow: inset 3px 0 0 var(--accent), inset 0 0 0 1px #28533e;
+}
+
+.files-entry-icon {
+  grid-row: 1 / span 2;
+  position: relative;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+}
+
+.files-entry-icon::before {
+  position: absolute;
+  inset: 2px 2px 1px;
+  border: 1.5px solid currentColor;
+  border-radius: 2px;
+  content: '';
+}
+
+.files-entry-icon.dir {
+  color: var(--accent);
+}
+
+.files-entry-icon.dir::before {
+  inset: 5px 1px 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, currentColor 14%, transparent);
+}
+
+.files-entry-icon.dir::after {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 8px;
+  height: 5px;
+  border: 1.5px solid currentColor;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  content: '';
 }
 
 .files-entry-name {
   min-width: 0;
   overflow: hidden;
-  color: #eef1f5;
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 14px;
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.files-entry-name.dir::before {
-  content: '▸ ';
-  color: #7d8aa0;
+.files-entry-meta {
+  grid-column: 2;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.files-entry-meta {
-  grid-column: 1 / -1;
-  color: #8b95a7;
-  font-size: 11px;
+.files-entry-modified,
+.files-entry-size {
+  display: none;
 }
 
 #files-empty-hint {
+  grid-row: 2;
+  align-self: center;
   margin: 24px 12px;
-  color: #8b95a7;
+  color: var(--muted);
   font-size: 13px;
   text-align: center;
+}
+
+#files-statusbar {
+  display: none;
+  grid-row: 3;
+  min-height: 28px;
+  margin: 0;
+  padding: 6px 12px;
+  overflow: hidden;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#files-panel[aria-busy='true'] #files-list {
+  opacity: 0.56;
+}
+
+#files-panel[aria-busy='true'] #files-refresh-desktop svg {
+  animation: files-spin 700ms linear infinite;
+}
+
+@keyframes files-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .files-actions-buttons {
@@ -494,9 +883,9 @@ header.collapsed #view-mode {
 }
 
 .files-action-danger {
-  border-color: #7f1d1d;
-  background: #3a1a1f;
-  color: #fca5a5;
+  border-color: var(--danger);
+  background: var(--danger-surface);
+  color: var(--danger);
 }
 
 #files-preview-dialog {
@@ -505,38 +894,304 @@ header.collapsed #view-mode {
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #1c1f30;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
 }
 
-#files-preview-body {
+#files-preview-body,
+#files-preview-pane-body {
   max-height: min(60vh, 480px);
   margin: 8px 0 0;
   padding: 10px;
   overflow: auto;
   border: 1px solid #34384c;
   border-radius: 8px;
-  background: #12141f;
-  color: #d7dde8;
+  background: var(--surface-deep);
+  color: var(--text);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
   word-break: break-word;
   -webkit-overflow-scrolling: touch;
+  -webkit-user-select: text;
+  user-select: text;
 }
 
-#files-actions-dialog {
+#files-actions-dialog,
+#files-options-dialog,
+#files-name-dialog,
+#quick-menu-dialog {
   width: min(92vw, 360px);
   padding: 12px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: #1c1f30;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+/* Settings menus (Terminal Menu, File options) stay a small contextual card,
+ * never a full-screen sheet — so they get a lighter scrim with no blur. */
+#files-options-dialog,
+#quick-menu-dialog {
+  width: min(90vw, 300px);
+}
+
+#files-actions-dialog::backdrop,
+#files-preview-dialog::backdrop,
+#files-name-dialog::backdrop {
+  background: rgba(4, 7, 11, 0.62);
+  backdrop-filter: blur(2px);
+}
+
+#files-options-dialog::backdrop,
+#quick-menu-dialog::backdrop {
+  background: rgba(4, 7, 11, 0.32);
+}
+
+.files-checkbox-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.files-actions-buttons > .files-checkbox-control {
+  border-color: var(--control-border);
+  background: var(--surface-deep);
+}
+
+.files-checkbox-control input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#files-name-form {
+  display: grid;
+  gap: 12px;
+}
+
+.files-name-field {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+#files-name-input {
+  width: 100%;
+  min-height: 44px;
+  padding: 0 10px;
+  border: 1px solid #465160;
+  border-radius: 8px;
+  background: var(--surface-deep);
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+#files-name-input:focus {
+  border-color: var(--accent);
+  outline: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  outline-offset: 1px;
+}
+
+#files-name-error {
+  min-height: 18px;
+  margin: -4px 0 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.files-name-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.files-name-actions button {
+  min-height: 40px;
+  padding: 0 16px;
+}
+
+#files-name-submit {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+/* Actual touch activation gets an ergonomic bottom sheet even on a hybrid
+ * device whose primary pointer is a mouse. */
+#files-actions-dialog.files-action-sheet {
+  width: 100%;
+  max-width: none;
+  margin: auto 0 0;
+  padding: 14px max(14px, var(--safe-right))
+    max(14px, var(--safe-bottom)) max(14px, var(--safe-left));
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 18px 18px 0 0;
+  background: var(--surface-raised);
+  box-shadow: 0 -18px 48px rgba(0, 0, 0, 0.42);
+}
+
+#files-actions-dialog.files-action-sheet .files-actions-buttons {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+#files-actions-dialog.files-action-sheet .files-action-danger {
+  grid-column: 1 / -1;
+}
+
+#files-actions-dialog.files-action-sheet:focus {
+  outline: 0;
+}
+
+#files-options-dialog:focus,
+#quick-menu-dialog:focus {
+  outline: 0;
+}
+
+/* Settings menus stay the small contextual card everywhere, including touch —
+ * see the rule above. Only their close-button touch target grows here. */
+@media (pointer: coarse) {
+  #quick-menu-close {
+    min-width: var(--control-size);
+    min-height: var(--control-size);
+  }
+}
+
+/* Term-mode Menu card: session profile plus the actions that do not earn
+ * permanent bar space (find, rename, reconnect, full settings). */
+#quick-menu-dialog {
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.quick-menu-section {
+  display: grid;
+  gap: 7px;
+  margin-bottom: 12px;
+}
+
+.quick-menu-section[hidden] {
+  display: none;
+}
+
+.quick-menu-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.quick-menu-section-heading h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+}
+
+.quick-menu-value {
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.quick-menu-profile-list {
+  display: grid;
+  gap: 4px;
+  max-height: min(34dvh, 240px);
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.quick-menu-profile-list button,
+.quick-menu-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  width: 100%;
+  min-height: var(--control-size);
+  padding: 0 12px;
+  font-size: 13px;
+  text-align: left;
+}
+
+.quick-menu-profile-list button {
+  border-color: transparent;
+  background: var(--surface-deep);
+  color: var(--text);
+}
+
+.quick-menu-profile-list button[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+.quick-menu-profile-list button:not([aria-checked="true"]):hover,
+.quick-menu-profile-list button:not([aria-checked="true"]):focus-visible {
+  background: var(--surface-pressed);
+}
+
+.quick-menu-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.quick-menu-actions button {
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* Short viewports: scroll the profile list, never the sheet's own actions. */
+@media (max-height: 700px) {
+  #quick-menu-dialog {
+    max-height: 92dvh;
+  }
+
+  .quick-menu-profile-list {
+    max-height: 120px;
+  }
+}
+
+/* Short landscape: pair the actions and shorten the profile list so the whole
+ * sheet still fits without scrolling. */
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  .quick-menu-profile-list {
+    max-height: 92px;
+  }
+
+  .quick-menu-actions {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 body.files-view #empty,
 body.files-view #terminal,
 body.files-view #scroll-catcher,
+body.files-view #picker-scrim,
 body.files-view #scroll-position,
 body.files-view #scroll-thumb,
 body.files-view #find-bar,
@@ -546,6 +1201,7 @@ body.files-view #selection-copy-chip {
 
 /* Term-only chrome: sessions live in the header; keyboard/footer stay Term. */
 body.files-view #header-summary,
+body.files-view #connection-dot,
 body.files-view #header-expanded {
   display: none !important;
 }
@@ -563,7 +1219,7 @@ body.files-view #footer-files {
 }
 
 /* Landscape Files: only Term|Files in the left rail. */
-@media (orientation: landscape) {
+@media (orientation: landscape) and (pointer: coarse) {
   body.files-view header .header-row {
     justify-content: flex-start;
   }
@@ -576,28 +1232,37 @@ body.files-view #footer-files {
 }
 
 #connection-dot {
-  flex: 0 0 14px;
-  width: 14px;
-  height: 14px;
+  display: none;
+  flex: 0 0 var(--header-control);
+  width: var(--header-control);
+  height: var(--header-control);
+  min-width: var(--header-control);
+  min-height: var(--header-control);
+  padding: 0;
+  border: 0;
   margin-right: 6px;
   border-radius: 50%;
-  background: radial-gradient(circle at center, #788091 0 3px, transparent 3.5px);
+  background: radial-gradient(circle at center, #788091 0 4px, transparent 4.5px);
   cursor: pointer;
 }
 
+header.collapsed #connection-dot {
+  display: block;
+}
+
 #connection-dot[data-state="connecting"] {
-  background: radial-gradient(circle at center, #f0ad4e 0 3px, transparent 3.5px);
+  background: radial-gradient(circle at center, #f0ad4e 0 4px, transparent 4.5px);
   animation: connection-pulse 1s ease-in-out infinite;
 }
 
 #connection-dot[data-state="connected"] {
-  background: radial-gradient(circle at center, var(--accent) 0 3px, transparent 3.5px);
-  box-shadow: 0 0 5px rgba(33, 181, 104, 0.45);
+  background: radial-gradient(circle at center, var(--accent) 0 4px, transparent 4.5px);
+  filter: drop-shadow(0 0 3px rgba(33, 181, 104, 0.55));
   animation: none;
 }
 
 #connection-dot[data-state="error"] {
-  background: radial-gradient(circle at center, #ff5c72 0 3px, transparent 3.5px);
+  background: radial-gradient(circle at center, #ff5c72 0 4px, transparent 4.5px);
   animation: connection-pulse 1.2s ease-in-out infinite;
 }
 
@@ -614,16 +1279,68 @@ body.files-view #footer-files {
 }
 
 #current-session {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+.active-profile-label,
+.session-profile-label {
+  flex: 0 0 auto;
+  max-width: 84px;
+  padding: 2px 6px;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--control-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent-surface) 72%, transparent);
+  color: var(--accent-text);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.03em;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.connection-state-label {
+  flex: 0 0 auto;
+  color: #7f8b99;
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
+.connection-state-label[data-state="connected"] {
+  color: #78c99d;
+}
+
+.connection-state-label[data-state="connecting"] {
+  color: #f0c36c;
+}
+
+.connection-state-label[data-state="error"] {
+  color: #ff7d8f;
+}
+
 .header-chevron {
+  display: grid;
+  place-items: center;
+  flex: 0 0 16px;
   margin-left: auto;
-  padding-left: 6px;
   color: #788091;
-  font-size: 12px;
+}
+
+.header-chevron svg,
+.header-icon-button svg {
+  width: 16px;
+  height: 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
 }
 
 nav {
@@ -647,12 +1364,23 @@ button {
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
   background: var(--surface-raised);
-  color: #eef1f5;
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font-label);
   font-weight: 600;
   touch-action: manipulation;
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
+}
+
+button:focus-visible,
+label[tabindex='0']:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+[role='tab']:focus-visible,
+[role='listbox']:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
 }
 
 button:active {
@@ -666,26 +1394,34 @@ button:disabled {
 
 button.active {
   border-color: var(--accent);
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
 }
 
 .session {
   flex: 0 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   max-width: min(148px, 42vw);
   min-height: var(--header-control);
   padding: 0 10px;
   overflow: hidden;
   font-size: var(--header-font);
   font-weight: 600;
+}
+
+.session-name {
+  min-width: 0;
+  overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .session.active {
-  border-color: #2dcc7d;
-  background: #153d31;
-  box-shadow: inset 0 0 0 1px rgba(45, 204, 125, 0.08);
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .session-item {
@@ -696,9 +1432,18 @@ button.active {
   min-height: var(--header-control);
 }
 
-.session.closable {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
+.session-item.active {
+  overflow: hidden;
+  border: 1px solid var(--accent);
+  border-radius: var(--header-radius);
+  background: var(--accent-surface);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+
+.session-item.active .session {
+  border: 0;
+  border-radius: 0;
+  color: var(--accent-text);
 }
 
 .session-close {
@@ -707,12 +1452,32 @@ button.active {
   min-width: var(--header-control);
   min-height: var(--header-control);
   padding: 0;
-  border-left: 0;
-  border-color: #7f1d1d;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
-  color: #fca5a5;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent-text) 68%, var(--muted));
   font-size: 15px;
+}
+
+.session-close:hover,
+.session-close:focus-visible {
+  background: var(--danger-surface);
+  color: var(--danger);
+}
+
+.session-close:active {
+  background: color-mix(in srgb, var(--danger-surface) 78%, var(--danger));
+}
+
+.session-close svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
 }
 
 .icon-button {
@@ -738,6 +1503,7 @@ footer .shortcut-icon,
 main {
   grid-row: 2;
   position: relative;
+  z-index: 0;
   min-height: 0;
   overflow: hidden;
   touch-action: none;
@@ -774,9 +1540,10 @@ main {
   -webkit-font-smoothing: antialiased;
 }
 
-#terminal .xterm-viewport {
+#terminal .xterm-viewport,
+#terminal .xterm-scrollable-element {
   -webkit-overflow-scrolling: auto;
-  overscroll-behavior-y: contain;
+  overscroll-behavior-y: none;
   touch-action: none;
 }
 
@@ -806,8 +1573,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 #paste.copy-mode {
   border-color: var(--accent);
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
 }
 
 #paste.copy-mode.copy-needs-attention {
@@ -824,6 +1591,22 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   }
 }
 
+/*
+ * Dismiss layer for the session picker, used only by layouts where the picker
+ * overlays the terminal (see the portrait rules). It sits above the terminal
+ * and its touch catcher (z-index 18) and below the find bar (30), so find
+ * stays one tap.
+ */
+#picker-scrim {
+  display: none;
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  background: rgba(4, 7, 11, 0.32);
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 /* One-tap Copy near the finger after long-press selection (iOS-reliable). */
 #selection-copy-chip {
   position: fixed;
@@ -833,8 +1616,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 0 16px;
   border: 1px solid var(--accent);
   border-radius: 999px;
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
   font: inherit;
   font-size: var(--control-font-label);
   font-weight: 700;
@@ -884,8 +1667,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 0 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #181b2c;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font-label);
   -webkit-user-select: text;
@@ -939,7 +1722,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   place-content: center;
   gap: 10px;
   text-align: center;
-  color: #aeb6c4;
+  color: var(--muted);
 }
 
 #status {
@@ -981,10 +1764,10 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   max-height: min(88dvh, 720px);
   padding: 14px 14px 16px;
   overflow: hidden;
-  border: 1px solid #484b61;
+  border: 1px solid var(--control-border);
   border-radius: 14px;
-  background: #202336;
-  color: #eef1f5;
+  background: var(--surface);
+  color: var(--text);
   box-shadow: 0 18px 60px rgba(0, 0, 0, 0.48);
 }
 
@@ -1013,7 +1796,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 3px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #181b2c;
+  background: var(--surface-raised);
 }
 
 .settings-tab {
@@ -1023,16 +1806,16 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   border: 0;
   border-radius: 7px;
   background: transparent;
-  color: #9aa4b3;
+  color: var(--muted);
   font-size: var(--control-font);
   font-weight: 700;
   box-shadow: none;
 }
 
 .settings-tab[aria-selected="true"] {
-  background: #2d3044;
-  color: #eef1f5;
-  box-shadow: inset 0 0 0 1px #484b61;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 
 .settings-tab:active {
@@ -1057,7 +1840,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 .settings-field {
   display: grid;
   gap: 7px;
-  color: #cbd2dc;
+  color: var(--muted);
   font-size: 12px;
 }
 
@@ -1067,17 +1850,206 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 0 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #2d3044;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font-label);
 }
 
 .settings-hint {
   margin: 0;
-  color: #aeb6c4;
+  color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
+}
+
+.settings-key-profiles {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+}
+
+.settings-profile-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: var(--control-gap);
+}
+
+.settings-key-profile-menu {
+  position: relative;
+}
+
+.settings-key-profile-menu > summary {
+  display: grid;
+  place-items: center;
+  min-width: 76px;
+  min-height: var(--control-size);
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--control-font-label);
+  font-weight: 650;
+  list-style: none;
+}
+
+.settings-key-profile-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.settings-key-profile-menu[open] > summary {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.settings-key-profile-actions {
+  position: absolute;
+  top: calc(100% + 5px);
+  right: 0;
+  z-index: 4;
+  display: grid;
+  width: min(248px, calc(100vw - 56px));
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
+}
+
+.settings-profile-default {
+  display: grid;
+  gap: 6px;
+  margin-top: 3px;
+  padding: 9px 5px 4px;
+  border-top: 1px solid var(--control-border);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-profile-default select {
+  width: 100%;
+  min-height: var(--control-size);
+  padding: 0 8px;
+  border: 1px solid var(--control-border);
+  border-radius: 7px;
+  background: var(--surface-deep);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-key-profile-actions button {
+  min-height: var(--control-size);
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+  font-size: var(--control-font-label);
+}
+
+.settings-key-profile-actions button:hover,
+.settings-key-profile-actions button:focus-visible {
+  background: var(--surface-pressed);
+}
+
+#key-profile-delete {
+  color: var(--danger);
+}
+
+.settings-profile-summary {
+  min-height: 18px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-sync {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+}
+
+.settings-sync-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-sync-heading strong {
+  font-size: 13px;
+}
+
+.settings-sync-status {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.settings-sync-status[data-state="synced"] {
+  color: var(--accent);
+}
+
+.settings-sync-status[data-state="conflict"],
+.settings-sync-status[data-state="offline"] {
+  color: var(--danger);
+}
+
+.settings-sync-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--control-gap);
+}
+
+.settings-sync-actions button {
+  flex: 1 1 140px;
+  min-height: var(--control-size);
+}
+
+.settings-profile-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: color-mix(in srgb, var(--surface-deep) 72%, transparent);
+}
+
+.settings-profile-section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.settings-profile-section-heading h3 {
+  margin: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.settings-count {
+  display: grid;
+  place-items: center;
+  min-width: 24px;
+  min-height: 22px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
 }
 
 #shortcut-editor-list {
@@ -1099,13 +2071,13 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 4px 6px 4px 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #2d3044;
+  background: var(--surface-raised);
 }
 
 .shortcut-editor-label {
   min-width: 0;
   overflow: hidden;
-  color: #eef1f5;
+  color: var(--text);
   font-size: 13px;
   font-weight: 600;
   text-overflow: ellipsis;
@@ -1113,17 +2085,87 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 .shortcut-editor-actions {
+  position: relative;
   display: flex;
   flex: 0 0 auto;
   gap: 4px;
 }
 
-.shortcut-editor-actions button {
+.shortcut-editor-actions > button,
+.shortcut-editor-more > summary {
+  display: grid;
+  place-items: center;
   min-width: var(--control-size);
   min-height: var(--control-size);
   padding: 0;
+  border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--muted);
+  cursor: pointer;
   font-size: 16px;
+  list-style: none;
+}
+
+.shortcut-editor-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.shortcut-editor-more[open] > summary {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+.shortcut-editor-more-actions {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 5;
+  display: grid;
+  width: 132px;
+  gap: 3px;
+  padding: 4px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
+}
+
+.shortcut-editor-more-actions button {
+  min-height: var(--control-size);
+  padding: 0 10px;
+  border-color: transparent;
+  background: transparent;
+  text-align: left;
+  font-size: var(--control-font-label);
+}
+
+.shortcut-editor-more-actions button:hover,
+.shortcut-editor-more-actions button:focus-visible {
+  background: var(--surface-pressed);
+}
+
+.settings-profile-pin {
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+}
+
+.settings-profile-pin svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.5;
+}
+
+.settings-profile-pin.active {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
 }
 
 .settings-shortcut-add {
@@ -1138,8 +2180,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 0 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #2d3044;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font-label);
 }
@@ -1156,9 +2198,27 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 .settings-custom-key {
   display: grid;
   gap: 6px;
-  margin-top: 4px;
-  padding-top: 8px;
-  border-top: 1px solid #3a3e54;
+  padding: 0;
+  border: 0;
+}
+
+.settings-custom-key > summary {
+  min-height: var(--control-size);
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--control-font-label);
+  font-weight: 650;
+  line-height: var(--control-size);
+  list-style-position: inside;
+}
+
+.settings-custom-key[open] > summary {
+  margin-bottom: 2px;
+  color: var(--text);
 }
 
 .settings-hint-tight {
@@ -1178,8 +2238,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   padding: 0 10px;
   border: 1px solid var(--control-border);
   border-radius: var(--control-radius);
-  background: #2d3044;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font-label);
 }
@@ -1191,14 +2251,98 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 .settings-custom-key code {
   font-size: 0.9em;
-  color: #b8c0d0;
+  color: var(--muted);
 }
 
 .settings-secondary {
   width: 100%;
-  border-color: #484b61;
-  background: #292d42;
-  color: #cbd2dc;
+  border-color: var(--control-border);
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+
+.settings-profile-snippet-actions {
+  display: flex;
+  gap: var(--control-gap);
+}
+
+.settings-profile-snippet-actions button {
+  min-height: 34px;
+  padding: 0 10px;
+  border-color: var(--control-border);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.settings-profile-snippet-list {
+  display: grid;
+  gap: 4px;
+  max-height: min(28vh, 220px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.settings-profile-snippet-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) var(--control-size);
+  align-items: center;
+  gap: 5px;
+  min-height: var(--control-size);
+  padding: 4px 5px 4px 9px;
+  border: 1px solid var(--control-border);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.settings-profile-snippet-select {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 0;
+  min-height: var(--control-size);
+  cursor: pointer;
+}
+
+.settings-profile-snippet-item:has(input:checked) {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+}
+
+.settings-profile-snippet-item input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.settings-profile-snippet-item .settings-profile-pin {
+  width: var(--control-size);
+  min-width: var(--control-size);
+  min-height: var(--control-size);
+  padding: 0;
+  border-radius: var(--control-radius);
+}
+
+.settings-profile-snippet-label {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-profile-snippet-behavior {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
 }
 
 #snippet-editor-list {
@@ -1220,10 +2364,10 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 .settings-snippet-edit textarea {
   width: 100%;
   padding: 10px;
-  border: 1px solid #484b61;
+  border: 1px solid var(--control-border);
   border-radius: 9px;
-  background: #2d3044;
-  color: #eef1f5;
+  background: var(--surface-raised);
+  color: var(--text);
   font: inherit;
   font-size: 13px;
 }
@@ -1310,15 +2454,30 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: none !important;
 }
 
-/* Portrait: keep the full main strip (paste/find/keys/snips/pins) when the
+.drawer-empty-hint {
+  flex: 1 1 auto;
+  align-self: center;
+  min-width: 0;
+  padding: 0 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--control-font);
+  font-weight: 600;
+  line-height: var(--control-size);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Portrait: keep the full main strip (paste/keys/snips/pins) when the
  * Keys/Snips drawer is open. Drawer sits on its own row above. Landscape
- * middle-replace (hide paste/find/pins) lives in the landscape media query. */
+ * middle-replace (hide paste/pins) lives in the landscape media query. */
 
 #footer-scroll::-webkit-scrollbar {
   display: none;
 }
 
 #files-hidden-toggle {
+  display: none;
   margin-left: auto;
   opacity: 0.9;
 }
@@ -1346,7 +2505,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   flex-shrink: 0;
 }
 
-/* Larger than paste/find/settings icons — primary mobile control. */
+/* Larger than paste/settings/tool icons — primary mobile control. */
 #keyboard.shortcut-icon svg {
   width: 24px;
   height: 24px;
@@ -1365,8 +2524,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #drawer-keys.active,
 #drawer-snips.active {
   border-color: var(--accent);
-  background: #174b3a;
-  color: #5ff0a4;
+  background: var(--accent-surface);
+  color: var(--accent-text);
 }
 
 #footer-drawer::-webkit-scrollbar {
@@ -1414,6 +2573,17 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: none;
 }
 
+#footer-scroll > button[hidden],
+#footer-pins button[hidden] {
+  display: none !important;
+}
+
+#footer-pin-overflow {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 750;
+}
+
 .settings-check {
   display: flex;
   align-items: center;
@@ -1449,18 +2619,26 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 footer {
   grid-row: 3;
+  position: relative;
+  /* Above #scroll-catcher (z-index 18) so terminal touch layer never steals footer taps. */
+  z-index: 25;
   display: flex;
   flex-direction: column;
   gap: var(--control-gap);
-  min-height: calc(var(--control-size) + var(--footer-bottom-padding));
+  min-height: calc(
+    var(--control-size) + var(--footer-top-padding) + var(--footer-bottom-padding)
+  );
   overflow: hidden;
-  padding: 6px calc(7px + var(--safe-right)) var(--footer-bottom-padding) calc(7px + var(--safe-left));
+  padding: var(--footer-top-padding) calc(7px + var(--safe-right))
+    var(--footer-bottom-padding) calc(7px + var(--safe-left));
   background: var(--surface);
   border-top: 1px solid var(--border);
   box-shadow: 0 -4px 14px rgba(5, 7, 15, 0.18);
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
+  /* Prefer button activation over inherited body touch-action: none. */
+  touch-action: manipulation;
 }
 
 header *,
@@ -1472,6 +2650,10 @@ footer * {
 
 footer button {
   flex: 0 0 auto;
+  position: relative;
+  z-index: 1;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .shortcut-icon svg {
@@ -1484,11 +2666,11 @@ footer button {
   stroke-width: 1.8;
 }
 
-@media (orientation: landscape) {
+@media (orientation: landscape) and (pointer: coarse) {
   /* Session rail left | terminal | shortcut rail right */
   body {
-    --session-rail-width: 40px;
-    --header-control: 34px;
+    --session-rail-width: 48px;
+    --header-control: 40px;
     grid-template-columns:
       calc(var(--session-rail-width) + var(--safe-left))
       minmax(0, 1fr)
@@ -1558,15 +2740,14 @@ footer button {
     align-items: stretch;
     width: 100%;
     margin: 0;
-    margin-top: auto;
-    order: 3;
-    padding: 2px;
+    order: 0;
+    padding: 0;
   }
 
   header .view-mode-btn {
     min-width: 0;
     width: 100%;
-    min-height: 30px;
+    min-height: 40px;
     padding: 0 2px;
     font-size: 9px;
     letter-spacing: 0.04em;
@@ -1582,12 +2763,15 @@ footer button {
     min-height: 0;
     padding: 4px 1px;
     gap: 8px;
-    order: 1;
+    order: 2;
   }
 
   header.collapsed #connection-dot {
+    flex: 0 0 var(--header-control);
+    width: 100%;
     margin-right: 0;
     margin-bottom: 0;
+    order: 1;
   }
 
   header.collapsed #current-session {
@@ -1600,6 +2784,23 @@ footer button {
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.04em;
+  }
+
+  header.collapsed .active-profile-label,
+  #header-expanded .session-profile-label {
+    max-width: 34px;
+    padding: 3px 5px;
+    font-size: 0;
+  }
+
+  header.collapsed .active-profile-label::after,
+  #header-expanded .session-profile-label::after {
+    content: attr(data-short-label);
+    font-size: 8px;
+  }
+
+  header.collapsed .connection-state-label {
+    display: none;
   }
 
   header.collapsed .header-chevron {
@@ -1615,7 +2816,12 @@ footer button {
     flex: 1 1 auto;
   }
 
-  /* Expanded landscape: still hide Term|Files (portrait rule). */
+  #collapse-header svg {
+    transform: rotate(-90deg);
+  }
+
+  /* The expanded picker owns the whole rail here, so Term|Files steps aside
+   * (portrait keeps it, because its menu only covers part of the screen). */
   header:not(.collapsed) #view-mode {
     display: none;
   }
@@ -1657,6 +2863,14 @@ footer button {
     min-height: var(--header-control);
     flex: 0 0 auto;
     font-size: 15px;
+  }
+
+  /* Narrow rail: the two picker actions stay stacked and icon-only. */
+  #header-picker-actions {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    gap: 4px;
   }
 
   main {
@@ -1730,6 +2944,7 @@ footer button {
     grid-column: auto;
     grid-row: auto;
     order: 2;
+    width: 100%;
     flex-direction: column;
     flex: 1 1 auto;
     min-height: 0;
@@ -1745,6 +2960,7 @@ footer button {
     grid-column: auto;
     grid-row: auto;
     order: 1;
+    width: 100%;
     flex: 1 1 auto;
     flex-direction: column;
     flex-basis: auto;
@@ -1758,9 +2974,20 @@ footer button {
     touch-action: pan-y;
   }
 
+  /* The rail is too narrow for one line, so wrap instead of clipping. */
+  .drawer-empty-hint {
+    flex: 0 0 auto;
+    align-self: stretch;
+    padding: 4px 2px;
+    font-size: 9px;
+    line-height: 1.35;
+    white-space: normal;
+    text-align: center;
+  }
+
   /*
    * Keys/Snips open → chips fill the middle rail.
-   * Hide paste/find/pins so the strip stays dense (Keys + Snips remain to
+   * Hide paste/pins so the strip stays dense (Keys + Snips remain to
    * close/switch). Portrait keeps the full main strip (see base rules).
    */
   #footer-main:has(#footer-drawer:not([hidden])) #footer-scroll {
@@ -1769,7 +2996,6 @@ footer button {
   }
 
   #footer-main:has(#footer-drawer:not([hidden])) #paste,
-  #footer-main:has(#footer-drawer:not([hidden])) #drawer-find,
   #footer-main:has(#footer-drawer:not([hidden])) #footer-pins {
     display: none !important;
   }
@@ -1778,14 +3004,6 @@ footer button {
   #footer-main:has(#footer-drawer:not([hidden])) #drawer-snips {
     width: 100%;
     max-width: none;
-  }
-
-  header.collapsed .header-create-collapsed {
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    margin: 0;
-    order: 2;
   }
 
   #settings {
@@ -1835,7 +3053,7 @@ footer button {
 
   /* Files landscape: slightly wider left rail for Term|Files only. */
   body.files-view {
-    --session-rail-width: 44px;
+    --session-rail-width: 48px;
   }
 
   body.files-view:has(header:not(.collapsed)) {
@@ -1843,7 +3061,7 @@ footer button {
   }
 }
 
-@media (orientation: landscape) and (max-height: 500px) {
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
   body {
     --control-size: 40px;
   }
@@ -1854,6 +3072,512 @@ footer button {
   }
 
   header .view-mode-btn {
-    min-height: 28px;
+    min-height: 40px;
+  }
+}
+
+/* Tablet touch layouts gain a persistent location pane without adopting
+ * fine-pointer density or shrinking touch targets. */
+@media (min-width: 700px) and (min-height: 600px) and (pointer: coarse) {
+  #files-location-select-wrap {
+    display: none;
+  }
+
+  #files-workspace {
+    grid-template-columns: 168px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  #files-sidebar {
+    display: block;
+    grid-row: 1;
+    grid-column: 1;
+    border-right: 1px solid var(--border);
+  }
+
+  #files-content {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .files-sidebar-heading {
+    display: block;
+    margin: 0;
+    padding: 12px 14px 7px;
+    color: #748190;
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  #files-roots {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 3px;
+    padding: 4px 8px 8px;
+    border-bottom: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #files-roots button {
+    width: 100%;
+    min-height: 44px;
+    border-color: transparent;
+    border-radius: 8px;
+    text-align: left;
+  }
+
+  #files-hidden-toggle {
+    display: flex;
+    margin-top: 10px;
+    margin-left: 0;
+  }
+}
+
+/* Fine-pointer workstations use compact top chrome and native desktop file
+ * manager conventions. Touch-only helpers are not rendered into the layout. */
+@media (hover: hover) and (pointer: fine) {
+  body {
+    --header-control: 32px;
+    --header-height: 40px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows:
+      calc(var(--header-height) + var(--safe-top))
+      minmax(0, 1fr);
+  }
+
+  header,
+  header.collapsed,
+  header:not(.collapsed) {
+    position: relative;
+    inset: auto;
+    grid-row: 1;
+    grid-column: 1;
+    width: 100%;
+    height: auto;
+    padding: var(--safe-top) calc(6px + var(--safe-right)) 4px
+      calc(6px + var(--safe-left));
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 1px 8px rgba(0, 0, 0, 0.22);
+  }
+
+  header .header-row,
+  header.collapsed .header-row {
+    flex-direction: row;
+    align-items: center;
+    min-height: var(--header-control);
+    background: transparent;
+  }
+
+  header #view-mode,
+  header.collapsed #view-mode {
+    order: initial;
+    flex-direction: row;
+    align-items: center;
+    width: auto;
+    margin: 0 0 0 auto;
+    padding: 0;
+  }
+
+  header:not(.collapsed) #view-mode {
+    display: none;
+  }
+
+  header .view-mode-btn {
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+  }
+
+  header.collapsed #header-summary {
+    order: initial;
+    flex-direction: row;
+    justify-content: flex-start;
+    max-width: min(340px, 38vw);
+    min-height: var(--header-control);
+    padding: 0 8px;
+  }
+
+  header.collapsed #current-session {
+    writing-mode: initial;
+    transform: none;
+    max-height: none;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    letter-spacing: 0;
+  }
+
+  header.collapsed .header-chevron {
+    margin: 0 0 0 auto;
+    padding-left: 8px;
+    transform: none;
+  }
+
+  header.collapsed #connection-dot {
+    order: initial;
+    flex: 0 0 var(--header-control);
+    width: var(--header-control);
+    margin: 0 2px 0 0;
+  }
+
+  #header-expanded {
+    flex-direction: row;
+    align-items: center;
+    min-height: var(--header-control);
+  }
+
+  #header-expanded nav {
+    flex-direction: row;
+    min-height: auto;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .desktop-header-action {
+    display: grid;
+    place-items: center;
+    flex: 0 0 var(--header-control);
+    width: var(--header-control);
+    min-width: var(--header-control);
+    min-height: var(--header-control);
+  }
+
+  body.files-view .desktop-header-action {
+    display: none;
+  }
+
+  main {
+    grid-row: 2;
+    grid-column: 1;
+    padding: 3px 5px;
+  }
+
+  footer {
+    display: none;
+  }
+
+  #status {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+  }
+
+  #files-panel {
+    border: 1px solid #202832;
+    border-radius: 8px 8px 0 0;
+  }
+
+  #files-toolbar {
+    min-height: 42px;
+    padding: 4px 6px 4px 10px;
+  }
+
+  #files-location-select-wrap {
+    display: none;
+  }
+
+  #files-breadcrumb,
+  #files-breadcrumb button {
+    min-height: 32px;
+  }
+
+  .files-up-nav {
+    flex-basis: 32px;
+    width: 32px;
+    min-width: 32px;
+    min-height: 32px;
+  }
+
+  #files-toolbar-actions {
+    display: flex;
+  }
+
+  .files-toolbar-button:hover:not(:disabled) {
+    border-color: var(--control-border);
+    background: var(--surface-raised);
+    color: var(--text);
+  }
+
+  .files-toolbar-button:disabled {
+    cursor: default;
+  }
+
+  #files-workspace {
+    grid-template-columns: 184px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+
+  #files-workspace:has(#files-preview-pane:not([hidden])) {
+    grid-template-columns: 184px minmax(320px, 1fr) minmax(280px, 34vw);
+  }
+
+  #files-sidebar {
+    display: block;
+    grid-row: 1;
+    grid-column: 1;
+    border-right: 1px solid var(--border);
+  }
+
+  #files-content {
+    grid-row: 1;
+    grid-column: 2;
+  }
+
+  .files-sidebar-heading {
+    display: block;
+    margin: 0;
+    padding: 14px 14px 7px;
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 750;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  #files-roots {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 2px;
+    height: calc(100% - 38px);
+    padding: 2px 8px 10px;
+    border-bottom: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #files-roots button {
+    width: 100%;
+    min-height: 34px;
+    padding: 0 10px;
+    border-color: transparent;
+    border-radius: 7px;
+    background: transparent;
+    color: var(--muted);
+    text-align: left;
+  }
+
+  #files-roots button:hover {
+    background: var(--surface-raised);
+    color: var(--text);
+  }
+
+  #files-roots button.active {
+    border-color: var(--accent);
+    background: var(--accent-surface);
+    color: var(--accent-text);
+  }
+
+  #files-hidden-toggle {
+    display: flex;
+    margin-top: auto;
+    margin-left: 0;
+    min-height: 34px;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  #files-list-header {
+    display: grid;
+    grid-row: 1;
+    grid-template-columns: 26px minmax(180px, 1fr) 168px 92px;
+    align-items: center;
+    min-height: 31px;
+    padding: 0 12px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-deep);
+    color: var(--muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+
+  #files-list-header .files-header-name {
+    grid-column: 1 / span 2;
+  }
+
+  #files-list {
+    padding-bottom: 4px;
+    outline: 0;
+  }
+
+  #files-list:focus-visible {
+    outline: 0;
+  }
+
+  #files-list li {
+    grid-template-columns: 26px minmax(180px, 1fr) 168px 92px;
+    gap: 0;
+    min-height: 38px;
+    padding: 0 12px;
+    border-bottom-color: var(--border);
+  }
+
+  #files-list li:hover {
+    background: var(--surface-raised);
+  }
+
+  #files-list li[aria-selected='true'] {
+    background: var(--accent-surface);
+  }
+
+  .files-entry-icon {
+    grid-row: auto;
+    width: 17px;
+    height: 17px;
+  }
+
+  .files-entry-name {
+    padding-right: 12px;
+    font-size: 12px;
+  }
+
+  .files-entry-meta {
+    display: none;
+  }
+
+  .files-entry-modified,
+  .files-entry-size {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--muted);
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #files-statusbar {
+    display: block;
+    min-height: 27px;
+    padding: 5px 12px;
+  }
+
+  #files-preview-pane:not([hidden]) {
+    display: grid;
+    grid-row: 1;
+    grid-column: 3;
+    grid-template-rows: auto minmax(0, 1fr);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    border-left: 1px solid var(--border);
+    background: var(--surface-deep);
+  }
+
+  .files-preview-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 5px 8px 5px 12px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .files-preview-heading strong {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  #files-preview-pane-close {
+    flex: 0 0 30px;
+    width: 30px;
+    min-width: 30px;
+    min-height: 30px;
+  }
+
+  #files-preview-pane-body {
+    max-height: none;
+    min-height: 0;
+    margin: 0;
+    border: 0;
+    border-radius: 0;
+    background: var(--surface-deep);
+    font-size: 11px;
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) {
+    position: fixed;
+    inset: auto;
+    z-index: 80;
+    width: 224px;
+    margin: 0;
+    padding: 6px;
+    border-color: var(--control-border);
+    border-radius: 9px;
+    background: var(--surface-raised);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.52);
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) .settings-heading,
+  #files-actions-dialog:not(.files-action-sheet) #files-actions-path {
+    display: none;
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) .files-actions-buttons {
+    gap: 2px;
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) .files-actions-buttons button {
+    min-height: 34px;
+    padding: 0 10px;
+    border-color: transparent;
+    border-radius: 6px;
+    background: transparent;
+    text-align: left;
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) .files-actions-buttons button:hover {
+    background: var(--surface-pressed);
+  }
+
+  #files-actions-dialog:not(.files-action-sheet) .files-action-danger {
+    margin-top: 4px;
+    border-top: 1px solid #3e2930;
+    border-radius: 0 0 6px 6px;
+  }
+}
+
+/* Convertible laptops and pointer-equipped tablets still receive direct touch.
+ * Preserve the minimum touch target even when their primary pointer is fine. */
+@media (hover: hover) and (pointer: fine) and (any-pointer: coarse) {
+  #files-list li {
+    min-height: 44px;
+  }
+}
+
+@media (hover: hover) and (pointer: fine) and (max-width: 820px) {
+  #files-workspace {
+    grid-template-columns: 148px minmax(0, 1fr);
+  }
+
+  #files-list-header,
+  #files-list li {
+    grid-template-columns: 24px minmax(140px, 1fr) 116px 72px;
+  }
+
+  .files-toolbar-button span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }

@@ -5,14 +5,25 @@ const terminalElement = document.querySelector('#terminal');
 const emptyElement = document.querySelector('#empty');
 const filesPanelElement = document.querySelector('#files-panel');
 const filesToolbarElement = document.querySelector('#files-toolbar');
-const filesUpButton = document.querySelector('#files-up');
+const filesUpButton = document.querySelector('#files-up-nav');
+const filesLocationSelect = document.querySelector('#files-location-select');
+const filesNewFolderDesktopButton = document.querySelector(
+  '#files-new-folder-desktop'
+);
 const filesRefreshButton = document.querySelector('#files-refresh');
+const filesRefreshDesktopButton = document.querySelector('#files-refresh-desktop');
 const filesSettingsButton = document.querySelector('#files-settings');
+const filesSettingsDesktopButton = document.querySelector('#files-settings-desktop');
 const filesBreadcrumbElement = document.querySelector('#files-breadcrumb');
 const filesRootsElement = document.querySelector('#files-roots');
 const filesListElement = document.querySelector('#files-list');
 const filesEmptyHintElement = document.querySelector('#files-empty-hint');
+const filesStatusbarElement = document.querySelector('#files-statusbar');
 const filesUploadInput = document.querySelector('#files-upload');
+const filesUploadDesktopInput = document.querySelector('#files-upload-desktop');
+const filesUploadTriggers = document.querySelectorAll(
+  '[data-files-upload-trigger]'
+);
 const footerTermElement = document.querySelector('#footer-term');
 const footerFilesElement = document.querySelector('#footer-files');
 const filesActionsDialog = document.querySelector('#files-actions-dialog');
@@ -21,35 +32,98 @@ const filesActionsPath = document.querySelector('#files-actions-path');
 const filesActionsClose = document.querySelector('#files-actions-close');
 const filesActionPreview = document.querySelector('#files-action-preview');
 const filesActionDownload = document.querySelector('#files-action-download');
+const filesActionRename = document.querySelector('#files-action-rename');
 const filesActionInsert = document.querySelector('#files-action-insert');
 const filesActionDelete = document.querySelector('#files-action-delete');
 const filesPreviewDialog = document.querySelector('#files-preview-dialog');
 const filesPreviewTitle = document.querySelector('#files-preview-title');
 const filesPreviewBody = document.querySelector('#files-preview-body');
 const filesPreviewClose = document.querySelector('#files-preview-close');
+const filesPreviewPane = document.querySelector('#files-preview-pane');
+const filesPreviewPaneTitle = document.querySelector('#files-preview-pane-title');
+const filesPreviewPaneBody = document.querySelector('#files-preview-pane-body');
+const filesPreviewPaneClose = document.querySelector('#files-preview-pane-close');
+const filesOptionsDialog = document.querySelector('#files-options-dialog');
+const filesOptionsClose = document.querySelector('#files-options-close');
+const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
+const filesOptionHidden = document.querySelector('#files-option-hidden');
+const filesOptionSettings = document.querySelector('#files-option-settings');
+const filesNameDialog = document.querySelector('#files-name-dialog');
+const filesNameForm = document.querySelector('#files-name-form');
+const filesNameTitle = document.querySelector('#files-name-title');
+const filesNameLabel = document.querySelector('#files-name-label');
+const filesNameInput = document.querySelector('#files-name-input');
+const filesNameError = document.querySelector('#files-name-error');
+const filesNameSubmit = document.querySelector('#files-name-submit');
+const filesNameClose = document.querySelector('#files-name-close');
+const filesNameCancel = document.querySelector('#files-name-cancel');
 const viewModeElement = document.querySelector('#view-mode');
 const appHeaderElement = document.querySelector('#app-header');
+const headerSettingsButton = document.querySelector('#header-settings');
 const headerSummaryButton = document.querySelector('#header-summary');
+const headerExpandedElement = document.querySelector('#header-expanded');
 const currentSessionElement = document.querySelector('#current-session');
+const activeProfileElement = document.querySelector('#active-profile');
+const quickMenuDialog = document.querySelector('#quick-menu-dialog');
+const quickMenuCloseButton = document.querySelector('#quick-menu-close');
+const quickMenuProfileSection = document.querySelector('#quick-menu-profile');
+const quickMenuProfileValue = document.querySelector(
+  '#quick-menu-profile-value'
+);
+const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
+const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
+const quickMenuFindButton = document.querySelector('#quick-menu-find');
+const quickMenuRenameButton = document.querySelector('#quick-menu-rename');
+const quickMenuReconnectButton = document.querySelector(
+  '#quick-menu-reconnect'
+);
+const quickMenuSettingsButton = document.querySelector('#quick-menu-settings');
+const connectionStateLabelElement = document.querySelector(
+  '#connection-state-label'
+);
 const connectionDotElement = document.querySelector('#connection-dot');
 const statusElement = document.querySelector('#status');
 const keyboardButton = document.querySelector('#keyboard');
 const pasteButton = document.querySelector('#paste');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
+const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
 const scrollThumbElement = document.querySelector('#scroll-thumb');
 const footerDrawerElement = document.querySelector('#footer-drawer');
 const footerPinsElement = document.querySelector('#footer-pins');
+const footerScrollElement = document.querySelector('#footer-scroll');
+const footerPinOverflowButton = document.querySelector(
+  '#footer-pin-overflow'
+);
 const drawerKeysButton = document.querySelector('#drawer-keys');
 const drawerSnipsButton = document.querySelector('#drawer-snips');
-const drawerFindButton = document.querySelector('#drawer-find');
 const settingsDialogElement = document.querySelector('#settings-dialog');
 const terminalThemeElement = document.querySelector('#terminal-theme');
 const shortcutEditorList = document.querySelector('#shortcut-editor-list');
 const shortcutAddSelect = document.querySelector('#shortcut-add-select');
 const shortcutAddButton = document.querySelector('#shortcut-add');
 const shortcutResetButton = document.querySelector('#shortcut-reset');
+const keyProfileSelect = document.querySelector('#key-profile-select');
+const keyProfileDefaultSelect = document.querySelector(
+  '#key-profile-default-select'
+);
+const keyProfileSummary = document.querySelector('#key-profile-summary');
+const profileKeyCount = document.querySelector('#profile-key-count');
+const profileSnippetCount = document.querySelector('#profile-snippet-count');
+const profileSnippetList = document.querySelector('#profile-snippet-list');
+const profileSnippetsAllButton = document.querySelector(
+  '#profile-snippets-all'
+);
+const profileSnippetsNoneButton = document.querySelector(
+  '#profile-snippets-none'
+);
+const keyProfileNewButton = document.querySelector('#key-profile-new');
+const keyProfileDuplicateButton = document.querySelector(
+  '#key-profile-duplicate'
+);
+const keyProfileRenameButton = document.querySelector('#key-profile-rename');
+const keyProfileDeleteButton = document.querySelector('#key-profile-delete');
 const customKeyLabelInput = document.querySelector('#custom-key-label');
 const customKeyTypeSelect = document.querySelector('#custom-key-type');
 const customKeyValueInput = document.querySelector('#custom-key-value');
@@ -69,18 +143,49 @@ const findNextButton = document.querySelector('#find-next');
 const findCloseButton = document.querySelector('#find-close');
 const installAppButton = document.querySelector('#install-app');
 const installHelpElement = document.querySelector('#install-help');
+const preferencesSyncStatusElement = document.querySelector(
+  '#preferences-sync-status'
+);
+const preferencesSyncHelpElement = document.querySelector(
+  '#preferences-sync-help'
+);
+const preferencesSyncEnableButton = document.querySelector(
+  '#preferences-sync-enable'
+);
+const preferencesSyncLoadButton = document.querySelector(
+  '#preferences-sync-load'
+);
+const preferencesSyncReplaceButton = document.querySelector(
+  '#preferences-sync-replace'
+);
+const preferencesSyncRetryButton = document.querySelector(
+  '#preferences-sync-retry'
+);
 const decoder = new TextDecoder();
 const activeSessionStorageKey = 'vps-terminal-active-session';
 const terminalFontSizeStorageKey = 'vps-terminal-font-size';
 const terminalThemeStorageKey = 'vps-terminal-theme';
 const sessionThemeStorageKey = 'vps-terminal-session-themes';
+// Legacy keys are read once when creating the initial Shell profile.
 const shortcutsStorageKey = 'vps-terminal-shortcuts';
 const customKeysStorageKey = 'vps-terminal-custom-keys';
+const keyProfilesStorageKey = 'vps-terminal-key-profiles-v1';
+const sessionKeyProfilesStorageKey = 'vps-terminal-session-key-profiles-v1';
+const preferencesSyncStorageKey = 'vps-terminal-preferences-sync-v1';
+const preferencesCacheStorageKey = 'vps-terminal-preferences-cache-v1';
+const preferencesLastIdentityStorageKey =
+  'vps-terminal-preferences-last-identity-v1';
+const preferencesPendingCacheStorageKey =
+  'vps-terminal-preferences-pending-cache-v1';
+const preferencesBootstrapStorageKey =
+  'vps-terminal-preferences-bootstrap-v1';
 const footerPinsStorageKey = 'vps-terminal-footer-pins';
 const viewModeStorageKey = 'vps-terminal-view-mode';
 const filesNavStorageKey = 'vps-terminal-files-nav';
 const filesShowHiddenStorageKey = 'vps-terminal-files-show-hidden';
 const settingsLastTabStorageKey = 'vps-terminal-settings-tab';
+const qaShellMode =
+  new URLSearchParams(window.location.search).get('qa-shell') === '1';
 const connectionConnectTimeoutMs = 10000;
 const pinHintStorageKey = 'vps-terminal-pin-hint-seen';
 const maximumPasteLength = 16384;
@@ -91,6 +196,12 @@ const maximumFooterPins = 8;
 const maximumCustomKeys = 24;
 const maximumCustomKeyLabelLength = 16;
 const maximumCustomKeySequenceLength = 32;
+const maximumKeyProfiles = 12;
+const maximumKeyProfileNameLength = 24;
+const maximumProfileSnippetIds = 50;
+const starterKeyProfilesVersion = 1;
+const starterProfileSnippetSelectionsVersion = 1;
+const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
 const minimumTerminalFontSize = 9;
@@ -109,10 +220,13 @@ const headerAutoCollapseMilliseconds = 4000;
 const sessionRefreshMilliseconds = 30000;
 const sessionLongPressMilliseconds = 500;
 const sessionLongPressMoveTolerance = 10;
+const filesEntryLongPressMilliseconds = 520;
+const filesEntryLongPressMoveTolerance = 10;
 const nativeTouchSelection = shouldUseNativeTouchSelection();
 const terminalFontFamily =
-  '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';// Built-in key chips (paste / keyboard / settings / find stay fixed chrome).
-// Find is only the footer Find button + Ctrl/Cmd+F — not a Keys chip.
+  '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
+// Find lives in the Menu sheet and Ctrl/Cmd+F, but is deliberately not a
+// permanent footer control or a configurable key chip.
 const builtinShortcutCatalog = {
   esc: { label: 'Esc', kind: 'sequence', sequence: '\u001b' },
   ctrl: { label: 'Ctrl', kind: 'ctrl' },
@@ -252,6 +366,91 @@ const defaultShortcutIds = [
   'pgup',
   'pgdn',
   'scroll-end'
+];
+// Starter profiles stay deliberately small. Agent-specific additions are
+// documented TUI controls; shared prompt text remains user-owned in Library.
+const starterKeyProfileTemplates = [
+  {
+    id: 'profile-codex0000',
+    name: 'Codex',
+    shortcutIds: [
+      'esc',
+      'shift-tab',
+      'ctrl-c',
+      'ctrl-o',
+      'tab',
+      'enter',
+      'ctrl',
+      'left',
+      'up',
+      'down',
+      'right',
+      'pgup',
+      'pgdn',
+      'scroll-end'
+    ],
+    snippetIds: [],
+    pins: [
+      { kind: 'key', id: 'esc' },
+      { kind: 'key', id: 'shift-tab' }
+    ]
+  },
+  {
+    id: 'profile-claude000',
+    name: 'Claude',
+    shortcutIds: [
+      'esc',
+      'shift-tab',
+      'ctrl-c',
+      'ctrl-d',
+      'tab',
+      'enter',
+      'ctrl',
+      'left',
+      'up',
+      'down',
+      'right',
+      'pgup',
+      'pgdn',
+      'scroll-end'
+    ],
+    snippetIds: [],
+    pins: [
+      { kind: 'key', id: 'esc' },
+      { kind: 'key', id: 'shift-tab' }
+    ]
+  },
+  {
+    id: 'profile-grok0000',
+    name: 'Grok',
+    shortcutIds: [
+      'esc',
+      'shift-tab',
+      'ctrl-p',
+      'ctrl-x',
+      'f2',
+      'ctrl-c',
+      'ctrl-d',
+      'tab',
+      'enter',
+      'left',
+      'up',
+      'down',
+      'right',
+      'pgup',
+      'pgdn',
+      'scroll-end'
+    ],
+    snippetIds: [],
+    pins: [
+      { kind: 'key', id: 'esc' },
+      { kind: 'key', id: 'shift-tab' }
+    ]
+  }
+];
+const starterProfileSnippetCandidateGroups = [
+  ['git-st', 'proj-git'],
+  ['pastes', 'paste-ls']
 ];
 // Display labels for the settings picker (order is picker order).
 const terminalThemeLabels = {
@@ -510,13 +709,14 @@ let socket = null;
 let lastSentTerminalCols = null;
 let lastSentTerminalRows = null;
 let reconnectTimer = null;
-let intentionalClose = false;
 let touchLastY = null;
 let touchMoved = false;
 let pinchStartDistance = null;
 let pinchStartFontSize = null;
 let terminalFontSize = rememberedFontSize();
+let globalTerminalThemeName = null;
 let terminalThemeName = rememberedTerminalThemeName();
+globalTerminalThemeName = terminalThemeName;
 let fontResizeFrame = null;
 let fontSizeChangedDuringPinch = false;
 let ctrlArmed = false;
@@ -552,6 +752,7 @@ let selectionViewportGestureActive = false;
 let selectionViewportReleaseTimer = null;
 let visualViewportUpdateFrame = null;
 let fitFrame = null;
+let terminalScrollClampFrame = null;
 let lastAppliedViewportHeight = null;
 let lastAppliedViewportTop = null;
 let lastSelectionApplyLogAt = 0;
@@ -566,6 +767,21 @@ let filesWritable = true;
 let filesListing = null;
 let filesActionTarget = null;
 let filesLoadPromise = null;
+let filesVisibleEntries = [];
+let filesSelectedIndex = -1;
+let filesSelectedName = '';
+let filesRestoreSelectionName = '';
+let filesRestoreSelectionIndex = -1;
+let filesPreviewTargetName = '';
+let filesPreviewRequestedName = '';
+let filesPreviewRequestId = 0;
+let filesNameMode = '';
+let filesNameTarget = null;
+let filesNameOriginRoot = '';
+let filesNameOriginPath = '';
+let filesNameGeneration = 0;
+let filesTypeahead = '';
+let filesTypeaheadTimer = null;
 /** @type {Array<{ id: string, label: string, displayPrefix?: string, writable?: boolean }>} */
 let filesRootsCatalog = [];
 let filesShowHidden = false;
@@ -574,6 +790,38 @@ let appDisplayName = 'VPS Terminal';
 let snippetsList = [];
 let snippetsLoadPromise = null;
 let snippetEditorSelectedId = null;
+let keyProfilesDocument = null;
+let keyProfileEditorId = null;
+let sessionKeyProfileAssignments = null;
+let sessionThemesMemory = null;
+const hadDurablePreferencesAtBoot = hasDurableBrowserPreferences();
+const initialPreferencesLastIdentity = loadLastPreferencesIdentity();
+const embeddedPreferencesIdentity = loadEmbeddedPreferencesIdentity();
+const initialPreferencesSyncIdentity =
+  embeddedPreferencesIdentity || initialPreferencesLastIdentity;
+const initialPreferencesSyncMetadata = loadPreferencesSyncMetadata(
+  initialPreferencesSyncIdentity
+);
+let preferencesSyncIdentity = initialPreferencesSyncIdentity;
+// The no-store HTML response is already behind the authenticated reverse
+// proxy, so its hashed subject is authority for selecting the private cache.
+// GET /api/preferences remains a second confirmation and revision lookup.
+let preferencesSyncIdentityConfirmed = Boolean(embeddedPreferencesIdentity);
+let preferencesSyncEnabled = initialPreferencesSyncMetadata.enabled;
+let preferencesSyncRevision = initialPreferencesSyncMetadata.revision;
+let preferencesSyncDirty =
+  initialPreferencesSyncMetadata.dirty ||
+  (!embeddedPreferencesIdentity && hasPendingPreferencesCache()) ||
+  (!initialPreferencesSyncMetadata.found &&
+    Boolean(readPreferencesCache(initialPreferencesSyncIdentity)));
+let preferencesSyncState = 'loading';
+let preferencesSyncTimer = null;
+let preferencesSyncWriting = false;
+let preferencesSyncPending = false;
+let preferencesApplying = false;
+let preferencesBootstrapMutation = false;
+let preferencesTrackingReady = false;
+let preferencesLocalMutationVersion = 0;
 
 document.documentElement.classList.toggle(
   'native-touch-terminal',
@@ -631,14 +879,175 @@ function connectionDotTitle() {
   return lastConnectionDetail || activeSession;
 }
 
+function connectionStateLabel() {
+  if (!activeSession) {
+    return '';
+  }
+  if (connectionState === 'connected') {
+    return 'Connected';
+  }
+  if (connectionState === 'connecting') {
+    return 'Connecting';
+  }
+  if (connectionState === 'error') {
+    return 'Connection issue';
+  }
+  return '';
+}
+
+function shortProfileLabel(profile) {
+  const known = {
+    Terminal: 'TM',
+    Codex: 'CX',
+    Claude: 'CL',
+    Grok: 'GR'
+  };
+  if (known[profile?.name]) {
+    return known[profile.name];
+  }
+  return String(profile?.name || '')
+    .replace(/[^A-Za-z0-9]+/g, '')
+    .slice(0, 2)
+    .toLocaleUpperCase();
+}
+
 function renderHeaderSummary() {
+  const profile = activeKeyProfile();
   currentSessionElement.textContent = activeSession || 'No session';
+  if (activeProfileElement) {
+    activeProfileElement.textContent = profile.name;
+    activeProfileElement.dataset.shortLabel = shortProfileLabel(profile);
+    activeProfileElement.title = `Profile: ${profile.name}`;
+    activeProfileElement.setAttribute(
+      'aria-label',
+      `Active profile: ${profile.name}`
+    );
+    activeProfileElement.hidden = !activeSession;
+  }
   connectionDotElement.dataset.state = connectionState;
   connectionDotElement.title = connectionDotTitle();
-  connectionDotElement.setAttribute(
-    'aria-label',
-    connectionDotTitle()
-  );
+  connectionDotElement.setAttribute('aria-label', connectionDotTitle());
+  connectionDotElement.disabled = !activeSession;
+  if (connectionStateLabelElement) {
+    connectionStateLabelElement.textContent = connectionStateLabel();
+    connectionStateLabelElement.dataset.state = connectionState;
+    connectionStateLabelElement.hidden = !activeSession;
+  }
+  renderQuickMenu();
+  syncPickerScrim();
+}
+
+/** Session profile assignment lives in the Menu sheet, not in the top bar. */
+function renderQuickMenu() {
+  if (!quickMenuProfileSection || !quickMenuProfileList) {
+    return;
+  }
+  quickMenuProfileSection.hidden = !activeSession;
+  if (!activeSession) {
+    quickMenuProfileList.replaceChildren();
+    return;
+  }
+  const profile = activeKeyProfile();
+  const assignments = loadSessionKeyProfileAssignments();
+  const assignedProfileId = assignments[activeSession] || '';
+  if (quickMenuProfileValue) {
+    quickMenuProfileValue.textContent = profile.name;
+  }
+  if (quickMenuProfileHint) {
+    quickMenuProfileHint.textContent =
+      `Keys, Snippets, and pins used by ${activeSession}.`;
+  }
+  // A background reconnect can rebuild this list while it is open, so keep the
+  // caller's place instead of dropping focus and scroll to the top.
+  const focusedProfileId = quickMenuProfileList.contains(document.activeElement)
+    ? document.activeElement.dataset.profileId ?? null
+    : null;
+  const listScrollTop = quickMenuProfileList.scrollTop;
+  quickMenuProfileList.replaceChildren();
+
+  const options = [
+    {
+      id: '',
+      label: `Use default — ${defaultKeyProfile().name}`
+    },
+    ...loadKeyProfilesDocument().profiles.map((entry) => ({
+      id: entry.id,
+      label: entry.name
+    }))
+  ];
+  for (const option of options) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.role = 'menuitemradio';
+    button.dataset.profileId = option.id;
+    button.textContent = option.label;
+    const checked = option.id === assignedProfileId;
+    button.setAttribute('aria-checked', String(checked));
+    // Roving tabindex: Tab reaches the list once, arrows move inside it. The
+    // tab stop follows the arrow-key position, not the assignment, so a
+    // background re-render cannot desync the focus ring from the Tab order.
+    button.tabIndex = option.id === (focusedProfileId ?? assignedProfileId)
+      ? 0
+      : -1;
+    quickMenuProfileList.append(button);
+  }
+  quickMenuProfileList.scrollTop = listScrollTop;
+  if (focusedProfileId !== null) {
+    quickMenuProfileList.querySelector(
+      `button[data-profile-id="${CSS.escape(focusedProfileId)}"]`
+    )?.focus({ preventScroll: true });
+  }
+}
+
+/** role="menu" implies arrow-key movement, so implement it. */
+function moveQuickMenuProfileFocus(key) {
+  if (!quickMenuProfileList) {
+    return false;
+  }
+  const options = [...quickMenuProfileList.querySelectorAll('button')];
+  if (options.length === 0) {
+    return false;
+  }
+  const current = options.indexOf(document.activeElement);
+  let next = current;
+  if (key === 'ArrowDown') {
+    next = current < 0 ? 0 : (current + 1) % options.length;
+  } else if (key === 'ArrowUp') {
+    next = current <= 0 ? options.length - 1 : current - 1;
+  } else if (key === 'Home') {
+    next = 0;
+  } else if (key === 'End') {
+    next = options.length - 1;
+  } else {
+    return false;
+  }
+  for (const option of options) {
+    option.tabIndex = option === options[next] ? 0 : -1;
+  }
+  options[next].focus({ preventScroll: false });
+  return true;
+}
+
+function openQuickMenu() {
+  // Everything in the sheet is session-scoped, so with no session the control
+  // keeps its old meaning and opens settings directly.
+  if (!quickMenuDialog || !activeSession) {
+    openSettingsDialog();
+    return;
+  }
+  renderQuickMenu();
+  updateTermControlsEnabled();
+  if (!quickMenuDialog.open) {
+    quickMenuDialog.showModal();
+    // Focus the sheet, not the close button, so nothing reads as pre-selected.
+    quickMenuDialog.focus({ preventScroll: true });
+  }
+}
+
+function closeQuickMenu() {
+  if (quickMenuDialog?.open) {
+    quickMenuDialog.close();
+  }
 }
 
 function sessionTransportLive() {
@@ -673,14 +1082,46 @@ function updateTermControlsEnabled() {
   } else if (pasteButton && terminalHasCopyableSelection()) {
     pasteButton.disabled = false;
   }
-  if (drawerFindButton) {
-    drawerFindButton.disabled = !live;
-    drawerFindButton.title = live
-      ? 'Find'
-      : 'Connect a session to search scrollback';
-    drawerFindButton.setAttribute(
+  // Reasons go on aria-label too, because a disabled button's title is not
+  // announced — but the accessible name keeps the visible label as a prefix so
+  // voice control still matches what the user reads (WCAG 2.5.3).
+  const describeMenuAction = (button, enabled, detail) => {
+    if (!button) {
+      return;
+    }
+    const visible = button.textContent.trim();
+    const name = detail ? `${visible} — ${detail}` : visible;
+    button.disabled = !enabled;
+    button.title = name;
+    button.setAttribute('aria-label', name);
+  };
+  describeMenuAction(
+    quickMenuFindButton,
+    live,
+    live ? '' : 'connect a session first'
+  );
+  describeMenuAction(
+    quickMenuRenameButton,
+    Boolean(activeSession),
+    activeSession || 'select a session first'
+  );
+  describeMenuAction(
+    quickMenuReconnectButton,
+    Boolean(activeSession),
+    activeSession || 'select a session first'
+  );
+  // With no session the control opens settings directly, so it says so.
+  for (const button of [
+    document.querySelector('#settings'),
+    headerSettingsButton
+  ]) {
+    if (!button) {
+      continue;
+    }
+    button.title = activeSession ? 'Menu' : 'Settings';
+    button.setAttribute(
       'aria-label',
-      live ? 'Find in scrollback' : 'Connect a session to search scrollback'
+      activeSession ? 'Open menu' : 'Open settings'
     );
   }
 }
@@ -730,17 +1171,16 @@ function forceReconnectActiveSession() {
   lastConnectionDetail = `Reconnecting to ${activeSession}…`;
   setConnectionState('connecting', lastConnectionDetail);
   setStatus(lastConnectionDetail, { sticky: true });
-  // Force a fresh socket even if a half-open one exists.
-  intentionalClose = true;
-  if (socket) {
+  // Retire the old socket before close so its callbacks cannot schedule retries.
+  const retiredSocket = socket;
+  socket = null;
+  if (retiredSocket) {
     try {
-      socket.close();
+      retiredSocket.close();
     } catch {
       // Ignore close races.
     }
-    socket = null;
   }
-  intentionalClose = false;
   void connect(activeSession);
 }
 
@@ -755,14 +1195,44 @@ function scheduleHeaderCollapse() {
   }
 }
 
+function headerPickerOpen() {
+  return !appHeaderElement.classList.contains('collapsed');
+}
+
+/**
+ * The scrim only exists to take the dismissing tap away from the session, so
+ * it appears exactly when the picker overlays a live terminal.
+ */
+function syncPickerScrim() {
+  if (!pickerScrimElement) {
+    return;
+  }
+  pickerScrimElement.hidden = !(
+    headerPickerOpen() && activeSession && viewMode !== 'files'
+  );
+}
+
 function setHeaderCollapsed(collapsed) {
   clearTimeout(headerCollapseTimer);
   headerCollapseTimer = null;
+  const hadFocusInside = headerExpandedElement?.contains(document.activeElement);
   appHeaderElement.classList.toggle('collapsed', collapsed);
   headerSummaryButton.setAttribute('aria-expanded', String(!collapsed));
-  if (!collapsed) {
+  if (collapsed) {
+    // Hiding the picker must not leave focus on a display:none control. In
+    // Files mode the summary is hidden too, so focus goes to the view switch.
+    if (hadFocusInside) {
+      const target = headerSummaryButton.offsetParent
+        ? headerSummaryButton
+        : viewModeElement?.querySelector(`[data-view-mode="${viewMode}"]`);
+      target?.focus({ preventScroll: true });
+    }
+  } else {
+    // Picker and tools drawer are both overlays; only one at a time.
+    closeFooterDrawer();
     scheduleHeaderCollapse();
   }
+  syncPickerScrim();
 }
 
 function setCtrlArmed(value) {
@@ -884,38 +1354,12 @@ function sanitizeCustomKeyDef(entry) {
   return null;
 }
 
-function loadCustomKeyDefs() {
-  try {
-    const raw = window.localStorage.getItem(customKeysStorageKey);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    const seen = new Set();
-    const cleaned = [];
-    for (const entry of parsed) {
-      const def = sanitizeCustomKeyDef(entry);
-      if (!def || seen.has(def.id)) {
-        continue;
-      }
-      seen.add(def.id);
-      cleaned.push(def);
-      if (cleaned.length >= maximumCustomKeys) {
-        break;
-      }
-    }
-    return cleaned;
-  } catch {
-    return [];
-  }
-}
-
-function saveCustomKeyDefs(defs) {
+function sanitizeCustomKeyDefs(defs) {
   const cleaned = [];
   const seen = new Set();
+  if (!Array.isArray(defs)) {
+    return cleaned;
+  }
   for (const entry of defs) {
     const def = sanitizeCustomKeyDef(entry);
     if (!def || seen.has(def.id)) {
@@ -927,68 +1371,580 @@ function saveCustomKeyDefs(defs) {
       break;
     }
   }
+  return cleaned;
+}
+
+function loadLegacyCustomKeyDefs() {
   try {
-    window.localStorage.setItem(customKeysStorageKey, JSON.stringify(cleaned));
+    const raw = window.localStorage.getItem(customKeysStorageKey);
+    if (!raw) {
+      return [];
+    }
+    return sanitizeCustomKeyDefs(JSON.parse(raw));
   } catch {
-    // Continue without persistence.
+    return [];
+  }
+}
+
+function sanitizeKeyProfileName(value) {
+  if (typeof value !== 'string') {
+    return '';
+  }
+  return value
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maximumKeyProfileNameLength);
+}
+
+function isValidKeyProfileId(value) {
+  return (
+    value === 'shell' ||
+    (typeof value === 'string' &&
+      /^profile-[a-z0-9]{8,48}$/.test(value))
+  );
+}
+
+function sanitizeShortcutIdsForProfile(ids, customKeys, useDefaults = true) {
+  const customIds = new Set(customKeys.map((entry) => entry.id));
+  const seen = new Set();
+  const cleaned = [];
+  if (Array.isArray(ids)) {
+    for (const id of ids) {
+      const known =
+        typeof id === 'string' &&
+        id !== 'find' &&
+        (Object.hasOwn(builtinShortcutCatalog, id) || customIds.has(id));
+      if (!known || seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
+      cleaned.push(id);
+    }
+  }
+  if (cleaned.length > 0 || !useDefaults) {
+    return cleaned;
+  }
+  return [...defaultShortcutIds];
+}
+
+function sanitizeProfileSnippetIds(ids) {
+  if (ids === null || ids === undefined) {
+    // Legacy profiles showed the whole shared library.
+    return null;
+  }
+  if (!Array.isArray(ids)) {
+    return [];
+  }
+  const seen = new Set();
+  const cleaned = [];
+  for (const id of ids) {
+    if (
+      typeof id !== 'string' ||
+      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ||
+      seen.has(id)
+    ) {
+      continue;
+    }
+    seen.add(id);
+    cleaned.push(id);
+    if (cleaned.length >= maximumProfileSnippetIds) {
+      break;
+    }
   }
   return cleaned;
 }
 
-function getShortcutDef(id) {
+function sanitizeProfilePins(pins, customKeys = []) {
+  const customIds = new Set(customKeys.map((entry) => entry.id));
+  const seen = new Set();
+  const cleaned = [];
+  if (!Array.isArray(pins)) {
+    return cleaned;
+  }
+  for (const entry of pins) {
+    if (
+      !entry ||
+      typeof entry.id !== 'string' ||
+      entry.id.length === 0 ||
+      entry.id.length > 128
+    ) {
+      continue;
+    }
+    const valid =
+      (entry.kind === 'key' &&
+        entry.id !== 'find' &&
+        (Object.hasOwn(builtinShortcutCatalog, entry.id) ||
+          customIds.has(entry.id))) ||
+      entry.kind === 'snip';
+    const identity = `${entry.kind}:${entry.id}`;
+    if (!valid || seen.has(identity)) {
+      continue;
+    }
+    seen.add(identity);
+    cleaned.push({ kind: entry.kind, id: entry.id });
+    if (cleaned.length >= maximumFooterPins) {
+      break;
+    }
+  }
+  return cleaned;
+}
+
+function loadLegacyFooterPins(customKeys) {
+  try {
+    const raw = window.localStorage.getItem(footerPinsStorageKey);
+    return raw
+      ? sanitizeProfilePins(JSON.parse(raw), customKeys)
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function sanitizeKeyProfile(entry, usedIds = new Set()) {
+  if (
+    !entry ||
+    typeof entry !== 'object' ||
+    !isValidKeyProfileId(entry.id) ||
+    usedIds.has(entry.id)
+  ) {
+    return null;
+  }
+  const name = sanitizeKeyProfileName(entry.name);
+  if (!name) {
+    return null;
+  }
+  const customKeys = sanitizeCustomKeyDefs(entry.customKeys);
+  const pins = sanitizeProfilePins(
+    Array.isArray(entry.pins)
+      ? entry.pins
+      : entry.id === 'shell'
+        ? loadLegacyFooterPins(customKeys)
+        : [],
+    customKeys
+  );
+  return {
+    id: entry.id,
+    name,
+    shortcutIds: sanitizeShortcutIdsForProfile(
+      entry.shortcutIds,
+      customKeys
+    ),
+    customKeys,
+    snippetIds: sanitizeProfileSnippetIds(entry.snippetIds),
+    pins
+  };
+}
+
+function loadLegacyShortcutIds(customKeys) {
+  try {
+    const raw = window.localStorage.getItem(shortcutsStorageKey);
+    if (!raw) {
+      return [...defaultShortcutIds];
+    }
+    return sanitizeShortcutIdsForProfile(JSON.parse(raw), customKeys);
+  } catch {
+    return [...defaultShortcutIds];
+  }
+}
+
+function migratedShellKeyProfile() {
+  const customKeys = loadLegacyCustomKeyDefs();
+  return {
+    id: 'shell',
+    name: 'Terminal',
+    shortcutIds: loadLegacyShortcutIds(customKeys),
+    customKeys,
+    snippetIds: null,
+    pins: loadLegacyFooterPins(customKeys)
+  };
+}
+
+function sanitizeKeyProfilesDocument(value) {
+  const usedIds = new Set();
+  const profiles = [];
+  if (value && typeof value === 'object' && Array.isArray(value.profiles)) {
+    for (const entry of value.profiles) {
+      const profile = sanitizeKeyProfile(entry, usedIds);
+      if (!profile) {
+        continue;
+      }
+      usedIds.add(profile.id);
+      profiles.push(profile);
+      if (profiles.length >= maximumKeyProfiles) {
+        break;
+      }
+    }
+  }
+  if (profiles.length === 0) {
+    profiles.push(migratedShellKeyProfile());
+  }
+  const requestedDefault =
+    typeof value?.defaultProfileId === 'string'
+      ? value.defaultProfileId
+      : '';
+  const defaultProfileId = profiles.some(
+    (profile) => profile.id === requestedDefault
+  )
+    ? requestedDefault
+    : profiles.find((profile) => profile.id === 'shell')?.id || profiles[0].id;
+  const starterProfilesVersionValue = Number.isInteger(
+    value?.starterProfilesVersion
+  )
+    ? Math.max(0, value.starterProfilesVersion)
+    : 0;
+  const starterSnippetSelectionsVersionValue = Number.isInteger(
+    value?.starterSnippetSelectionsVersion
+  )
+    ? Math.max(0, value.starterSnippetSelectionsVersion)
+    : 0;
+  return {
+    version: 2,
+    starterProfilesVersion: starterProfilesVersionValue,
+    starterSnippetSelectionsVersion: starterSnippetSelectionsVersionValue,
+    defaultProfileId,
+    profiles
+  };
+}
+
+function withStarterKeyProfiles(documentValue) {
+  if (documentValue.starterProfilesVersion >= starterKeyProfilesVersion) {
+    return documentValue;
+  }
+  const profiles = documentValue.profiles.map((profile) =>
+    profile.id === 'shell' && profile.name === 'Shell'
+      ? { ...profile, name: 'Terminal' }
+      : profile
+  );
+  for (const template of starterKeyProfileTemplates) {
+    if (profiles.length >= maximumKeyProfiles) {
+      break;
+    }
+    const duplicate = profiles.some(
+      (profile) =>
+        profile.id === template.id ||
+        profile.name.toLocaleLowerCase() === template.name.toLocaleLowerCase()
+    );
+    if (duplicate) {
+      continue;
+    }
+    profiles.push({
+      id: template.id,
+      name: template.name,
+      shortcutIds: [...template.shortcutIds],
+      customKeys: [],
+      snippetIds: [...template.snippetIds],
+      pins: template.pins.map((pin) => ({ ...pin }))
+    });
+  }
+  const allStartersHandled = starterKeyProfileTemplates.every((template) =>
+    profiles.some(
+      (profile) =>
+        profile.id === template.id ||
+        profile.name.toLocaleLowerCase() === template.name.toLocaleLowerCase()
+    )
+  );
+  return {
+    ...documentValue,
+    version: 2,
+    starterProfilesVersion: allStartersHandled
+      ? starterKeyProfilesVersion
+      : documentValue.starterProfilesVersion,
+    profiles
+  };
+}
+
+function applyStarterProfileSnippetSelections() {
+  const documentValue = loadKeyProfilesDocument();
+  if (
+    documentValue.starterSnippetSelectionsVersion >=
+    starterProfileSnippetSelectionsVersion
+  ) {
+    return;
+  }
+  const availableIds = new Set(snippetsList.map((snippet) => snippet.id));
+  const selectedIds = starterProfileSnippetCandidateGroups
+    .map((candidates) => candidates.find((id) => availableIds.has(id)))
+    .filter(Boolean);
+  const starterIds = new Set(
+    starterKeyProfileTemplates.map((template) => template.id)
+  );
+  const profiles = documentValue.profiles.map((profile) =>
+    starterIds.has(profile.id)
+      ? { ...profile, snippetIds: [...selectedIds] }
+      : profile
+  );
+  preferencesBootstrapMutation = true;
+  try {
+    saveKeyProfilesDocument({
+      ...documentValue,
+      starterSnippetSelectionsVersion:
+        starterProfileSnippetSelectionsVersion,
+      profiles
+    });
+  } finally {
+    preferencesBootstrapMutation = false;
+  }
+}
+
+function saveKeyProfilesDocument(value) {
+  const cleaned = sanitizeKeyProfilesDocument(value);
+  keyProfilesDocument = cleaned;
+  if (!qaShellMode) {
+    try {
+      window.localStorage.setItem(
+        keyProfilesStorageKey,
+        JSON.stringify(cleaned)
+      );
+    } catch {
+      // Continue with the in-memory profile document.
+    }
+  }
+  noteDurablePreferencesChange();
+  return cleaned;
+}
+
+function loadKeyProfilesDocument() {
+  if (keyProfilesDocument) {
+    return keyProfilesDocument;
+  }
+  try {
+    const raw = window.localStorage.getItem(keyProfilesStorageKey);
+    if (raw) {
+      return saveKeyProfilesDocument(
+        withStarterKeyProfiles(
+          sanitizeKeyProfilesDocument(JSON.parse(raw))
+        )
+      );
+    }
+  } catch {
+    // Migrate from legacy Keys storage below.
+  }
+  markPreferencesBootstrapGenerated();
+  return saveKeyProfilesDocument(
+    withStarterKeyProfiles({
+      version: 2,
+      starterProfilesVersion: 0,
+      starterSnippetSelectionsVersion: 0,
+      defaultProfileId: 'shell',
+      profiles: [migratedShellKeyProfile()]
+    })
+  );
+}
+
+function keyProfileById(id) {
+  return (
+    loadKeyProfilesDocument().profiles.find((profile) => profile.id === id) ||
+    null
+  );
+}
+
+function defaultKeyProfile() {
+  const documentValue = loadKeyProfilesDocument();
+  return (
+    keyProfileById(documentValue.defaultProfileId) ||
+    documentValue.profiles[0]
+  );
+}
+
+function loadSessionKeyProfileAssignments() {
+  if (sessionKeyProfileAssignments) {
+    return { ...sessionKeyProfileAssignments };
+  }
+  try {
+    const raw = window.localStorage.getItem(sessionKeyProfilesStorageKey);
+    if (!raw) {
+      sessionKeyProfileAssignments = {};
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      sessionKeyProfileAssignments = {};
+      return {};
+    }
+    const cleaned = {};
+    for (const [sessionName, profileId] of Object.entries(parsed)) {
+      if (
+        typeof sessionName === 'string' &&
+        sessionName.length > 0 &&
+        sessionName.length <= 128 &&
+        typeof profileId === 'string' &&
+        keyProfileById(profileId)
+      ) {
+        cleaned[sessionName] = profileId;
+      }
+    }
+    sessionKeyProfileAssignments = cleaned;
+    return { ...cleaned };
+  } catch {
+    sessionKeyProfileAssignments = {};
+    return {};
+  }
+}
+
+function saveSessionKeyProfileAssignments(assignments) {
+  const cleaned = {};
+  for (const [sessionName, profileId] of Object.entries(assignments || {})) {
+    if (
+      typeof sessionName === 'string' &&
+      sessionName.length > 0 &&
+      sessionName.length <= 128 &&
+      keyProfileById(profileId)
+    ) {
+      cleaned[sessionName] = profileId;
+    }
+  }
+  sessionKeyProfileAssignments = cleaned;
+  if (!qaShellMode) {
+    try {
+      window.localStorage.setItem(
+        sessionKeyProfilesStorageKey,
+        JSON.stringify(cleaned)
+      );
+    } catch {
+      // Continue without persistence.
+    }
+  }
+  noteDurablePreferencesChange();
+  return { ...cleaned };
+}
+
+function keyProfileForSession(sessionName) {
+  const assignments = loadSessionKeyProfileAssignments();
+  return keyProfileById(assignments[sessionName]) || defaultKeyProfile();
+}
+
+function activeKeyProfile() {
+  return activeSession
+    ? keyProfileForSession(activeSession)
+    : defaultKeyProfile();
+}
+
+function editorKeyProfile() {
+  return keyProfileById(keyProfileEditorId) || activeKeyProfile();
+}
+
+function updateKeyProfile(profileId, updater) {
+  const documentValue = loadKeyProfilesDocument();
+  const nextProfiles = documentValue.profiles.map((profile) => {
+    if (profile.id !== profileId) {
+      return profile;
+    }
+    return updater({
+      ...profile,
+      shortcutIds: [...profile.shortcutIds],
+      customKeys: profile.customKeys.map((entry) => ({ ...entry })),
+      snippetIds:
+        profile.snippetIds === null ? null : [...profile.snippetIds],
+      pins: profile.pins.map((entry) => ({ ...entry }))
+    });
+  });
+  return saveKeyProfilesDocument({
+    ...documentValue,
+    profiles: nextProfiles
+  });
+}
+
+function getShortcutDef(id, profile = activeKeyProfile()) {
   if (typeof id !== 'string') {
     return null;
   }
   if (Object.hasOwn(builtinShortcutCatalog, id)) {
     return builtinShortcutCatalog[id];
   }
-  return loadCustomKeyDefs().find((entry) => entry.id === id) || null;
+  return profile?.customKeys?.find((entry) => entry.id === id) || null;
 }
 
-function isKnownShortcutId(id) {
-  return getShortcutDef(id) !== null;
+function isKnownShortcutId(id, profile = activeKeyProfile()) {
+  return getShortcutDef(id, profile) !== null;
 }
 
-function sanitizeShortcutIds(ids) {
-  if (!Array.isArray(ids)) {
-    return [...defaultShortcutIds];
+function loadCustomKeyDefs(profile = editorKeyProfile()) {
+  return profile?.customKeys?.map((entry) => ({ ...entry })) || [];
+}
+
+function saveCustomKeyDefs(defs, profileId = editorKeyProfile().id) {
+  const cleaned = sanitizeCustomKeyDefs(defs);
+  updateKeyProfile(profileId, (profile) => ({
+    ...profile,
+    customKeys: cleaned,
+    shortcutIds: sanitizeShortcutIdsForProfile(
+      profile.shortcutIds,
+      cleaned
+    )
+  }));
+  return cleaned;
+}
+
+function loadShortcutIds(profile = activeKeyProfile()) {
+  return [...(profile?.shortcutIds || defaultShortcutIds)];
+}
+
+function saveShortcutIds(ids, profileId = editorKeyProfile().id) {
+  const profile = keyProfileById(profileId) || editorKeyProfile();
+  const cleaned = sanitizeShortcutIdsForProfile(ids, profile.customKeys);
+  updateKeyProfile(profile.id, (entry) => ({
+    ...entry,
+    shortcutIds: cleaned
+  }));
+  return cleaned;
+}
+
+function snippetsForProfile(profile = activeKeyProfile()) {
+  if (!profile || profile.snippetIds === null) {
+    return [...snippetsList];
   }
-  const seen = new Set();
-  const cleaned = [];
-  for (const id of ids) {
-    // Drop legacy "find" key and any unknown ids.
-    if (typeof id !== 'string' || id === 'find' || !isKnownShortcutId(id)) {
-      continue;
-    }
-    if (seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    cleaned.push(id);
-  }
-  return cleaned.length > 0 ? cleaned : [...defaultShortcutIds];
+  const included = new Set(profile.snippetIds);
+  return snippetsList.filter((snippet) => included.has(snippet.id));
 }
 
-function loadShortcutIds() {
-  try {
-    const raw = window.localStorage.getItem(shortcutsStorageKey);
-    if (!raw) {
-      return [...defaultShortcutIds];
-    }
-    return sanitizeShortcutIds(JSON.parse(raw));
-  } catch {
-    return [...defaultShortcutIds];
-  }
-}
-
-function saveShortcutIds(ids) {
-  const cleaned = sanitizeShortcutIds(ids);
-  try {
-    window.localStorage.setItem(shortcutsStorageKey, JSON.stringify(cleaned));
-  } catch {
-    // Continue without persistence when browser storage is unavailable.
+function saveProfileSnippetIds(ids, profileId = editorKeyProfile().id) {
+  const previousScrollTop = profileSnippetList?.scrollTop || 0;
+  const cleaned = sanitizeProfileSnippetIds(ids);
+  updateKeyProfile(profileId, (profile) => ({
+    ...profile,
+    snippetIds: cleaned,
+    pins:
+      cleaned === null
+        ? profile.pins
+        : profile.pins.filter(
+            (pin) => pin.kind !== 'snip' || cleaned.includes(pin.id)
+          )
+  }));
+  refreshKeysUi();
+  if (profileSnippetList) {
+    profileSnippetList.scrollTop = previousScrollTop;
   }
   return cleaned;
+}
+
+function reconcileSnippetReferences() {
+  const knownIds = new Set(snippetsList.map((snippet) => snippet.id));
+  const documentValue = loadKeyProfilesDocument();
+  let changed = false;
+  const profiles = documentValue.profiles.map((profile) => {
+    const snippetIds =
+      profile.snippetIds === null
+        ? null
+        : profile.snippetIds.filter((id) => knownIds.has(id));
+    const selectedIds = snippetIds === null ? knownIds : new Set(snippetIds);
+    const pins = profile.pins.filter(
+      (pin) =>
+        pin.kind !== 'snip' ||
+        (knownIds.has(pin.id) && selectedIds.has(pin.id))
+    );
+    if (
+      (snippetIds !== null &&
+        snippetIds.length !== profile.snippetIds.length) ||
+      pins.length !== profile.pins.length
+    ) {
+      changed = true;
+      return { ...profile, snippetIds, pins };
+    }
+    return profile;
+  });
+  if (changed) {
+    saveKeyProfilesDocument({ ...documentValue, profiles });
+  }
 }
 
 function activateShortcut(id) {
@@ -1099,59 +2055,57 @@ function runFind(direction) {
     return Boolean(found);
   } catch (error) {
     clientDebug('find-error', {
-      message: String(error?.message || error).slice(0, 120)
+      errorName: error?.name || 'Error'
     });
     setStatus('Find failed');
     return false;
   }
 }
 
-function loadFooterPins() {
-  try {
-    const raw = window.localStorage.getItem(footerPinsStorageKey);
-    if (!raw) {
-      return [];
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter((entry) => {
-        if (!entry || typeof entry.id !== 'string') {
-          return false;
-        }
-        if (entry.kind === 'key') {
-          // Drop legacy find pins and unknown keys.
-          return entry.id !== 'find' && isKnownShortcutId(entry.id);
-        }
-        return entry.kind === 'snip';
-      })
-      .slice(0, maximumFooterPins);
-  } catch {
-    return [];
-  }
+function loadFooterPins(profile = activeKeyProfile()) {
+  return sanitizeProfilePins(profile?.pins, profile?.customKeys);
 }
 
-function saveFooterPins(pins) {
-  try {
-    window.localStorage.setItem(
-      footerPinsStorageKey,
-      JSON.stringify(pins.slice(0, maximumFooterPins))
+function saveFooterPins(pins, profileId = activeKeyProfile().id) {
+  const profile = keyProfileById(profileId) || activeKeyProfile();
+  const cleaned = sanitizeProfilePins(pins, profile.customKeys);
+  updateKeyProfile(profile.id, (entry) => ({
+    ...entry,
+    pins: cleaned
+  }));
+  return cleaned;
+}
+
+function removeFooterPinFromEveryProfile(kind, id) {
+  const documentValue = loadKeyProfilesDocument();
+  let changed = false;
+  const profiles = documentValue.profiles.map((profile) => {
+    const pins = profile.pins.filter(
+      (pin) => pin.kind !== kind || pin.id !== id
     );
-  } catch {
-    // Continue without persistence.
+    if (pins.length === profile.pins.length) {
+      return profile;
+    }
+    changed = true;
+    return { ...profile, pins };
+  });
+  if (changed) {
+    saveKeyProfilesDocument({ ...documentValue, profiles });
   }
 }
 
-function isPinned(kind, id) {
-  return loadFooterPins().some(
+function isPinned(kind, id, profile = activeKeyProfile()) {
+  return loadFooterPins(profile).some(
     (entry) => entry.kind === kind && entry.id === id
   );
 }
 
-function toggleFooterPin(kind, id) {
-  const pins = loadFooterPins();
+function toggleProfilePin(profileId, kind, id) {
+  const profile = keyProfileById(profileId);
+  if (!profile) {
+    return;
+  }
+  const pins = loadFooterPins(profile);
   const index = pins.findIndex(
     (entry) => entry.kind === kind && entry.id === id
   );
@@ -1163,10 +2117,13 @@ function toggleFooterPin(kind, id) {
       setStatus(`Pin limit ${maximumFooterPins}`);
       return;
     }
-    if (kind === 'key' && !isKnownShortcutId(id)) {
+    if (kind === 'key' && !isKnownShortcutId(id, profile)) {
       return;
     }
-    if (kind === 'snip' && !snippetsList.some((entry) => entry.id === id)) {
+    if (
+      kind === 'snip' &&
+      !snippetsForProfile(profile).some((entry) => entry.id === id)
+    ) {
       return;
     }
     pins.push({ kind, id });
@@ -1181,13 +2138,17 @@ function toggleFooterPin(kind, id) {
       setStatus('Pinned');
     }
   }
-  saveFooterPins(pins);
-  renderFooterPins();
-  renderFooterDrawer();
+  saveFooterPins(pins, profile.id);
+  refreshKeysUi();
+}
+
+function toggleFooterPin(kind, id) {
+  toggleProfilePin(activeKeyProfile().id, kind, id);
 }
 
 function setFooterDrawer(mode) {
-  const next = mode === 'keys' || mode === 'snips' ? mode : null;
+  const next =
+    mode === 'keys' || mode === 'snips' || mode === 'pins' ? mode : null;
   footerDrawer = footerDrawer === next ? null : next;
   if (drawerKeysButton) {
     drawerKeysButton.classList.toggle('active', footerDrawer === 'keys');
@@ -1203,10 +2164,22 @@ function setFooterDrawer(mode) {
       String(footerDrawer === 'snips')
     );
   }
+  if (footerPinOverflowButton) {
+    footerPinOverflowButton.classList.toggle(
+      'active',
+      footerDrawer === 'pins'
+    );
+    footerPinOverflowButton.setAttribute(
+      'aria-pressed',
+      String(footerDrawer === 'pins')
+    );
+  }
   if (footerDrawer === 'snips' && snippetsList.length === 0) {
     void loadSnippetsFromServer();
   }
   renderFooterDrawer();
+  scheduleFooterPinLayout();
+  scheduleLayoutDebug('drawer');
 }
 
 function closeFooterDrawer() {
@@ -1218,10 +2191,14 @@ function closeFooterDrawer() {
   drawerKeysButton?.setAttribute('aria-pressed', 'false');
   drawerSnipsButton?.classList.remove('active');
   drawerSnipsButton?.setAttribute('aria-pressed', 'false');
+  footerPinOverflowButton?.classList.remove('active');
+  footerPinOverflowButton?.setAttribute('aria-pressed', 'false');
   if (footerDrawerElement) {
     footerDrawerElement.hidden = true;
     footerDrawerElement.replaceChildren();
   }
+  scheduleFooterPinLayout();
+  scheduleLayoutDebug('drawer');
 }
 
 function createKeyChipButton(id, options = {}) {
@@ -1279,6 +2256,17 @@ function createSnipChipButton(snippet, options = {}) {
   return button;
 }
 
+/** An open drawer always says something; a blank strip looks broken. */
+function appendDrawerEmptyHint(text) {
+  if (!footerDrawerElement || footerDrawerElement.childElementCount > 0) {
+    return;
+  }
+  const hint = document.createElement('span');
+  hint.className = 'drawer-empty-hint';
+  hint.textContent = text;
+  footerDrawerElement.append(hint);
+}
+
 function renderFooterDrawer() {
   if (!footerDrawerElement) {
     return;
@@ -1299,9 +2287,37 @@ function renderFooterDrawer() {
         footerDrawerElement.append(button);
       }
     }
+    appendDrawerEmptyHint('No keys in this profile');
     return;
   }
-  for (const snippet of snippetsList) {
+  if (footerDrawer === 'pins') {
+    for (const pin of loadFooterPins()) {
+      const button =
+        pin.kind === 'key'
+          ? createKeyChipButton(pin.id, { pinned: true })
+          : createSnipChipButton(
+              snippetsForProfile().find((entry) => entry.id === pin.id),
+              { pinned: true }
+            );
+      if (button) {
+        footerDrawerElement.append(button);
+      }
+    }
+    if (footerSnipsInOverflow) {
+      const snippetsButton = document.createElement('button');
+      snippetsButton.type = 'button';
+      snippetsButton.className = 'drawer-action';
+      snippetsButton.textContent = 'Snips';
+      snippetsButton.title = 'Open profile snippets';
+      snippetsButton.addEventListener('click', () => {
+        setFooterDrawer('snips');
+      });
+      footerDrawerElement.append(snippetsButton);
+    }
+    appendDrawerEmptyHint('No pins in this profile');
+    return;
+  }
+  for (const snippet of snippetsForProfile()) {
     const button = createSnipChipButton(snippet, {
       pinned: isPinned('snip', snippet.id)
     });
@@ -1312,6 +2328,117 @@ function renderFooterDrawer() {
       footerDrawerElement.append(button);
     }
   }
+  appendDrawerEmptyHint('No snippets in this profile');
+}
+
+let footerPinLayoutFrame = 0;
+let footerSnipsInOverflow = false;
+let footerHiddenPinCount = 0;
+
+function updateFooterPinOverflow() {
+  if (
+    !footerPinsElement ||
+    !footerScrollElement ||
+    !footerPinOverflowButton
+  ) {
+    return;
+  }
+  const buttons = [...footerPinsElement.querySelectorAll('button')];
+  const landscapeRail = window.matchMedia?.(
+    '(orientation: landscape) and (pointer: coarse)'
+  ).matches;
+  const overflows = () =>
+    landscapeRail
+      ? footerScrollElement.scrollHeight >
+        footerScrollElement.clientHeight + 1
+      : footerScrollElement.scrollWidth >
+        footerScrollElement.clientWidth + 1;
+  if (
+    (footerDrawer === 'pins' || footerDrawer === 'snips') &&
+    footerSnipsInOverflow
+  ) {
+    const preservedHiddenCount = Math.min(
+      footerHiddenPinCount,
+      Math.max(0, buttons.length - 1)
+    );
+    footerHiddenPinCount = preservedHiddenCount;
+    buttons.forEach((button, index) => {
+      button.hidden =
+        index >= buttons.length - preservedHiddenCount;
+    });
+    let nextHiddenIndex = buttons.length - preservedHiddenCount - 1;
+    while (nextHiddenIndex >= 1 && overflows()) {
+      buttons[nextHiddenIndex].hidden = true;
+      footerHiddenPinCount += 1;
+      nextHiddenIndex -= 1;
+    }
+    drawerSnipsButton.hidden = true;
+    footerPinOverflowButton.hidden = false;
+    footerPinOverflowButton.classList.add('active');
+    footerPinOverflowButton.setAttribute('aria-pressed', 'true');
+    footerPinOverflowButton.textContent = '−';
+    footerPinOverflowButton.title =
+      footerDrawer === 'pins'
+        ? 'Close pinned shortcuts'
+        : 'Close profile snippets';
+    footerPinOverflowButton.setAttribute(
+      'aria-label',
+      footerPinOverflowButton.title
+    );
+    return;
+  }
+  for (const button of buttons) {
+    button.hidden = false;
+  }
+  footerSnipsInOverflow = false;
+  footerHiddenPinCount = 0;
+  drawerSnipsButton.hidden = false;
+  footerPinOverflowButton.classList.remove('active');
+  footerPinOverflowButton.setAttribute('aria-pressed', 'false');
+  footerPinOverflowButton.hidden = true;
+  footerPinOverflowButton.textContent = '+0';
+  if (
+    buttons.length === 0 ||
+    footerScrollElement.clientWidth === 0 ||
+    footerScrollElement.clientHeight === 0
+  ) {
+    return;
+  }
+  if (!overflows()) {
+    return;
+  }
+  footerPinOverflowButton.hidden = false;
+  drawerSnipsButton.hidden = true;
+  footerSnipsInOverflow = true;
+  let hiddenCount = 0;
+  for (let index = buttons.length - 1; index >= 0 && overflows(); index -= 1) {
+    buttons[index].hidden = true;
+    hiddenCount += 1;
+  }
+  footerHiddenPinCount = hiddenCount;
+  if (hiddenCount === 0) {
+    footerPinOverflowButton.textContent = '•••';
+    footerPinOverflowButton.title = 'More terminal tools';
+    footerPinOverflowButton.setAttribute(
+      'aria-label',
+      'Show more terminal tools'
+    );
+    return;
+  }
+  footerPinOverflowButton.textContent = `+${hiddenCount}`;
+  footerPinOverflowButton.title = `${hiddenCount} more pinned shortcuts`;
+  footerPinOverflowButton.setAttribute(
+    'aria-label',
+    `Show ${hiddenCount} more pinned shortcuts`
+  );
+}
+
+function scheduleFooterPinLayout() {
+  cancelAnimationFrame(footerPinLayoutFrame);
+  footerPinLayoutFrame = requestAnimationFrame(() => {
+    footerPinLayoutFrame = 0;
+    updateFooterPinOverflow();
+  });
 }
 
 function renderFooterPins() {
@@ -1327,7 +2454,7 @@ function renderFooterPins() {
       }
       continue;
     }
-    const snippet = snippetsList.find((entry) => entry.id === pin.id);
+    const snippet = snippetsForProfile().find((entry) => entry.id === pin.id);
     if (!snippet) {
       continue;
     }
@@ -1336,6 +2463,7 @@ function renderFooterPins() {
       footerPinsElement.append(button);
     }
   }
+  scheduleFooterPinLayout();
 }
 
 function installChipLongPress(button, { onTap, onHold }) {
@@ -1397,8 +2525,10 @@ function installChipLongPress(button, { onTap, onHold }) {
 }
 
 function setSettingsTab(tabId) {
-  const allowed = new Set(['theme', 'keys', 'snips', 'app']);
-  const active = allowed.has(tabId) ? tabId : 'theme';
+  const migrated =
+    tabId === 'keys' ? 'profiles' : tabId === 'snips' ? 'library' : tabId;
+  const allowed = new Set(['profiles', 'library', 'theme', 'app']);
+  const active = allowed.has(migrated) ? migrated : 'profiles';
   try {
     window.localStorage.setItem(settingsLastTabStorageKey, active);
   } catch {
@@ -1411,28 +2541,40 @@ function setSettingsTab(tabId) {
   document.querySelectorAll('.settings-panel').forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== active;
   });
-  if (active === 'keys') {
+  if (active === 'profiles') {
+    renderKeyProfileControls();
     renderShortcutEditor();
+    renderProfileSnippetSelector();
+    if (snippetsList.length === 0) {
+      void loadSnippetsFromServer();
+    }
   }
-  if (active === 'snips') {
+  if (active === 'library') {
     void loadSnippetsFromServer();
   }
   if (active === 'app') {
     updateInstallSettings();
     updateAppHelpPanel();
+    updatePreferencesSyncUi();
   }
 }
 
 function loadLastSettingsTab() {
   try {
     const tab = window.localStorage.getItem(settingsLastTabStorageKey);
-    if (tab === 'theme' || tab === 'keys' || tab === 'snips' || tab === 'app') {
+    if (tab === 'keys') {
+      return 'profiles';
+    }
+    if (tab === 'snips') {
+      return 'library';
+    }
+    if (tab === 'profiles' || tab === 'library' || tab === 'theme' || tab === 'app') {
       return tab;
     }
   } catch {
     // ignore
   }
-  return 'theme';
+  return 'profiles';
 }
 
 function updateAppHelpPanel() {
@@ -1443,6 +2585,7 @@ function updateAppHelpPanel() {
   help.textContent = [
     `${appDisplayName}.`,
     'Hold a Keys/Snips chip to pin it on the main bar.',
+    'Menu holds the session profile, Find, rename, and reconnect.',
     'Find needs an active session (scrollback search).',
     'Hardware keyboard: when focus is on chrome, keys route to the session;',
     'browser reload chords (Ctrl/Cmd+R, etc.) stay with the browser when not focused in the terminal.'
@@ -1452,6 +2595,12 @@ function updateAppHelpPanel() {
 async function loadAppConfig() {
   try {
     const cfg = await api('/api/config');
+    const shouldFlushClientDebug =
+      cfg?.clientDebug === true && !clientDebugServerEnabled;
+    clientDebugServerEnabled = cfg?.clientDebug === true;
+    if (shouldFlushClientDebug) {
+      shipClientDebugEntries(clientDebugEntries.slice(-20));
+    }
     if (cfg && typeof cfg.appName === 'string' && cfg.appName.trim()) {
       appDisplayName = cfg.appName.trim().slice(0, 64);
       document.title = appDisplayName;
@@ -1519,6 +2668,8 @@ async function loadSnippetsFromServer() {
       snippetsList = Array.isArray(documentValue.snippets)
         ? documentValue.snippets
         : [];
+      applyStarterProfileSnippetSelections();
+      reconcileSnippetReferences();
     } catch (error) {
       snippetsList = [];
       setStatus(error.message || 'Could not load snippets');
@@ -1530,6 +2681,7 @@ async function loadSnippetsFromServer() {
     }
     renderFooterPins();
     renderSnippetEditor();
+    renderProfileSnippetSelector();
     return snippetsList;
   })();
   return snippetsLoadPromise;
@@ -1542,11 +2694,13 @@ async function saveSnippetsToServer(nextList) {
     body: JSON.stringify({ version: 1, snippets: nextList })
   });
   snippetsList = Array.isArray(saved.snippets) ? saved.snippets : nextList;
+  reconcileSnippetReferences();
   if (footerDrawer === 'snips') {
     renderFooterDrawer();
   }
   renderFooterPins();
   renderSnippetEditor();
+  renderProfileSnippetSelector();
   return snippetsList;
 }
 
@@ -1669,6 +2823,8 @@ async function removeSnippet(id) {
   }
   try {
     await saveSnippetsToServer(next);
+    removeFooterPinFromEveryProfile('snip', id);
+    renderFooterPins();
   } catch (error) {
     window.alert(error.message);
   }
@@ -1731,11 +2887,18 @@ async function resetSnippetsToPresets() {
 }
 
 function refreshKeysUi() {
-  if (footerDrawer === 'keys') {
+  if (
+    footerDrawer === 'keys' ||
+    footerDrawer === 'snips' ||
+    footerDrawer === 'pins'
+  ) {
     renderFooterDrawer();
   }
   renderFooterPins();
+  renderHeaderSummary();
+  renderKeyProfileControls();
   renderShortcutEditor();
+  renderProfileSnippetSelector();
   syncCustomKeyFormFields();
 }
 
@@ -1767,14 +2930,366 @@ function createCustomKeyId() {
   return `custom-${random}`;
 }
 
+function createKeyProfileId() {
+  const random =
+    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+  return `profile-${random}`;
+}
+
+function keyProfileNameExists(name, exceptId = '') {
+  const normalized = sanitizeKeyProfileName(name).toLocaleLowerCase();
+  return loadKeyProfilesDocument().profiles.some(
+    (profile) =>
+      profile.id !== exceptId &&
+      profile.name.toLocaleLowerCase() === normalized
+  );
+}
+
+function appendKeyProfileOptions(select) {
+  if (!select) {
+    return;
+  }
+  const documentValue = loadKeyProfilesDocument();
+  select.replaceChildren();
+  for (const profile of documentValue.profiles) {
+    const option = document.createElement('option');
+    option.value = profile.id;
+    option.textContent = profile.name;
+    select.append(option);
+  }
+}
+
+function renderKeyProfileControls() {
+  if (!keyProfileSelect) {
+    return;
+  }
+  const documentValue = loadKeyProfilesDocument();
+  if (!keyProfileById(keyProfileEditorId)) {
+    keyProfileEditorId = activeKeyProfile().id;
+  }
+  appendKeyProfileOptions(keyProfileSelect);
+  keyProfileSelect.value = keyProfileEditorId;
+
+  appendKeyProfileOptions(keyProfileDefaultSelect);
+  if (keyProfileDefaultSelect) {
+    keyProfileDefaultSelect.value = documentValue.defaultProfileId;
+  }
+
+  if (keyProfileNewButton) {
+    keyProfileNewButton.disabled =
+      documentValue.profiles.length >= maximumKeyProfiles;
+  }
+  if (keyProfileDuplicateButton) {
+    keyProfileDuplicateButton.disabled =
+      documentValue.profiles.length >= maximumKeyProfiles;
+  }
+  if (keyProfileDeleteButton) {
+    keyProfileDeleteButton.disabled = documentValue.profiles.length <= 1;
+  }
+  const profile = editorKeyProfile();
+  const visibleSnippetCount = snippetsForProfile(profile).length;
+  if (keyProfileSummary) {
+    keyProfileSummary.textContent = [
+      `${profile.shortcutIds.length} keys`,
+      `${visibleSnippetCount} snippets`,
+      `${profile.pins.length} pinned`
+    ].join(' · ');
+  }
+  if (profileKeyCount) {
+    profileKeyCount.textContent = String(profile.shortcutIds.length);
+  }
+  if (profileSnippetCount) {
+    profileSnippetCount.textContent =
+      profile.snippetIds === null
+        ? `${visibleSnippetCount} · all`
+        : String(visibleSnippetCount);
+  }
+}
+
+function createProfilePinToggle(kind, id, label, profile, options = {}) {
+  const pinned = isPinned(kind, id, profile);
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'settings-profile-pin';
+  button.dataset.action = 'pin';
+  button.classList.toggle('active', pinned);
+  button.disabled = options.disabled === true;
+  button.title = pinned ? `Unpin ${label}` : `Pin ${label} to main bar`;
+  button.setAttribute('aria-label', button.title);
+  button.setAttribute('aria-pressed', String(pinned));
+  button.innerHTML =
+    '<svg viewBox="0 0 20 20" aria-hidden="true">' +
+    '<path d="M7 3h6l-.8 4 2.3 2.3v1.2h-4V17l-1 1-1-1v-6.5h-4V9.3L6.8 7z" />' +
+    '</svg>';
+  return button;
+}
+
+function renderProfileSnippetSelector() {
+  if (!profileSnippetList) {
+    return;
+  }
+  profileSnippetList.replaceChildren();
+  if (snippetsList.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'settings-hint';
+    empty.textContent = 'No Library snippets available.';
+    profileSnippetList.append(empty);
+    return;
+  }
+  const profile = editorKeyProfile();
+  const selected = new Set(
+    profile.snippetIds === null
+      ? snippetsList.map((snippet) => snippet.id)
+      : profile.snippetIds
+  );
+  for (const snippet of snippetsList) {
+    const item = document.createElement('div');
+    item.className = 'settings-profile-snippet-item';
+    item.dataset.snippetId = snippet.id;
+
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = snippet.id;
+    input.checked = selected.has(snippet.id);
+    input.setAttribute(
+      'aria-label',
+      `${input.checked ? 'Remove' : 'Add'} ${snippet.label} from ${profile.name}`
+    );
+
+    const selection = document.createElement('label');
+    selection.className = 'settings-profile-snippet-select';
+
+    const label = document.createElement('span');
+    label.className = 'settings-profile-snippet-label';
+    label.textContent = snippet.label;
+
+    const behavior = document.createElement('span');
+    behavior.className = 'settings-profile-snippet-behavior';
+    behavior.textContent = snippet.run === false ? 'Insert' : 'Run';
+
+    const pin = createProfilePinToggle(
+      'snip',
+      snippet.id,
+      snippet.label,
+      profile,
+      { disabled: !input.checked }
+    );
+
+    selection.append(input, label, behavior);
+    item.append(selection, pin);
+    profileSnippetList.append(item);
+  }
+}
+
+function createKeyProfile() {
+  if (loadKeyProfilesDocument().profiles.length >= maximumKeyProfiles) {
+    setStatus(`Profile limit ${maximumKeyProfiles}`);
+    return;
+  }
+  const proposed = window.prompt('New Key Profile name:', 'New profile');
+  if (proposed === null) {
+    return;
+  }
+  const name = sanitizeKeyProfileName(proposed);
+  if (!name) {
+    setStatus('Profile name required');
+    return;
+  }
+  if (keyProfileNameExists(name)) {
+    setStatus('Profile name already exists');
+    return;
+  }
+  const profile = {
+    id: createKeyProfileId(),
+    name,
+    shortcutIds: [...defaultShortcutIds],
+    customKeys: [],
+    snippetIds: [],
+    pins: []
+  };
+  const documentValue = loadKeyProfilesDocument();
+  saveKeyProfilesDocument({
+    ...documentValue,
+    profiles: [...documentValue.profiles, profile]
+  });
+  keyProfileEditorId = profile.id;
+  setStatus(`Created profile: ${name}`);
+  refreshKeysUi();
+}
+
+function duplicateKeyProfile() {
+  const source = editorKeyProfile();
+  const documentValue = loadKeyProfilesDocument();
+  if (documentValue.profiles.length >= maximumKeyProfiles) {
+    setStatus(`Profile limit ${maximumKeyProfiles}`);
+    return;
+  }
+  const proposed = window.prompt(
+    'Duplicate Key Profile as:',
+    `${source.name} copy`
+  );
+  if (proposed === null) {
+    return;
+  }
+  const name = sanitizeKeyProfileName(proposed);
+  if (!name || keyProfileNameExists(name)) {
+    setStatus(name ? 'Profile name already exists' : 'Profile name required');
+    return;
+  }
+  const idMap = new Map();
+  const customKeys = source.customKeys.map((entry) => {
+    const id = createCustomKeyId();
+    idMap.set(entry.id, id);
+    return { ...entry, id };
+  });
+  const profile = {
+    id: createKeyProfileId(),
+    name,
+    shortcutIds: source.shortcutIds.map((id) => idMap.get(id) || id),
+    customKeys,
+    snippetIds:
+      source.snippetIds === null ? null : [...source.snippetIds],
+    pins: source.pins.map((pin) => ({
+      ...pin,
+      id: pin.kind === 'key' ? idMap.get(pin.id) || pin.id : pin.id
+    }))
+  };
+  saveKeyProfilesDocument({
+    ...documentValue,
+    profiles: [...documentValue.profiles, profile]
+  });
+  keyProfileEditorId = profile.id;
+  setStatus(`Duplicated profile: ${name}`);
+  refreshKeysUi();
+}
+
+function renameKeyProfile() {
+  const profile = editorKeyProfile();
+  const proposed = window.prompt('Rename Key Profile:', profile.name);
+  if (proposed === null) {
+    return;
+  }
+  const name = sanitizeKeyProfileName(proposed);
+  if (!name) {
+    setStatus('Profile name required');
+    return;
+  }
+  if (keyProfileNameExists(name, profile.id)) {
+    setStatus('Profile name already exists');
+    return;
+  }
+  updateKeyProfile(profile.id, (entry) => ({ ...entry, name }));
+  renderSessions();
+  setStatus(`Renamed profile: ${name}`);
+  refreshKeysUi();
+}
+
+function deleteKeyProfile() {
+  const profile = editorKeyProfile();
+  const documentValue = loadKeyProfilesDocument();
+  if (
+    documentValue.profiles.length <= 1 ||
+    !window.confirm(`Delete Key Profile “${profile.name}”?`)
+  ) {
+    return;
+  }
+  const profiles = documentValue.profiles.filter(
+    (entry) => entry.id !== profile.id
+  );
+  const defaultProfileId =
+    documentValue.defaultProfileId === profile.id
+      ? profiles.find((entry) => entry.id === 'shell')?.id || profiles[0].id
+      : documentValue.defaultProfileId;
+  saveKeyProfilesDocument(
+    withStarterKeyProfiles({
+      ...documentValue,
+      defaultProfileId,
+      profiles
+    })
+  );
+  const assignments = loadSessionKeyProfileAssignments();
+  for (const [sessionName, profileId] of Object.entries(assignments)) {
+    if (profileId === profile.id) {
+      delete assignments[sessionName];
+    }
+  }
+  saveSessionKeyProfileAssignments(assignments);
+  keyProfileEditorId = defaultProfileId;
+  setCtrlArmed(false);
+  renderSessions();
+  setStatus(`Deleted profile: ${profile.name}`);
+  refreshKeysUi();
+}
+
+function selectKeyProfileForEditor(profileId) {
+  if (!keyProfileById(profileId)) {
+    return;
+  }
+  keyProfileEditorId = profileId;
+  renderKeyProfileControls();
+  renderShortcutEditor();
+  renderProfileSnippetSelector();
+}
+
+function setDefaultKeyProfile(profileId) {
+  if (!keyProfileById(profileId)) {
+    return;
+  }
+  const documentValue = loadKeyProfilesDocument();
+  saveKeyProfilesDocument({
+    ...documentValue,
+    defaultProfileId: profileId
+  });
+  renderSessions();
+  setStatus(`Default profile: ${keyProfileById(profileId).name}`);
+  refreshKeysUi();
+}
+
+function assignActiveSessionKeyProfile(profileId) {
+  if (!activeSession) {
+    return;
+  }
+  const assignments = loadSessionKeyProfileAssignments();
+  if (profileId && keyProfileById(profileId)) {
+    assignments[activeSession] = profileId;
+  } else {
+    delete assignments[activeSession];
+  }
+  saveSessionKeyProfileAssignments(assignments);
+  keyProfileEditorId = activeKeyProfile().id;
+  setCtrlArmed(false);
+  renderSessions();
+  setStatus(`${activeSession}: ${activeKeyProfile().name} profile`);
+  refreshKeysUi();
+}
+
+function syncActiveKeyProfileUi() {
+  keyProfileEditorId = activeKeyProfile().id;
+  setCtrlArmed(false);
+  refreshKeysUi();
+}
+
+function renameSessionKeyProfileAssignment(fromName, toName) {
+  const assignments = loadSessionKeyProfileAssignments();
+  if (!assignments[fromName]) {
+    return;
+  }
+  assignments[toName] = assignments[fromName];
+  delete assignments[fromName];
+  saveSessionKeyProfileAssignments(assignments);
+}
+
 function renderShortcutEditor() {
   if (!shortcutEditorList || !shortcutAddSelect) {
     return;
   }
-  const ids = loadShortcutIds();
+  const profile = editorKeyProfile();
+  const ids = loadShortcutIds(profile);
   shortcutEditorList.replaceChildren();
   ids.forEach((id, index) => {
-    const def = getShortcutDef(id);
+    const def = getShortcutDef(id, profile);
     if (!def) {
       return;
     }
@@ -1789,12 +3304,23 @@ function renderShortcutEditor() {
     const actions = document.createElement('div');
     actions.className = 'shortcut-editor-actions';
 
+    const pin = createProfilePinToggle('key', id, def.label, profile);
+
+    const more = document.createElement('details');
+    more.className = 'shortcut-editor-more';
+    const moreSummary = document.createElement('summary');
+    moreSummary.title = `Manage ${def.label}`;
+    moreSummary.setAttribute('aria-label', `Manage ${def.label}`);
+    moreSummary.textContent = '•••';
+    const moreActions = document.createElement('div');
+    moreActions.className = 'shortcut-editor-more-actions';
+
     const up = document.createElement('button');
     up.type = 'button';
     up.dataset.action = 'up';
     up.title = 'Move up';
     up.setAttribute('aria-label', `Move ${def.label} up`);
-    up.textContent = '↑';
+    up.textContent = 'Move up';
     up.disabled = index === 0;
 
     const down = document.createElement('button');
@@ -1802,7 +3328,7 @@ function renderShortcutEditor() {
     down.dataset.action = 'down';
     down.title = 'Move down';
     down.setAttribute('aria-label', `Move ${def.label} down`);
-    down.textContent = '↓';
+    down.textContent = 'Move down';
     down.disabled = index === ids.length - 1;
 
     const remove = document.createElement('button');
@@ -1812,9 +3338,11 @@ function renderShortcutEditor() {
       ? 'Remove from Keys and delete custom key'
       : 'Remove from Keys';
     remove.setAttribute('aria-label', `Remove ${def.label}`);
-    remove.textContent = '×';
+    remove.textContent = 'Remove';
 
-    actions.append(up, down, remove);
+    moreActions.append(up, down, remove);
+    more.append(moreSummary, moreActions);
+    actions.append(pin, more);
     item.append(label, actions);
     shortcutEditorList.append(item);
   });
@@ -1841,7 +3369,9 @@ function renderShortcutEditor() {
     }
   }
 
-  const customDefs = loadCustomKeyDefs().filter((entry) => !active.has(entry.id));
+  const customDefs = loadCustomKeyDefs(profile).filter(
+    (entry) => !active.has(entry.id)
+  );
   if (customDefs.length > 0) {
     const optgroup = document.createElement('optgroup');
     optgroup.label = 'Custom';
@@ -1874,7 +3404,8 @@ function renderShortcutEditor() {
 }
 
 function moveShortcut(id, delta) {
-  const ids = loadShortcutIds();
+  const profile = editorKeyProfile();
+  const ids = loadShortcutIds(profile);
   const index = ids.indexOf(id);
   if (index < 0) {
     return;
@@ -1886,42 +3417,48 @@ function moveShortcut(id, delta) {
   const copy = [...ids];
   const [item] = copy.splice(index, 1);
   copy.splice(next, 0, item);
-  saveShortcutIds(copy);
+  saveShortcutIds(copy, profile.id);
   refreshKeysUi();
 }
 
 function removeShortcut(id) {
-  const ids = loadShortcutIds().filter((entry) => entry !== id);
-  saveShortcutIds(ids);
+  const profile = editorKeyProfile();
+  const ids = loadShortcutIds(profile).filter((entry) => entry !== id);
+  saveShortcutIds(ids, profile.id);
   if (id === 'ctrl') {
     ctrlArmed = false;
   }
   // Removing a custom key also deletes its definition (re-create if needed).
   if (isCustomKeyId(id)) {
-    saveCustomKeyDefs(loadCustomKeyDefs().filter((entry) => entry.id !== id));
-    const pins = loadFooterPins().filter(
+    saveCustomKeyDefs(
+      loadCustomKeyDefs(profile).filter((entry) => entry.id !== id),
+      profile.id
+    );
+    const pins = loadFooterPins(profile).filter(
       (pin) => !(pin.kind === 'key' && pin.id === id)
     );
-    saveFooterPins(pins);
+    saveFooterPins(pins, profile.id);
   }
   refreshKeysUi();
 }
 
 function addShortcut(id) {
-  if (!isKnownShortcutId(id)) {
+  const profile = editorKeyProfile();
+  if (!isKnownShortcutId(id, profile)) {
     return;
   }
-  const ids = loadShortcutIds();
+  const ids = loadShortcutIds(profile);
   if (ids.includes(id)) {
     return;
   }
   ids.push(id);
-  saveShortcutIds(ids);
+  saveShortcutIds(ids, profile.id);
   refreshKeysUi();
 }
 
 function addCustomKeyFromForm() {
-  if (loadCustomKeyDefs().length >= maximumCustomKeys) {
+  const profile = editorKeyProfile();
+  if (loadCustomKeyDefs(profile).length >= maximumCustomKeys) {
     setStatus(`Custom key limit ${maximumCustomKeys}`);
     return;
   }
@@ -1988,12 +3525,12 @@ function addCustomKeyFromForm() {
     setStatus('Could not save custom key');
     return;
   }
-  const nextDefs = [...loadCustomKeyDefs(), cleaned];
-  saveCustomKeyDefs(nextDefs);
-  const ids = loadShortcutIds();
+  const nextDefs = [...loadCustomKeyDefs(profile), cleaned];
+  saveCustomKeyDefs(nextDefs, profile.id);
+  const ids = loadShortcutIds(keyProfileById(profile.id));
   if (!ids.includes(cleaned.id)) {
     ids.push(cleaned.id);
-    saveShortcutIds(ids);
+    saveShortcutIds(ids, profile.id);
   }
   if (customKeyLabelInput) {
     customKeyLabelInput.value = '';
@@ -2006,7 +3543,14 @@ function addCustomKeyFromForm() {
 }
 
 function resetShortcuts() {
-  saveShortcutIds([...defaultShortcutIds]);
+  const profile = editorKeyProfile();
+  const starter = starterKeyProfileTemplates.find(
+    (template) => template.id === profile.id
+  );
+  saveShortcutIds(
+    [...(starter?.shortcutIds || defaultShortcutIds)],
+    profile.id
+  );
   // Keep custom key definitions; only reset which chips are active to defaults.
   ctrlArmed = false;
   refreshKeysUi();
@@ -2089,6 +3633,27 @@ function terminalHasCopyableSelection() {
 
 const clientDebugEntries = [];
 const maximumClientDebugEntries = 250;
+let clientDebugServerEnabled = false;
+let layoutDebugFrame = null;
+let layoutDebugReason = 'initial';
+let lastLayoutDebugSignature = '';
+
+function shipClientDebugEntries(entries) {
+  if (!clientDebugServerEnabled || entries.length === 0) {
+    return;
+  }
+  try {
+    fetch('/api/client-debug', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ entries }),
+      keepalive: true
+    }).catch(() => {});
+  } catch {
+    // Ignore transport failures.
+  }
+}
 
 function clientDebug(event, detail = {}) {
   const entry = {
@@ -2108,29 +3673,88 @@ function clientDebug(event, detail = {}) {
   } catch {
     // Ignore console failures.
   }
-  // Best-effort ship to the server so we can inspect after a device test.
-  try {
-    fetch('/api/client-debug', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ entries: [entry] }),
-      keepalive: true
-    }).catch(() => {});
-  } catch {
-    // Ignore transport failures.
+  if (!clientDebugServerEnabled) {
+    return;
   }
+  // Best-effort ship metadata to the bounded, opt-in server log.
+  shipClientDebugEntries([entry]);
+}
+
+function layoutDebugSnapshot(reason) {
+  const root = document.documentElement;
+  const rootStyle = window.getComputedStyle(root);
+  const headerBounds = appHeaderElement.getBoundingClientRect();
+  const mainBounds = document.querySelector('main').getBoundingClientRect();
+  const footerBounds = document.querySelector('footer').getBoundingClientRect();
+  const terminalBounds = terminalElement.getBoundingClientRect();
+  const cssPixels = (name) =>
+    Math.round(Number.parseFloat(rootStyle.getPropertyValue(name)) || 0);
+  return {
+    reason,
+    viewportWidth: Math.round(window.visualViewport?.width || window.innerWidth),
+    viewportHeight: Math.round(
+      window.visualViewport?.height || window.innerHeight
+    ),
+    layoutWidth: Math.round(root.clientWidth || window.innerWidth),
+    layoutHeight: Math.round(root.clientHeight || window.innerHeight),
+    orientation: window.matchMedia('(orientation: landscape)').matches
+      ? 'landscape'
+      : 'portrait',
+    pointer: window.matchMedia('(hover: none) and (pointer: coarse)').matches
+      ? 'coarse'
+      : 'fine',
+    displayMode: root.dataset.displayMode || 'browser',
+    viewMode,
+    keyboardOpen: root.classList.contains('keyboard-open'),
+    drawerOpen: !footerDrawerElement?.hidden,
+    safeTop: cssPixels('--safe-top'),
+    safeRight: cssPixels('--safe-right'),
+    safeBottom: cssPixels('--safe-bottom'),
+    safeLeft: cssPixels('--safe-left'),
+    headerWidth: Math.round(headerBounds.width),
+    headerHeight: Math.round(headerBounds.height),
+    mainWidth: Math.round(mainBounds.width),
+    mainHeight: Math.round(mainBounds.height),
+    footerWidth: Math.round(footerBounds.width),
+    footerHeight: Math.round(footerBounds.height),
+    terminalWidth: Math.round(terminalBounds.width),
+    terminalHeight: Math.round(terminalBounds.height)
+  };
+}
+
+function scheduleLayoutDebug(reason = 'viewport') {
+  layoutDebugReason = reason;
+  if (layoutDebugFrame !== null) {
+    return;
+  }
+  layoutDebugFrame = window.requestAnimationFrame(() => {
+    layoutDebugFrame = null;
+    const snapshot = layoutDebugSnapshot(layoutDebugReason);
+    const signature = JSON.stringify({ ...snapshot, reason: undefined });
+    if (signature === lastLayoutDebugSignature) {
+      return;
+    }
+    lastLayoutDebugSignature = signature;
+    clientDebug('layout', snapshot);
+  });
 }
 
 function selectionDebugSnapshot(extra = {}) {
   const position = terminal?.getSelectionPosition?.() || null;
   const apiText = terminal?.getSelection?.() || '';
+  const range = position
+    ? {
+        selectionStartColumn: position.start?.x,
+        selectionStartRow: position.start?.y,
+        selectionEndColumn: position.end?.x,
+        selectionEndRow: position.end?.y
+      }
+    : {};
   return {
     hasSelection: Boolean(terminal?.hasSelection?.()),
     apiLength: apiText.length,
     apiLines: apiText ? apiText.split('\n').length : 0,
-    apiPreview: apiText.slice(0, 48).replace(/[^\x20-\x7E\n]/g, '?'),
-    position,
+    ...range,
     holdKeyboardLayoutForSelection,
     xtermTouchSelecting,
     ...extra
@@ -2743,6 +4367,15 @@ function handleHardwareKeyboardBridge(event) {
     closeFindBar();
     return;
   }
+  // Then the session picker, which is an overlay in portrait. Focus inside the
+  // terminal or another UI capture target already returned above, so Escape
+  // still reaches the PTY and dialogs.
+  if (event.key === 'Escape' && headerPickerOpen()) {
+    event.preventDefault();
+    event.stopPropagation();
+    setHeaderCollapsed(true);
+    return;
+  }
   // Ctrl/Cmd+F is handled by the global find listener; skip here.
   if (
     (event.key === 'f' || event.key === 'F') &&
@@ -2825,10 +4458,44 @@ function hideScrollPosition() {
   scrollThumbElement.classList.remove('visible');
 }
 
+function clampTerminalScrollBounds() {
+  if (!terminal || terminalElement.hidden) {
+    return;
+  }
+  const buffer = terminal.buffer.active;
+  if (buffer.viewportY < 0) {
+    terminal.scrollToLine(0);
+  } else if (buffer.viewportY > buffer.baseY) {
+    terminal.scrollToBottom();
+  }
+}
+
+function scrollTerminalLinesClamped(lineDelta) {
+  if (!terminal || terminalElement.hidden || !Number.isFinite(lineDelta)) {
+    return;
+  }
+  const buffer = terminal.buffer.active;
+  terminal.scrollToLine(
+    Math.max(0, Math.min(buffer.baseY, buffer.viewportY + lineDelta))
+  );
+  scheduleTerminalScrollClamp();
+}
+
+function scheduleTerminalScrollClamp() {
+  if (terminalScrollClampFrame !== null) {
+    return;
+  }
+  terminalScrollClampFrame = window.requestAnimationFrame(() => {
+    terminalScrollClampFrame = null;
+    clampTerminalScrollBounds();
+  });
+}
+
 function showScrollPosition(viewportY) {
   if (!terminal) {
     return;
   }
+  scheduleTerminalScrollClamp();
   const buffer = terminal.buffer.active;
   const trackHeight = Math.max(0, terminalElement.clientHeight - 20);
   if (buffer.length <= terminal.rows || trackHeight === 0) {
@@ -2905,6 +4572,12 @@ function resolveThemeName(name) {
 }
 
 function rememberedTerminalThemeName() {
+  if (
+    globalTerminalThemeName &&
+    Object.hasOwn(terminalThemes, globalTerminalThemeName)
+  ) {
+    return globalTerminalThemeName;
+  }
   try {
     const value = resolveThemeName(
       window.localStorage.getItem(terminalThemeStorageKey)
@@ -2919,26 +4592,53 @@ function rememberedTerminalThemeName() {
 }
 
 function loadSessionThemes() {
+  if (sessionThemesMemory) {
+    return { ...sessionThemesMemory };
+  }
   try {
     const raw = window.localStorage.getItem(sessionThemeStorageKey);
     if (!raw) {
       return {};
     }
     const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? parsed
-      : {};
+    sessionThemesMemory = sanitizeSessionThemes(parsed);
+    return { ...sessionThemesMemory };
   } catch {
+    sessionThemesMemory = {};
     return {};
   }
 }
 
+function sanitizeSessionThemes(map) {
+  const cleaned = {};
+  if (!map || typeof map !== 'object' || Array.isArray(map)) {
+    return cleaned;
+  }
+  for (const [sessionName, themeName] of Object.entries(map)) {
+    const resolved = resolveThemeName(themeName);
+    if (
+      /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(sessionName) &&
+      Object.hasOwn(terminalThemes, resolved)
+    ) {
+      cleaned[sessionName] = resolved;
+    }
+  }
+  return cleaned;
+}
+
 function saveSessionThemes(map) {
+  const cleaned = sanitizeSessionThemes(map);
+  sessionThemesMemory = cleaned;
   try {
-    window.localStorage.setItem(sessionThemeStorageKey, JSON.stringify(map));
+    window.localStorage.setItem(
+      sessionThemeStorageKey,
+      JSON.stringify(cleaned)
+    );
   } catch {
     // Continue without persistence when browser storage is unavailable.
   }
+  noteDurablePreferencesChange();
+  return cleaned;
 }
 
 function themeForSession(sessionName) {
@@ -2991,6 +4691,146 @@ function populateThemeSelect() {
   terminalThemeElement.value = terminalThemeName;
 }
 
+const terminalThemeAccentKeys = {
+  matrix: 'cursor',
+  groknight: 'magenta',
+  tokyonight: 'blue',
+  rosepine: 'magenta',
+  oscura: 'blue',
+  dracula: 'magenta',
+  solarized: 'blue',
+  nord: 'blue',
+  monokai: 'magenta',
+  gruvbox: 'yellow'
+};
+
+function mixHexColors(base, overlay, overlayWeight) {
+  const parse = (value) => {
+    const match = /^#([0-9a-f]{6})$/i.exec(value || '');
+    if (!match) {
+      return null;
+    }
+    const packed = Number.parseInt(match[1], 16);
+    return [
+      (packed >> 16) & 255,
+      (packed >> 8) & 255,
+      packed & 255
+    ];
+  };
+  const baseRgb = parse(base);
+  const overlayRgb = parse(overlay);
+  if (!baseRgb || !overlayRgb) {
+    return base;
+  }
+  const weight = Math.max(0, Math.min(1, overlayWeight));
+  const mixed = baseRgb.map((channel, index) =>
+    Math.round(channel + (overlayRgb[index] - channel) * weight)
+  );
+  return `#${mixed
+    .map((channel) => channel.toString(16).padStart(2, '0'))
+    .join('')}`;
+}
+
+function hexColorContrast(foreground, background) {
+  const luminance = (value) => {
+    const match = /^#([0-9a-f]{6})$/i.exec(value || '');
+    if (!match) {
+      return 0;
+    }
+    const packed = Number.parseInt(match[1], 16);
+    const channels = [
+      (packed >> 16) & 255,
+      (packed >> 8) & 255,
+      packed & 255
+    ].map((channel) => {
+      const normalized = channel / 255;
+      return normalized <= 0.04045
+        ? normalized / 12.92
+        : ((normalized + 0.055) / 1.055) ** 2.4;
+    });
+    return (
+      0.2126 * channels[0] +
+      0.7152 * channels[1] +
+      0.0722 * channels[2]
+    );
+  };
+  const foregroundLuminance = luminance(foreground);
+  const backgroundLuminance = luminance(background);
+  return (
+    (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) /
+    (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+  );
+}
+
+function ensureHexColorContrast(
+  foreground,
+  background,
+  minimumRatio,
+  target = '#ffffff'
+) {
+  if (hexColorContrast(foreground, background) >= minimumRatio) {
+    return foreground;
+  }
+  for (let step = 1; step <= 20; step += 1) {
+    const candidate = mixHexColors(foreground, target, step / 20);
+    if (hexColorContrast(candidate, background) >= minimumRatio) {
+      return candidate;
+    }
+  }
+  return target;
+}
+
+function applyAppTheme(themeName) {
+  const theme = terminalThemes[themeName];
+  const accentKey = terminalThemeAccentKeys[themeName] || 'cursor';
+  const accent = theme[accentKey] || theme.cursor || theme.foreground;
+  const raisedSurface = mixHexColors(
+    theme.background,
+    theme.foreground,
+    0.08
+  );
+  const accentSurface = mixHexColors(theme.background, accent, 0.24);
+  const danger = theme.brightRed || theme.red;
+  const dangerSurface = mixHexColors(theme.background, danger, 0.18);
+  const root = document.documentElement;
+  const variables = {
+    '--terminal-bg': theme.background,
+    '--surface': theme.background,
+    '--surface-raised': raisedSurface,
+    '--surface-deep': mixHexColors(theme.background, '#000000', 0.14),
+    '--surface-pressed': mixHexColors(theme.background, theme.foreground, 0.15),
+    '--border': mixHexColors(theme.background, theme.foreground, 0.18),
+    '--control-border': mixHexColors(theme.background, theme.foreground, 0.25),
+    '--muted': ensureHexColorContrast(
+      mixHexColors(theme.background, theme.foreground, 0.62),
+      raisedSurface,
+      3
+    ),
+    '--text': mixHexColors(theme.foreground, '#ffffff', 0.08),
+    '--text-strong': mixHexColors(theme.foreground, '#ffffff', 0.22),
+    '--accent': accent,
+    '--accent-surface': accentSurface,
+    '--accent-text': ensureHexColorContrast(
+      mixHexColors(theme.foreground, accent, 0.22),
+      accentSurface,
+      4.5
+    ),
+    '--danger': ensureHexColorContrast(
+      danger,
+      dangerSurface,
+      4.5
+    ),
+    '--danger-surface': dangerSurface,
+    '--focus-ring': mixHexColors(accent, '#ffffff', 0.24)
+  };
+  for (const [property, value] of Object.entries(variables)) {
+    root.style.setProperty(property, value);
+  }
+  document
+    .querySelector('meta[name="theme-color"]')
+    ?.setAttribute('content', theme.background);
+}
+
 function applyTerminalTheme(name, options = {}) {
   const persist = options.persist !== false;
   const resolved = resolveThemeName(name);
@@ -3004,11 +4844,11 @@ function applyTerminalTheme(name, options = {}) {
   if (terminal) {
     terminal.options.theme = terminalThemes[resolved];
   }
-  const background = terminalThemes[resolved].background;
-  document.documentElement.style.setProperty('--terminal-bg', background);
+  applyAppTheme(resolved);
   if (!persist) {
     return;
   }
+  globalTerminalThemeName = resolved;
   try {
     window.localStorage.setItem(terminalThemeStorageKey, resolved);
   } catch {
@@ -3017,6 +4857,7 @@ function applyTerminalTheme(name, options = {}) {
   if (activeSession) {
     rememberSessionTheme(activeSession, resolved);
   }
+  noteDurablePreferencesChange();
 }
 
 function runningAsInstalledWebApp() {
@@ -3025,6 +4866,149 @@ function runningAsInstalledWebApp() {
     window.matchMedia('(display-mode: standalone)').matches ||
     window.matchMedia('(display-mode: fullscreen)').matches
   );
+}
+
+const viewportMetaCoverContent =
+  'width=device-width, initial-scale=1, viewport-fit=cover';
+const viewportMetaInsetContent =
+  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no';
+
+function currentDisplayMode() {
+  return runningAsInstalledWebApp() ? 'standalone' : 'browser';
+}
+
+/**
+ * Browser tabs keep viewport-fit=cover. Installed PWAs drop cover and shift
+ * the footer with an effective safe-area inset (see updateEffectiveSafeAreaInsets).
+ */
+function applyViewportFitPolicy() {
+  const meta = document.querySelector('meta[name="viewport"]');
+  const installed = runningAsInstalledWebApp();
+  const useCover = !installed;
+  if (meta) {
+    meta.setAttribute(
+      'content',
+      useCover ? viewportMetaCoverContent : viewportMetaInsetContent
+    );
+  }
+  document.documentElement.classList.toggle('viewport-cover', useCover);
+  document.documentElement.classList.toggle('viewport-no-cover', !useCover);
+  document.documentElement.dataset.displayMode = currentDisplayMode();
+  updateEffectiveSafeAreaInsets();
+  return { useCover, installed };
+}
+
+/**
+ * Read env(safe-area-inset-*) via a probe (more reliable than parsing CSS vars).
+ */
+function measureEnvSafeAreaInsets() {
+  if (!document.body) {
+    return { top: 0, right: 0, bottom: 0, left: 0 };
+  }
+  const probe = document.createElement('div');
+  probe.setAttribute('aria-hidden', 'true');
+  probe.style.cssText = [
+    'position:fixed',
+    'left:0',
+    'top:0',
+    'width:0',
+    'height:0',
+    'padding-top:env(safe-area-inset-top, 0px)',
+    'padding-right:env(safe-area-inset-right, 0px)',
+    'padding-bottom:env(safe-area-inset-bottom, 0px)',
+    'padding-left:env(safe-area-inset-left, 0px)',
+    'visibility:hidden',
+    'pointer-events:none'
+  ].join(';');
+  document.body.appendChild(probe);
+  const style = window.getComputedStyle(probe);
+  const insets = {
+    top: Math.max(0, Math.round(Number.parseFloat(style.paddingTop) || 0)),
+    right: Math.max(0, Math.round(Number.parseFloat(style.paddingRight) || 0)),
+    bottom: Math.max(0, Math.round(Number.parseFloat(style.paddingBottom) || 0)),
+    left: Math.max(0, Math.round(Number.parseFloat(style.paddingLeft) || 0))
+  };
+  probe.remove();
+  return insets;
+}
+
+function isLikelyIphoneWithHomeIndicator() {
+  const ua = navigator.userAgent || '';
+  const iPhone = /iPhone|iPod/.test(ua);
+  const iPadOsDesktopUa =
+    navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+  if (!iPhone && !iPadOsDesktopUa) {
+    return false;
+  }
+  const longSide = Math.max(
+    window.screen?.width || 0,
+    window.screen?.height || 0
+  );
+  // iPhone X+ logical min height is 812.
+  return longSide >= 812;
+}
+
+/**
+ * When standalone + no cover, iOS often reports safe-area-inset-bottom as 0
+ * even though the home indicator still overlaps the bottom of the webview.
+ * Use env when present; otherwise a conservative synthetic inset.
+ */
+function estimateEffectiveSafeBottom(envInsets) {
+  // Keyboard already owns the bottom edge — never stack home-indicator pad.
+  if (document.documentElement.classList.contains('keyboard-open')) {
+    return { bottom: 0, source: 'keyboard-open' };
+  }
+  const envBottom = envInsets?.bottom || 0;
+  if (envBottom > 0) {
+    return { bottom: envBottom, source: 'env' };
+  }
+  if (!runningAsInstalledWebApp()) {
+    return { bottom: 0, source: 'env-zero' };
+  }
+  // Prefer known home-indicator size on notched iPhones.
+  if (isLikelyIphoneWithHomeIndicator()) {
+    return { bottom: 34, source: 'iphone-home-indicator' };
+  }
+  const screenH = Math.round(window.screen?.height || 0);
+  const layoutH = Math.round(
+    window.innerHeight || document.documentElement.clientHeight || 0
+  );
+  const gap = Math.max(0, screenH - layoutH);
+  if (gap >= 50) {
+    const guess = Math.min(40, Math.max(20, Math.round(gap * 0.45)));
+    return { bottom: guess, source: `screen-gap:${gap}` };
+  }
+  return { bottom: 0, source: 'none' };
+}
+
+function updateEffectiveSafeAreaInsets() {
+  const env = measureEnvSafeAreaInsets();
+  const estimated = estimateEffectiveSafeBottom(env);
+  const keyboardOpen = document.documentElement.classList.contains(
+    'keyboard-open'
+  );
+  const effectiveBottom = keyboardOpen ? 0 : estimated.bottom;
+  const root = document.documentElement;
+  root.style.setProperty('--safe-bottom-env', `${env.bottom}px`);
+  root.style.setProperty('--safe-top-env', `${env.top}px`);
+  root.style.setProperty('--safe-bottom-effective', `${effectiveBottom}px`);
+  root.style.setProperty('--safe-bottom', `${effectiveBottom}px`);
+  // Drop any debug/profile inline pad overrides when the keyboard is open so
+  // html.keyboard-open CSS (4px, no safe-area) wins.
+  if (keyboardOpen) {
+    root.style.removeProperty('--layout-safe-bottom');
+    root.style.removeProperty('--footer-bottom-padding');
+  } else if (root.classList.contains('viewport-no-cover')) {
+    root.style.setProperty('--layout-safe-bottom', `${effectiveBottom}px`);
+    root.style.setProperty(
+      '--footer-bottom-padding',
+      `${Math.max(6, effectiveBottom)}px`
+    );
+  } else {
+    root.style.removeProperty('--layout-safe-bottom');
+    root.style.removeProperty('--footer-bottom-padding');
+  }
+  return { env, effectiveBottom, source: estimated.source };
 }
 
 function updateInstallSettings() {
@@ -3078,12 +5062,845 @@ async function api(path, options = {}) {
   }
   const value = await response.json();
   if (!response.ok) {
-    throw new Error(value.error || 'Request failed');
+    const error = new Error(value.error || 'Request failed');
+    error.status = response.status;
+    error.payload = value;
+    throw error;
   }
   return value;
 }
 
+function hasDurableBrowserPreferences() {
+  if (qaShellMode) {
+    return false;
+  }
+  const durableKeys = [
+    terminalThemeStorageKey,
+    sessionThemeStorageKey,
+    shortcutsStorageKey,
+    customKeysStorageKey,
+    sessionKeyProfilesStorageKey,
+    footerPinsStorageKey
+  ];
+  try {
+    const generatedBootstrap =
+      window.localStorage.getItem(preferencesBootstrapStorageKey) === '1';
+    return (
+      durableKeys.some(
+        (storageKey) => window.localStorage.getItem(storageKey) !== null
+      ) ||
+      (!generatedBootstrap &&
+        window.localStorage.getItem(keyProfilesStorageKey) !== null)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function markPreferencesBootstrapGenerated() {
+  if (qaShellMode) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(preferencesBootstrapStorageKey, '1');
+  } catch {
+    // In-memory dirty tracking still protects edits for this page lifetime.
+  }
+}
+
+function clearPreferencesBootstrapMarker() {
+  if (qaShellMode) {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(preferencesBootstrapStorageKey);
+  } catch {
+    // In-memory dirty tracking still protects edits for this page lifetime.
+  }
+}
+
+function preferencesSyncMetadataStorageKey(identity) {
+  return identity
+    ? `${preferencesSyncStorageKey}:${identity}`
+    : '';
+}
+
+function preferencesCacheStorageKeyFor(identity) {
+  return identity
+    ? `${preferencesCacheStorageKey}:${identity}`
+    : preferencesPendingCacheStorageKey;
+}
+
+function validPreferencesIdentity(identity) {
+  return typeof identity === 'string' && /^[a-f0-9]{64}$/.test(identity);
+}
+
+function preferencesWriteAllowed(identity, confirmed) {
+  return confirmed === true && validPreferencesIdentity(identity);
+}
+
+function preferencesWriteInProgress(state, writing) {
+  return writing === true || state === 'saving';
+}
+
+function loadLastPreferencesIdentity() {
+  if (qaShellMode) {
+    return '';
+  }
+  try {
+    const identity = window.localStorage.getItem(
+      preferencesLastIdentityStorageKey
+    );
+    return validPreferencesIdentity(identity) ? identity : '';
+  } catch {
+    return '';
+  }
+}
+
+function loadEmbeddedPreferencesIdentity() {
+  if (qaShellMode) {
+    return '';
+  }
+  const identity = document
+    .querySelector('meta[name="vps-preferences-subject"]')
+    ?.getAttribute('content');
+  return validPreferencesIdentity(identity) ? identity : '';
+}
+
+function saveLastPreferencesIdentity(identity) {
+  if (qaShellMode || !validPreferencesIdentity(identity)) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      preferencesLastIdentityStorageKey,
+      identity
+    );
+  } catch {
+    // The current page still keeps its adopted identity in memory.
+  }
+}
+
+function readPreferencesCache(identity = preferencesSyncIdentity) {
+  if (qaShellMode) {
+    return null;
+  }
+  try {
+    const raw = window.localStorage.getItem(
+      preferencesCacheStorageKeyFor(identity)
+    );
+    if (!raw) {
+      return null;
+    }
+    const value = JSON.parse(raw);
+    return value && typeof value === 'object' && !Array.isArray(value)
+      ? value
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function hasPendingPreferencesCache() {
+  return readPreferencesCache('') !== null;
+}
+
+function writePreferencesCache(
+  preferences,
+  identity = preferencesSyncIdentity
+) {
+  if (
+    qaShellMode ||
+    !preferences ||
+    typeof preferences !== 'object'
+  ) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      preferencesCacheStorageKeyFor(identity),
+      JSON.stringify(preferences)
+    );
+  } catch {
+    // Existing unscoped storage remains the in-page fallback.
+  }
+}
+
+function removePendingPreferencesCache() {
+  if (qaShellMode) {
+    return;
+  }
+  try {
+    window.localStorage.removeItem(preferencesPendingCacheStorageKey);
+  } catch {
+    // A stale pending cache causes a conservative conflict, not data loss.
+  }
+}
+
+function loadPreferencesSyncMetadata(identity = preferencesSyncIdentity) {
+  const storageKey = preferencesSyncMetadataStorageKey(identity);
+  if (!storageKey) {
+    return { found: false, enabled: false, revision: 0, dirty: false };
+  }
+  try {
+    const value = JSON.parse(
+      window.localStorage.getItem(storageKey) || 'null'
+    );
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      return { found: false, enabled: false, revision: 0, dirty: false };
+    }
+    return {
+      found: true,
+      enabled: value.enabled === true,
+      revision:
+        Number.isSafeInteger(value.revision) && value.revision >= 0
+          ? value.revision
+          : 0,
+      dirty: value.dirty === true
+    };
+  } catch {
+    return { found: false, enabled: false, revision: 0, dirty: false };
+  }
+}
+
+function savePreferencesSyncMetadata() {
+  if (!preferencesSyncIdentityConfirmed) {
+    return;
+  }
+  savePreferencesSyncMetadataForIdentity(preferencesSyncIdentity, {
+    enabled: preferencesSyncEnabled,
+    revision: preferencesSyncRevision,
+    dirty: preferencesSyncDirty
+  });
+}
+
+function savePreferencesSyncMetadataForIdentity(identity, metadata) {
+  const storageKey = preferencesSyncMetadataStorageKey(identity);
+  if (
+    qaShellMode ||
+    !storageKey ||
+    !metadata ||
+    typeof metadata !== 'object'
+  ) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      storageKey,
+      JSON.stringify({
+        enabled: metadata.enabled === true,
+        revision:
+          Number.isSafeInteger(metadata.revision) && metadata.revision >= 0
+            ? metadata.revision
+            : 0,
+        dirty: metadata.dirty === true
+      })
+    );
+  } catch {
+    // In-memory conflict protection still applies for this page lifetime.
+  }
+}
+
+function resolveAdoptedPreferencesDirty(
+  metadata,
+  hasPendingCache,
+  hasUntrackedCache
+) {
+  return (
+    metadata.dirty ||
+    hasPendingCache ||
+    (!metadata.found && hasUntrackedCache)
+  );
+}
+
+function selectAdoptedPreferencesCache(pendingCache, accountCache) {
+  return pendingCache || accountCache || null;
+}
+
+function adoptPreferencesSyncIdentity(identity) {
+  if (!validPreferencesIdentity(identity)) {
+    throw new Error('Shared setup identity is invalid');
+  }
+  if (
+    identity === preferencesSyncIdentity &&
+    preferencesSyncIdentityConfirmed
+  ) {
+    return;
+  }
+  const previousIdentity = preferencesSyncIdentity;
+  const previousIdentityWasConfirmed = preferencesSyncIdentityConfirmed;
+  if (previousIdentity && previousIdentityWasConfirmed) {
+    writePreferencesCache(
+      durablePreferencesSnapshot(),
+      previousIdentity
+    );
+  }
+  const pendingCacheCandidate = previousIdentityWasConfirmed
+    ? null
+    : readPreferencesCache('');
+  const adoptedCache = readPreferencesCache(identity);
+  const selectedCache = selectAdoptedPreferencesCache(
+    pendingCacheCandidate,
+    adoptedCache
+  );
+  const pendingCache =
+    pendingCacheCandidate === selectedCache ? pendingCacheCandidate : null;
+  preferencesSyncIdentity = identity;
+  preferencesSyncIdentityConfirmed = true;
+  const metadata = loadPreferencesSyncMetadata(identity);
+  preferencesSyncEnabled = metadata.enabled;
+  preferencesSyncRevision = metadata.revision;
+  if (selectedCache) {
+    applySharedPreferences(selectedCache);
+  }
+  if (pendingCache) {
+    writePreferencesCache(pendingCache, identity);
+    removePendingPreferencesCache();
+  } else if (
+    !selectedCache &&
+    previousIdentity &&
+    previousIdentity !== identity
+  ) {
+    applySharedPreferences(freshPreferencesSnapshot());
+  } else if (!selectedCache && hadDurablePreferencesAtBoot) {
+    writePreferencesCache(durablePreferencesSnapshot(), identity);
+  }
+  preferencesSyncDirty = resolveAdoptedPreferencesDirty(
+    metadata,
+    Boolean(pendingCache),
+    Boolean(
+      adoptedCache ||
+      (!previousIdentity && hadDurablePreferencesAtBoot)
+    )
+  );
+  saveLastPreferencesIdentity(identity);
+  savePreferencesSyncMetadata();
+}
+
+function noteDurablePreferencesChange() {
+  if (
+    qaShellMode ||
+    preferencesApplying ||
+    !preferencesTrackingReady
+  ) {
+    return;
+  }
+  if (preferencesBootstrapMutation && !preferencesSyncEnabled) {
+    return;
+  }
+  if (!preferencesBootstrapMutation) {
+    clearPreferencesBootstrapMarker();
+  }
+  preferencesLocalMutationVersion += 1;
+  preferencesSyncDirty = true;
+  writePreferencesCache(
+    durablePreferencesSnapshot(),
+    preferencesSyncIdentityConfirmed ? preferencesSyncIdentity : ''
+  );
+  savePreferencesSyncMetadata();
+  schedulePreferencesSync();
+}
+
+function resolvePreferencesLoadAction(options) {
+  if (
+    (options.forceRemote && !options.mutatedDuringLoad) ||
+    (!options.dirty && !options.mutatedDuringLoad)
+  ) {
+    return 'apply';
+  }
+  if (
+    options.knownEnabled &&
+    options.knownRevision === options.remoteRevision
+  ) {
+    return 'flush';
+  }
+  return 'conflict';
+}
+
+function durablePreferencesSnapshot() {
+  return {
+    keyProfiles: loadKeyProfilesDocument(),
+    sessionProfiles: loadSessionKeyProfileAssignments(),
+    theme: rememberedTerminalThemeName(),
+    sessionThemes: loadSessionThemes()
+  };
+}
+
+function freshPreferencesSnapshot() {
+  return {
+    keyProfiles: withStarterKeyProfiles({
+      version: 2,
+      starterProfilesVersion: 0,
+      starterSnippetSelectionsVersion: 0,
+      defaultProfileId: 'shell',
+      profiles: [
+        {
+          id: 'shell',
+          name: 'Terminal',
+          shortcutIds: [...defaultShortcutIds],
+          customKeys: [],
+          snippetIds: null,
+          pins: []
+        }
+      ]
+    }),
+    sessionProfiles: {},
+    theme: 'matrix',
+    sessionThemes: {}
+  };
+}
+
+function prepareInitialPreferences() {
+  if (qaShellMode) {
+    return;
+  }
+  if (preferencesSyncIdentityConfirmed) {
+    const accountCache = readPreferencesCache(preferencesSyncIdentity);
+    const canMigrateBrowserSetup =
+      !initialPreferencesLastIdentity ||
+      initialPreferencesLastIdentity === preferencesSyncIdentity;
+    if (
+      !accountCache &&
+      canMigrateBrowserSetup &&
+      hadDurablePreferencesAtBoot
+    ) {
+      writePreferencesCache(
+        durablePreferencesSnapshot(),
+        preferencesSyncIdentity
+      );
+      // The migrated setup predates revision metadata. Preserve it until the
+      // user chooses between it and any already-saved shared setup.
+      preferencesSyncDirty = true;
+    }
+    const selectedCache =
+      readPreferencesCache(preferencesSyncIdentity) ||
+      freshPreferencesSnapshot();
+    applySharedPreferences(selectedCache);
+    removePendingPreferencesCache();
+    saveLastPreferencesIdentity(preferencesSyncIdentity);
+    return;
+  }
+  if (validPreferencesIdentity(initialPreferencesSyncIdentity)) {
+    // A pending cache from another page cannot be attributed safely after an
+    // auth switch. Current-page edits create a new pending cache below.
+    removePendingPreferencesCache();
+    if (
+      hadDurablePreferencesAtBoot &&
+      !readPreferencesCache(initialPreferencesSyncIdentity)
+    ) {
+      writePreferencesCache(
+        durablePreferencesSnapshot(),
+        initialPreferencesSyncIdentity
+      );
+    }
+  } else if (
+    hadDurablePreferencesAtBoot &&
+    !hasPendingPreferencesCache()
+  ) {
+    // One-time migration for browsers that predate account-scoped setup.
+    writePreferencesCache(durablePreferencesSnapshot(), '');
+  }
+  // A last-login marker is not proof of the current authenticated request.
+  // Keep its setup private until GET /api/preferences confirms the identity.
+  applySharedPreferences(freshPreferencesSnapshot());
+}
+
+function setPreferencesSyncState(state) {
+  preferencesSyncState = state;
+  updatePreferencesSyncUi();
+}
+
+function updatePreferencesSyncUi() {
+  if (!preferencesSyncStatusElement) {
+    return;
+  }
+  const states = {
+    loading: {
+      label: 'Checking…',
+      help: 'Checking for a shared setup saved for this login.'
+    },
+    local: {
+      label: 'Not enabled',
+      help:
+        'This browser is local-only. Enable once to make profiles, pins, ' +
+        'session assignments, and themes follow your login.'
+    },
+    saving: {
+      label: 'Saving…',
+      help: 'Your shared setup is being updated.'
+    },
+    synced: {
+      label: 'Synced',
+      help:
+        'Profiles, pins, session assignments, and themes follow your login. ' +
+        'Active view, file path, font size, and layout stay on this device.'
+    },
+    offline: {
+      label: 'Local fallback',
+      help:
+        'Shared setup is temporarily unavailable. This login’s cached setup ' +
+        'remains active; changes stay in this browser until retry.'
+    },
+    conflict: {
+      label: 'Needs choice',
+      help:
+        'Another browser saved a newer setup. Load it, or explicitly keep ' +
+        'this browser’s setup.'
+    }
+  };
+  const current = states[preferencesSyncState] || states.offline;
+  preferencesSyncStatusElement.textContent = current.label;
+  preferencesSyncStatusElement.dataset.state = preferencesSyncState;
+  if (preferencesSyncHelpElement) {
+    preferencesSyncHelpElement.textContent = current.help;
+  }
+  if (preferencesSyncEnableButton) {
+    preferencesSyncEnableButton.hidden = preferencesSyncState !== 'local';
+  }
+  if (preferencesSyncLoadButton) {
+    preferencesSyncLoadButton.hidden = preferencesSyncState !== 'conflict';
+  }
+  if (preferencesSyncReplaceButton) {
+    preferencesSyncReplaceButton.hidden =
+      preferencesSyncState !== 'conflict';
+  }
+  if (preferencesSyncRetryButton) {
+    preferencesSyncRetryButton.hidden =
+      preferencesSyncState !== 'offline';
+  }
+}
+
+function applySharedPreferences(preferences) {
+  if (!preferences || typeof preferences !== 'object') {
+    throw new Error('Shared setup is invalid');
+  }
+  preferencesApplying = true;
+  try {
+    const profiles = withStarterKeyProfiles(
+      sanitizeKeyProfilesDocument(preferences.keyProfiles)
+    );
+    saveKeyProfilesDocument(profiles);
+    sessionKeyProfileAssignments = null;
+    saveSessionKeyProfileAssignments(preferences.sessionProfiles);
+    const globalTheme = resolveThemeName(preferences.theme);
+    const cleanGlobalTheme = Object.hasOwn(terminalThemes, globalTheme)
+      ? globalTheme
+      : 'matrix';
+    globalTerminalThemeName = cleanGlobalTheme;
+    try {
+      window.localStorage.setItem(
+        terminalThemeStorageKey,
+        cleanGlobalTheme
+      );
+    } catch {
+      // The in-memory setup still works when browser storage is unavailable.
+    }
+    const cleanSessionThemes = saveSessionThemes(preferences.sessionThemes);
+    const nextTheme =
+      (activeSession && cleanSessionThemes[activeSession]) ||
+      cleanGlobalTheme;
+    applyTerminalTheme(nextTheme, { persist: false });
+    keyProfileEditorId = activeKeyProfile().id;
+  } finally {
+    preferencesApplying = false;
+  }
+  renderSessions();
+  refreshKeysUi();
+}
+
+function adoptSavedSharedPreferences(saved, mutationVersionAtStart) {
+  const mutatedDuringSave =
+    preferencesLocalMutationVersion !== mutationVersionAtStart;
+  if (
+    !mutatedDuringSave &&
+    saved?.preferences &&
+    typeof saved.preferences === 'object'
+  ) {
+    applySharedPreferences(saved.preferences);
+  }
+  preferencesSyncDirty = mutatedDuringSave;
+  writePreferencesCache(durablePreferencesSnapshot());
+  return mutatedDuringSave;
+}
+
+async function loadPreferencesFromServer(options = {}) {
+  const mutationVersionAtStart = preferencesLocalMutationVersion;
+  setPreferencesSyncState('loading');
+  try {
+    const documentValue = await api('/api/preferences');
+    adoptPreferencesSyncIdentity(documentValue.subject);
+    const knownEnabled = preferencesSyncEnabled;
+    const knownRevision = preferencesSyncRevision;
+    const remoteRevision = Number.isSafeInteger(documentValue.revision)
+      ? documentValue.revision
+      : 0;
+    if (
+      documentValue.enabled === true &&
+      documentValue.preferences &&
+      typeof documentValue.preferences === 'object'
+    ) {
+      const action = resolvePreferencesLoadAction({
+        forceRemote: options.forceRemote === true,
+        dirty: preferencesSyncDirty,
+        mutatedDuringLoad:
+          preferencesLocalMutationVersion !== mutationVersionAtStart,
+        knownEnabled,
+        knownRevision,
+        remoteRevision
+      });
+      preferencesSyncEnabled = true;
+      if (action === 'conflict') {
+        setPreferencesSyncState('conflict');
+        return documentValue;
+      }
+      preferencesSyncRevision = remoteRevision;
+      if (action === 'flush') {
+        preferencesSyncDirty = true;
+        savePreferencesSyncMetadata();
+        setPreferencesSyncState('synced');
+        await flushPreferencesSync();
+        return documentValue;
+      }
+      applySharedPreferences(documentValue.preferences);
+      preferencesSyncDirty = false;
+      writePreferencesCache(durablePreferencesSnapshot());
+      savePreferencesSyncMetadata();
+      setPreferencesSyncState('synced');
+    } else {
+      preferencesSyncEnabled = false;
+      preferencesSyncRevision = 0;
+      savePreferencesSyncMetadata();
+      setPreferencesSyncState('local');
+    }
+    return documentValue;
+  } catch (error) {
+    setPreferencesSyncState('offline');
+    return null;
+  }
+}
+
+function schedulePreferencesSync() {
+  if (
+    qaShellMode ||
+    preferencesApplying ||
+    !preferencesWriteAllowed(
+      preferencesSyncIdentity,
+      preferencesSyncIdentityConfirmed
+    ) ||
+    !preferencesSyncEnabled ||
+    preferencesSyncState === 'loading' ||
+    preferencesSyncState === 'conflict'
+  ) {
+    return;
+  }
+  if (
+    preferencesWriteInProgress(
+      preferencesSyncState,
+      preferencesSyncWriting
+    )
+  ) {
+    preferencesSyncPending = true;
+    return;
+  }
+  clearTimeout(preferencesSyncTimer);
+  preferencesSyncTimer = window.setTimeout(() => {
+    preferencesSyncTimer = null;
+    void flushPreferencesSync();
+  }, preferencesSyncDebounceMs);
+}
+
+async function flushPreferencesSync() {
+  if (
+    !preferencesWriteAllowed(
+      preferencesSyncIdentity,
+      preferencesSyncIdentityConfirmed
+    ) ||
+    !preferencesSyncEnabled ||
+    preferencesSyncState === 'conflict'
+  ) {
+    return;
+  }
+  if (
+    preferencesWriteInProgress(
+      preferencesSyncState,
+      preferencesSyncWriting
+    )
+  ) {
+    preferencesSyncPending = true;
+    return;
+  }
+  preferencesSyncWriting = true;
+  const mutationVersionAtWrite = preferencesLocalMutationVersion;
+  setPreferencesSyncState('saving');
+  try {
+    const saved = await api('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedSubject: preferencesSyncIdentity,
+        expectedRevision: preferencesSyncRevision,
+        preferences: durablePreferencesSnapshot()
+      })
+    });
+    preferencesSyncRevision = saved.revision;
+    adoptSavedSharedPreferences(saved, mutationVersionAtWrite);
+    savePreferencesSyncMetadata();
+    setPreferencesSyncState('synced');
+  } catch (error) {
+    if (error.status === 412) {
+      preferencesSyncIdentityConfirmed = false;
+      setPreferencesSyncState('offline');
+    } else if (error.status === 409) {
+      setPreferencesSyncState('conflict');
+    } else {
+      setPreferencesSyncState('offline');
+    }
+  } finally {
+    preferencesSyncWriting = false;
+    if (
+      preferencesSyncPending &&
+      preferencesSyncState !== 'conflict'
+    ) {
+      preferencesSyncPending = false;
+      schedulePreferencesSync();
+    }
+  }
+}
+
+async function enablePreferencesSync() {
+  if (
+    preferencesSyncState !== 'local' ||
+    !preferencesWriteAllowed(
+      preferencesSyncIdentity,
+      preferencesSyncIdentityConfirmed
+    )
+  ) {
+    return;
+  }
+  const seededPreferences = durablePreferencesSnapshot();
+  const mutationVersionAtSeed = preferencesLocalMutationVersion;
+  setPreferencesSyncState('saving');
+  try {
+    const saved = await api('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedSubject: preferencesSyncIdentity,
+        expectedRevision: 0,
+        preferences: seededPreferences
+      })
+    });
+    preferencesSyncEnabled = true;
+    preferencesSyncRevision = saved.revision;
+    adoptSavedSharedPreferences(saved, mutationVersionAtSeed);
+    savePreferencesSyncMetadata();
+    setPreferencesSyncState('synced');
+    if (preferencesSyncDirty) {
+      preferencesSyncPending = false;
+      schedulePreferencesSync();
+    }
+    setStatus('Shared setup enabled');
+  } catch (error) {
+    if (error.status === 412) {
+      preferencesSyncIdentityConfirmed = false;
+      setPreferencesSyncState('offline');
+      setStatus('Login changed; reload shared setup');
+    } else if (error.status === 409) {
+      await loadPreferencesFromServer();
+      setStatus('Loaded the setup enabled in another browser');
+    } else {
+      setPreferencesSyncState('offline');
+      setStatus('Could not enable shared setup');
+    }
+  }
+}
+
+async function replaceSharedPreferences() {
+  if (
+    preferencesSyncState !== 'conflict' ||
+    !preferencesWriteAllowed(
+      preferencesSyncIdentity,
+      preferencesSyncIdentityConfirmed
+    ) ||
+    !window.confirm(
+      'Replace the newer shared setup with this browser’s profiles and themes?'
+    )
+  ) {
+    return;
+  }
+  const localPreferences = durablePreferencesSnapshot();
+  const mutationVersionAtReplace = preferencesLocalMutationVersion;
+  setPreferencesSyncState('saving');
+  try {
+    const latest = await api('/api/preferences');
+    if (latest.subject !== preferencesSyncIdentity) {
+      preferencesSyncIdentityConfirmed = false;
+      setPreferencesSyncState('offline');
+      return;
+    }
+    const saved = await api('/api/preferences', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedSubject: preferencesSyncIdentity,
+        expectedRevision: latest.revision,
+        preferences: localPreferences
+      })
+    });
+    preferencesSyncEnabled = true;
+    preferencesSyncRevision = saved.revision;
+    adoptSavedSharedPreferences(saved, mutationVersionAtReplace);
+    savePreferencesSyncMetadata();
+    setPreferencesSyncState('synced');
+    const needsFollowUp = preferencesSyncDirty || preferencesSyncPending;
+    preferencesSyncPending = false;
+    if (needsFollowUp) {
+      schedulePreferencesSync();
+    }
+    setStatus('Shared setup replaced');
+  } catch (error) {
+    if (error.status === 412) {
+      preferencesSyncIdentityConfirmed = false;
+      setPreferencesSyncState('offline');
+    } else {
+      setPreferencesSyncState(error.status === 409 ? 'conflict' : 'offline');
+    }
+  }
+}
+
+async function loadLatestSharedPreferences() {
+  if (
+    preferencesSyncState !== 'conflict' ||
+    !window.confirm(
+      'Discard this browser’s unsynced profile and theme changes and load the latest shared setup?'
+    )
+  ) {
+    return;
+  }
+  const wasDirty = preferencesSyncDirty;
+  preferencesSyncDirty = false;
+  await loadPreferencesFromServer({ forceRemote: true });
+  if (preferencesSyncState === 'synced') {
+    setStatus('Loaded latest shared setup');
+  } else {
+    preferencesSyncDirty = wasDirty || preferencesSyncDirty;
+    savePreferencesSyncMetadata();
+  }
+}
+
+async function initializeSharedSetupAndSnippets() {
+  if (qaShellMode) {
+    setPreferencesSyncState('local');
+  } else {
+    await loadPreferencesFromServer();
+  }
+  await loadSnippetsFromServer();
+}
+
 function loadViewMode() {
+  if (qaShellMode) {
+    return 'term';
+  }
   try {
     return window.localStorage.getItem(viewModeStorageKey) === 'files'
       ? 'files'
@@ -3200,6 +6017,265 @@ function formatFilesMtime(ms) {
   }
 }
 
+function filesPrimaryPointerIsFine() {
+  return Boolean(
+    window.matchMedia?.('(hover: hover) and (pointer: fine)').matches
+  );
+}
+
+function filesUsesCompactLocationSelector() {
+  return (
+    !filesPrimaryPointerIsFine() &&
+    (window.innerWidth < 700 || window.innerHeight < 600)
+  );
+}
+
+function filesEntryTarget(entry, listing = filesListing) {
+  if (!entry || !listing) {
+    return null;
+  }
+  return {
+    root: listing.root || filesRootId,
+    path: listing.path ? `${listing.path}/${entry.name}` : entry.name,
+    name: entry.name,
+    type: entry.type,
+    size: entry.size
+  };
+}
+
+function updateFilesStatusbar() {
+  if (!filesStatusbarElement) {
+    return;
+  }
+  const count = filesVisibleEntries.length;
+  const itemLabel = `${count} ${count === 1 ? 'item' : 'items'}`;
+  const selected = filesVisibleEntries[filesSelectedIndex];
+  if (selected) {
+    const detail =
+      selected.type === 'dir'
+        ? 'Folder'
+        : formatFilesSize(selected.size);
+    filesStatusbarElement.textContent = filesPrimaryPointerIsFine()
+      ? `${selected.name} · ${detail} · Enter open · F2 rename`
+      : `${itemLabel} · ${selected.name}`;
+    return;
+  }
+  filesStatusbarElement.textContent = filesPrimaryPointerIsFine()
+    ? `${itemLabel} · Arrow keys navigate · Ctrl+Shift+N new folder`
+    : itemLabel;
+}
+
+function setFilesSelection(index, options = {}) {
+  if (!filesListElement) {
+    return;
+  }
+  const rows = [...filesListElement.querySelectorAll('[role="option"]')];
+  const nextIndex =
+    Number.isInteger(index) && index >= 0 && index < rows.length ? index : -1;
+  filesSelectedIndex = nextIndex;
+  filesSelectedName =
+    nextIndex >= 0 ? filesVisibleEntries[nextIndex]?.name || '' : '';
+  const previewSelectionName =
+    filesPreviewRequestedName || filesPreviewTargetName;
+  if (
+    previewSelectionName &&
+    filesSelectedName !== previewSelectionName
+  ) {
+    closeFilesPreview({ restoreFocus: false });
+  }
+  rows.forEach((row, rowIndex) => {
+    row.setAttribute('aria-selected', String(rowIndex === nextIndex));
+  });
+  if (nextIndex >= 0) {
+    filesListElement.setAttribute('aria-activedescendant', rows[nextIndex].id);
+    if (options.scroll !== false) {
+      rows[nextIndex].scrollIntoView({ block: 'nearest' });
+    }
+  } else {
+    filesListElement.removeAttribute('aria-activedescendant');
+  }
+  if (options.focus) {
+    filesListElement.focus({ preventScroll: true });
+  }
+  updateFilesStatusbar();
+}
+
+function clearFilesSelection() {
+  setFilesSelection(-1, { scroll: false });
+}
+
+function navigateFilesParent() {
+  if (
+    !filesListing ||
+    filesListing.parent === null ||
+    filesListing.parent === undefined
+  ) {
+    return false;
+  }
+  const segments = String(filesListing.path || '').split('/').filter(Boolean);
+  closeFilesPreview({ restoreFocus: false });
+  filesRestoreSelectionName = segments.at(-1) || '';
+  filesSelectedName = '';
+  filesSelectedIndex = -1;
+  filesPath = filesListing.parent;
+  saveFilesNav();
+  void refreshFilesListing();
+  return true;
+}
+
+function activateFilesEntry(entry, options = {}) {
+  const target = filesEntryTarget(entry);
+  if (!target) {
+    return;
+  }
+  if (entry.type === 'dir') {
+    closeFilesPreview({ restoreFocus: false });
+    filesRestoreSelectionName = '';
+    filesSelectedName = '';
+    filesSelectedIndex = -1;
+    filesPath = target.path;
+    saveFilesNav();
+    void refreshFilesListing();
+    return;
+  }
+  if (filesPrimaryPointerIsFine() && !options.directTouch) {
+    void previewFilesTarget(target).catch((error) => {
+      setStatus(error.message || 'Preview failed');
+    });
+    return;
+  }
+  openFilesActions(target, undefined, { touch: options.directTouch });
+}
+
+function handleFilesListKeydown(event) {
+  if (!filesListElement || viewMode !== 'files') {
+    return;
+  }
+  if (event.altKey && event.key === 'ArrowUp') {
+    event.preventDefault();
+    navigateFilesParent();
+    return;
+  }
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    event.shiftKey &&
+    event.key.toLocaleLowerCase() === 'n'
+  ) {
+    event.preventDefault();
+    openFilesNameDialog('create');
+    return;
+  }
+  if (event.key === 'ArrowLeft' || event.key === 'Backspace') {
+    event.preventDefault();
+    navigateFilesParent();
+    return;
+  }
+  if (filesVisibleEntries.length === 0) {
+    return;
+  }
+  const lastIndex = filesVisibleEntries.length - 1;
+  let nextIndex = filesSelectedIndex;
+  if (event.ctrlKey || event.metaKey) {
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    nextIndex = filesSelectedIndex < 0 ? 0 : Math.min(lastIndex, filesSelectedIndex + 1);
+  } else if (event.key === 'ArrowUp') {
+    nextIndex = filesSelectedIndex < 0 ? lastIndex : Math.max(0, filesSelectedIndex - 1);
+  } else if (event.key === 'Home') {
+    nextIndex = 0;
+  } else if (event.key === 'End') {
+    nextIndex = lastIndex;
+  } else if (event.key === 'PageDown') {
+    nextIndex = filesSelectedIndex < 0 ? 0 : Math.min(lastIndex, filesSelectedIndex + 10);
+  } else if (event.key === 'PageUp') {
+    nextIndex = filesSelectedIndex < 0 ? 0 : Math.max(0, filesSelectedIndex - 10);
+  } else if (event.key === 'Enter') {
+    event.preventDefault();
+    if (filesSelectedIndex >= 0) {
+      activateFilesEntry(filesVisibleEntries[filesSelectedIndex]);
+    }
+    return;
+  } else if (event.key === 'F2') {
+    event.preventDefault();
+    if (filesSelectedIndex >= 0) {
+      openFilesNameDialog(
+        'rename',
+        filesEntryTarget(filesVisibleEntries[filesSelectedIndex])
+      );
+    }
+    return;
+  } else if (event.key === 'Delete') {
+    event.preventDefault();
+    if (filesSelectedIndex >= 0 && filesWritable && !event.repeat) {
+      void deleteFilesTarget(
+        filesEntryTarget(filesVisibleEntries[filesSelectedIndex])
+      ).catch((error) => {
+        setStatus(error.message || 'Delete failed');
+      });
+    }
+    return;
+  } else if (event.key === 'ArrowRight') {
+    event.preventDefault();
+    const selected = filesVisibleEntries[filesSelectedIndex];
+    if (selected?.type === 'dir') {
+      activateFilesEntry(selected);
+    }
+    return;
+  } else if (
+    event.key === 'ContextMenu' ||
+    (event.shiftKey && event.key === 'F10')
+  ) {
+    event.preventDefault();
+    if (filesSelectedIndex >= 0) {
+      const row = filesListElement.querySelectorAll('[role="option"]')[
+        filesSelectedIndex
+      ];
+      const bounds = row?.getBoundingClientRect();
+      openFilesActions(
+        filesEntryTarget(filesVisibleEntries[filesSelectedIndex]),
+        bounds
+          ? { x: bounds.left + 24, y: bounds.top + Math.min(28, bounds.height) }
+          : undefined
+      );
+    }
+    return;
+  } else if (event.key === 'Escape') {
+    event.preventDefault();
+    clearFilesSelection();
+    return;
+  } else if (
+    event.key.length === 1 &&
+    !event.altKey &&
+    !event.isComposing &&
+    /\S/.test(event.key)
+  ) {
+    event.preventDefault();
+    window.clearTimeout(filesTypeaheadTimer);
+    filesTypeahead += event.key.toLocaleLowerCase();
+    filesTypeaheadTimer = window.setTimeout(() => {
+      filesTypeahead = '';
+    }, 650);
+    const start = Math.max(0, filesSelectedIndex + 1);
+    const ordered = [
+      ...filesVisibleEntries.slice(start),
+      ...filesVisibleEntries.slice(0, start)
+    ];
+    const match = ordered.find((entry) =>
+      entry.name.toLocaleLowerCase().startsWith(filesTypeahead)
+    );
+    if (match) {
+      nextIndex = filesVisibleEntries.indexOf(match);
+    } else {
+      return;
+    }
+  } else {
+    return;
+  }
+  event.preventDefault();
+  setFilesSelection(nextIndex, { scroll: true });
+}
+
 function filesDisplayPath(rootId, relativePath) {
   const prefix = filesDisplayPrefix(rootId);
   return relativePath ? `${prefix}/${relativePath}` : prefix;
@@ -3241,8 +6317,13 @@ function setViewMode(mode, options = {}) {
     }
     updateScrollCatcherMode();
     void ensureFilesRoots().then(() => refreshFilesListing());
+    scheduleLayoutDebug('view-mode');
     return;
   }
+  closeFilesActions({ restoreFocus: false });
+  closeFilesPreview();
+  closeFilesOptions();
+  closeFilesNameDialog();
   // Term mode: show empty or terminal based on session.
   if (activeSession) {
     if (emptyElement) {
@@ -3262,6 +6343,7 @@ function setViewMode(mode, options = {}) {
     }
     updateScrollCatcherMode();
   }
+  scheduleLayoutDebug('view-mode');
 }
 
 async function ensureFilesRoots() {
@@ -3304,45 +6386,87 @@ function renderFilesRoots() {
           { id: 'projects', label: 'projects' },
           { id: 'paste', label: 'paste' }
         ];
+  if (filesLocationSelect) {
+    filesLocationSelect.replaceChildren();
+    for (const root of roots) {
+      const option = document.createElement('option');
+      option.value = root.id;
+      option.textContent = root.label || root.id;
+      option.title = root.displayPrefix || root.label || root.id;
+      filesLocationSelect.append(option);
+    }
+    filesLocationSelect.value = filesRootId;
+    filesLocationSelect.disabled = roots.length < 2;
+  }
   for (const root of roots) {
     const button = document.createElement('button');
     button.type = 'button';
     button.textContent = root.label || root.id;
     button.dataset.filesRoot = root.id;
     button.classList.toggle('active', filesRootId === root.id);
-    button.setAttribute('aria-selected', String(filesRootId === root.id));
+    if (filesRootId === root.id) {
+      button.setAttribute('aria-current', 'location');
+    }
     button.title = root.displayPrefix || root.label || root.id;
     button.addEventListener('click', () => {
-      if (filesRootId === root.id) {
-        void refreshFilesListing();
-        return;
-      }
-      filesRootId = root.id;
-      filesPath = '';
-      saveFilesNav();
-      void refreshFilesListing();
+      switchFilesRoot(root.id);
     });
     filesRootsElement.append(button);
   }
-  const hiddenToggle = document.createElement('button');
-  hiddenToggle.type = 'button';
-  hiddenToggle.id = 'files-hidden-toggle';
-  hiddenToggle.textContent = filesShowHidden ? '· hide' : '· show';
-  hiddenToggle.title = filesShowHidden
-    ? 'Hide dotfiles (names starting with .)'
-    : 'Show hidden files (names starting with .)';
-  hiddenToggle.setAttribute('aria-pressed', String(filesShowHidden));
-  hiddenToggle.classList.toggle('active', filesShowHidden);
-  hiddenToggle.addEventListener('click', () => {
-    filesShowHidden = !filesShowHidden;
+  const hiddenControl = document.createElement('label');
+  hiddenControl.id = 'files-hidden-toggle';
+  hiddenControl.className = 'files-checkbox-control';
+  hiddenControl.title = 'Include dotfiles (names starting with .)';
+  const hiddenInput = document.createElement('input');
+  hiddenInput.type = 'checkbox';
+  hiddenInput.checked = filesShowHidden;
+  const hiddenLabel = document.createElement('span');
+  hiddenLabel.textContent = 'Show hidden files';
+  hiddenInput.addEventListener('change', () => {
+    filesShowHidden = hiddenInput.checked;
     saveFilesShowHidden();
+    updateFilesHiddenControls();
     if (filesListing) {
       renderFilesListing(filesListing);
     } else {
       void refreshFilesListing();
     }
   });
-  filesRootsElement.append(hiddenToggle);
+  hiddenControl.append(hiddenInput, hiddenLabel);
+  filesRootsElement.append(hiddenControl);
+  updateFilesHiddenControls();
+}
+
+function updateFilesHiddenControls() {
+  const sidebarInput = filesRootsElement?.querySelector(
+    '#files-hidden-toggle input[type="checkbox"]'
+  );
+  if (sidebarInput) {
+    sidebarInput.checked = filesShowHidden;
+  }
+  if (filesOptionHidden) {
+    filesOptionHidden.checked = filesShowHidden;
+  }
+}
+
+function switchFilesRoot(rootId) {
+  const nextRoot = filesRootsCatalog.find((entry) => entry.id === rootId);
+  if (!nextRoot) {
+    return false;
+  }
+  if (filesRootId === nextRoot.id) {
+    void refreshFilesListing();
+    return true;
+  }
+  closeFilesPreview({ restoreFocus: false });
+  filesRootId = nextRoot.id;
+  filesPath = '';
+  filesRestoreSelectionName = '';
+  clearFilesSelection();
+  saveFilesNav();
+  renderFilesRoots();
+  void refreshFilesListing();
+  return true;
 }
 
 function renderFilesBreadcrumb(listing) {
@@ -3373,6 +6497,8 @@ function renderFilesBreadcrumb(listing) {
     } else {
       button.addEventListener('click', () => {
         filesPath = pathValue;
+        filesRestoreSelectionName = '';
+        clearFilesSelection();
         saveFilesNav();
         void refreshFilesListing();
       });
@@ -3380,7 +6506,9 @@ function renderFilesBreadcrumb(listing) {
     filesBreadcrumbElement.append(button);
   };
 
-  appendCrumb(prefix, '', segments.length === 0);
+  if (!filesUsesCompactLocationSelector()) {
+    appendCrumb(prefix, '', segments.length === 0);
+  }
   let acc = '';
   segments.forEach((segment, index) => {
     acc = acc ? `${acc}/${segment}` : segment;
@@ -3393,13 +6521,25 @@ function renderFilesListing(listing) {
   filesWritable = listing.writable !== false;
   filesRootId = listing.root || filesRootId;
   renderFilesBreadcrumb(listing);
+  const atRoot = listing.parent === null || listing.parent === undefined;
   if (filesUpButton) {
-    filesUpButton.disabled =
-      listing.parent === null || listing.parent === undefined;
+    filesUpButton.disabled = atRoot;
   }
-  if (filesUploadInput) {
-    filesUploadInput.disabled = !filesWritable;
+  if (filesNewFolderDesktopButton) {
+    filesNewFolderDesktopButton.disabled = !filesWritable;
   }
+  if (filesOptionNewFolder) {
+    filesOptionNewFolder.disabled = !filesWritable;
+  }
+  for (const input of [filesUploadInput, filesUploadDesktopInput]) {
+    if (input) {
+      input.disabled = !filesWritable;
+    }
+  }
+  filesUploadTriggers.forEach((trigger) => {
+    trigger.setAttribute('aria-disabled', String(!filesWritable));
+    trigger.tabIndex = filesWritable ? 0 : -1;
+  });
   if (!filesListElement) {
     return;
   }
@@ -3411,13 +6551,15 @@ function renderFilesListing(listing) {
   const entries = filesShowHidden
     ? rawEntries
     : rawEntries.filter((entry) => !isHiddenFileName(entry.name));
+  filesVisibleEntries = entries;
   if (filesEmptyHintElement) {
     if (entries.length > 0) {
       filesEmptyHintElement.hidden = true;
     } else {
       filesEmptyHintElement.hidden = false;
       if (rawEntries.length > 0 && !filesShowHidden) {
-        filesEmptyHintElement.textContent = `No visible items (${hiddenCount} hidden). Tap “· show”.`;
+        filesEmptyHintElement.textContent =
+          `No visible items (${hiddenCount} hidden). Enable “Show hidden files” in File options.`;
       } else if (rawEntries.length === 0) {
         filesEmptyHintElement.textContent = 'Empty folder';
       } else {
@@ -3425,10 +6567,22 @@ function renderFilesListing(listing) {
       }
     }
   }
-  for (const entry of entries) {
+  const selectionName = filesRestoreSelectionName || filesSelectedName;
+  const selectionIndex = filesRestoreSelectionIndex;
+  filesRestoreSelectionName = '';
+  filesRestoreSelectionIndex = -1;
+  filesSelectedIndex = -1;
+  filesSelectedName = '';
+  entries.forEach((entry, index) => {
     const item = document.createElement('li');
+    item.id = `files-entry-${index}`;
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', 'false');
     item.dataset.name = entry.name;
     item.dataset.type = entry.type;
+    const icon = document.createElement('span');
+    icon.className = `files-entry-icon ${entry.type === 'dir' ? 'dir' : 'file'}`;
+    icon.setAttribute('aria-hidden', 'true');
     const name = document.createElement('span');
     name.className = `files-entry-name ${entry.type === 'dir' ? 'dir' : 'file'}`;
     name.textContent = entry.name;
@@ -3438,24 +6592,141 @@ function renderFilesListing(listing) {
       entry.type === 'dir'
         ? 'folder'
         : `${formatFilesSize(entry.size)} · ${formatFilesMtime(entry.mtime)}`;
-    item.append(name, meta);
-    item.addEventListener('click', () => {
-      if (entry.type === 'dir') {
-        const next = listing.path ? `${listing.path}/${entry.name}` : entry.name;
-        filesPath = next;
-        saveFilesNav();
-        void refreshFilesListing();
+    const modified = document.createElement('span');
+    modified.className = 'files-entry-modified';
+    modified.textContent = formatFilesMtime(entry.mtime) || '—';
+    const size = document.createElement('span');
+    size.className = 'files-entry-size';
+    size.textContent = entry.type === 'dir' ? '—' : formatFilesSize(entry.size);
+    item.setAttribute(
+      'aria-label',
+      entry.type === 'dir'
+        ? `${entry.name}, folder`
+        : `${entry.name}, file, ${formatFilesSize(entry.size)}, ${formatFilesMtime(entry.mtime)}`
+    );
+    item.append(icon, name, meta, modified, size);
+    let entryLongPressTimer = null;
+    let entryLongPressPointerId = null;
+    let entryLongPressStartX = 0;
+    let entryLongPressStartY = 0;
+    const cancelEntryLongPress = () => {
+      window.clearTimeout(entryLongPressTimer);
+      entryLongPressTimer = null;
+      entryLongPressPointerId = null;
+    };
+    item.addEventListener('pointerdown', (event) => {
+      item.dataset.lastPointerType = event.pointerType || '';
+      if (event.pointerType !== 'touch' && event.pointerType !== 'pen') {
         return;
       }
-      openFilesActions({
-        root: listing.root,
-        path: listing.path ? `${listing.path}/${entry.name}` : entry.name,
-        name: entry.name,
-        type: 'file',
-        size: entry.size
+      cancelEntryLongPress();
+      entryLongPressPointerId = event.pointerId;
+      entryLongPressStartX = event.clientX;
+      entryLongPressStartY = event.clientY;
+      entryLongPressTimer = window.setTimeout(() => {
+        entryLongPressTimer = null;
+        item.dataset.longPressActivated = '1';
+        setFilesSelection(index, { scroll: false });
+        openFilesActions(filesEntryTarget(entry, listing), undefined, {
+          touch: true
+        });
+      }, filesEntryLongPressMilliseconds);
+    });
+    item.addEventListener('pointermove', (event) => {
+      if (
+        entryLongPressTimer === null ||
+        event.pointerId !== entryLongPressPointerId
+      ) {
+        return;
+      }
+      if (
+        Math.hypot(
+          event.clientX - entryLongPressStartX,
+          event.clientY - entryLongPressStartY
+        ) > filesEntryLongPressMoveTolerance
+      ) {
+        cancelEntryLongPress();
+      }
+    });
+    item.addEventListener('pointerup', cancelEntryLongPress);
+    item.addEventListener('pointercancel', cancelEntryLongPress);
+    item.addEventListener('pointerleave', (event) => {
+      if (event.pointerType !== 'touch') {
+        cancelEntryLongPress();
+      }
+    });
+    item.addEventListener('click', (event) => {
+      if (item.dataset.longPressActivated === '1') {
+        delete item.dataset.longPressActivated;
+        item.dataset.lastPointerType = '';
+        event.preventDefault();
+        return;
+      }
+      setFilesSelection(index, {
+        focus: filesPrimaryPointerIsFine(),
+        scroll: false
+      });
+      const directTouch =
+        item.dataset.lastPointerType === 'touch' ||
+        item.dataset.lastPointerType === 'pen';
+      item.dataset.lastPointerType = '';
+      if (filesPrimaryPointerIsFine() && !directTouch) {
+        return;
+      }
+      activateFilesEntry(entry, { directTouch });
+    });
+    item.addEventListener('dblclick', (event) => {
+      if (!filesPrimaryPointerIsFine()) {
+        return;
+      }
+      event.preventDefault();
+      setFilesSelection(index, { focus: true, scroll: false });
+      activateFilesEntry(entry);
+    });
+    item.addEventListener('contextmenu', (event) => {
+      if (!filesPrimaryPointerIsFine()) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      setFilesSelection(index, { focus: true, scroll: false });
+      openFilesActions(filesEntryTarget(entry, listing), {
+        x: event.clientX,
+        y: event.clientY
       });
     });
     filesListElement.append(item);
+  });
+  let selectionApplied = false;
+  if (selectionName) {
+    const namedSelectionIndex = entries.findIndex(
+      (entry) => entry.name === selectionName
+    );
+    if (namedSelectionIndex >= 0) {
+      setFilesSelection(namedSelectionIndex, { scroll: true });
+      selectionApplied = true;
+    }
+  }
+  if (!selectionApplied && selectionIndex >= 0 && entries.length > 0) {
+    setFilesSelection(Math.min(selectionIndex, entries.length - 1), {
+      scroll: true
+    });
+    selectionApplied = true;
+  }
+  if (
+    !selectionApplied &&
+    document.activeElement === filesListElement &&
+    entries.length > 0
+  ) {
+    setFilesSelection(0, { scroll: false });
+    selectionApplied = true;
+  }
+  if (!selectionApplied) {
+    filesListElement.removeAttribute('aria-activedescendant');
+    updateFilesStatusbar();
+    if (filesPreviewRequestedName || filesPreviewTargetName) {
+      closeFilesPreview({ restoreFocus: false });
+    }
   }
   renderFilesRoots();
 }
@@ -3465,43 +6736,96 @@ async function refreshFilesListing() {
     return filesLoadPromise;
   }
   filesLoadPromise = (async () => {
+    filesPanelElement?.setAttribute('aria-busy', 'true');
+    for (const button of [filesRefreshButton, filesRefreshDesktopButton]) {
+      if (button) {
+        button.disabled = true;
+      }
+    }
     try {
-      const query = new URLSearchParams({
-        root: filesRootId,
-        path: filesPath || ''
-      });
-      const listing = await api(`/api/fs/list?${query.toString()}`);
-      filesRootId = listing.root || filesRootId;
-      filesPath = typeof listing.path === 'string' ? listing.path : '';
-      saveFilesNav();
-      renderFilesListing(listing);
-      if (listing.truncated) {
-        setStatus('Folder truncated (too many entries)');
-      }
-    } catch (error) {
-      // Path vanished — bounce to root of current tree.
-      if (filesPath) {
-        filesPath = '';
-        saveFilesNav();
-        filesLoadPromise = null;
-        return refreshFilesListing();
-      }
-      setStatus(error.message || 'Could not list files');
-      if (filesListElement) {
-        filesListElement.replaceChildren();
-      }
-      if (filesEmptyHintElement) {
-        filesEmptyHintElement.hidden = false;
-        filesEmptyHintElement.textContent = error.message || 'Could not list files';
+      let triedRootFallback = false;
+      while (true) {
+        try {
+          const query = new URLSearchParams({
+            root: filesRootId,
+            path: filesPath || ''
+          });
+          const listing = await api(`/api/fs/list?${query.toString()}`);
+          filesRootId = listing.root || filesRootId;
+          filesPath = typeof listing.path === 'string' ? listing.path : '';
+          saveFilesNav();
+          renderFilesListing(listing);
+          if (listing.truncated) {
+            setStatus('Folder truncated (too many entries)');
+          }
+          break;
+        } catch (error) {
+          // A remembered path may disappear between visits. Retry its root
+          // within the same guarded load so a second refresh cannot race it.
+          if (filesPath && !triedRootFallback) {
+            closeFilesPreview({ restoreFocus: false });
+            filesPath = '';
+            saveFilesNav();
+            triedRootFallback = true;
+            continue;
+          }
+          setStatus(error.message || 'Could not list files');
+          if (filesListElement) {
+            filesListElement.replaceChildren();
+          }
+          filesVisibleEntries = [];
+          filesSelectedIndex = -1;
+          filesSelectedName = '';
+          filesListElement?.removeAttribute('aria-activedescendant');
+          updateFilesStatusbar();
+          if (filesEmptyHintElement) {
+            filesEmptyHintElement.hidden = false;
+            filesEmptyHintElement.textContent =
+              error.message || 'Could not list files';
+          }
+          break;
+        }
       }
     } finally {
+      filesPanelElement?.setAttribute('aria-busy', 'false');
+      for (const button of [filesRefreshButton, filesRefreshDesktopButton]) {
+        if (button) {
+          button.disabled = false;
+        }
+      }
       filesLoadPromise = null;
     }
   })();
   return filesLoadPromise;
 }
 
-function openFilesActions(target) {
+async function refreshFilesListingAfterMutation(
+  rootId,
+  directoryPath,
+  selection = {}
+) {
+  const inFlight = filesLoadPromise;
+  if (inFlight) {
+    await inFlight;
+  }
+  if (filesRootId !== rootId || filesPath !== directoryPath) {
+    return false;
+  }
+  filesRestoreSelectionName = selection.name || '';
+  filesRestoreSelectionIndex = Number.isInteger(selection.index)
+    ? selection.index
+    : -1;
+  await refreshFilesListing();
+  return true;
+}
+
+function openFilesActions(target, anchor, options = {}) {
+  if (!target) {
+    return;
+  }
+  if (filesActionsDialog?.open) {
+    filesActionsDialog.close();
+  }
   filesActionTarget = target;
   if (filesActionsTitle) {
     filesActionsTitle.textContent = target.name;
@@ -3512,41 +6836,342 @@ function openFilesActions(target) {
   if (filesActionDelete) {
     filesActionDelete.hidden = !filesWritable;
   }
-  if (filesActionsDialog && !filesActionsDialog.open) {
+  if (filesActionRename) {
+    filesActionRename.hidden = !filesWritable;
+  }
+  if (filesActionPreview) {
+    filesActionPreview.hidden = target.type !== 'file';
+  }
+  if (filesActionDownload) {
+    filesActionDownload.hidden = target.type !== 'file';
+  }
+  if (!filesActionsDialog) {
+    return;
+  }
+  const useActionSheet = options.touch || !filesPrimaryPointerIsFine();
+  filesActionsDialog.classList.toggle('files-action-sheet', useActionSheet);
+  if (!useActionSheet) {
+    filesActionsDialog.show();
+    const bounds = filesActionsDialog.getBoundingClientRect();
+    const requestedX = Number.isFinite(anchor?.x)
+      ? anchor.x
+      : window.innerWidth / 2;
+    const requestedY = Number.isFinite(anchor?.y)
+      ? anchor.y
+      : window.innerHeight / 2;
+    const left = Math.max(
+      6,
+      Math.min(requestedX, window.innerWidth - bounds.width - 6)
+    );
+    const top = Math.max(
+      6,
+      Math.min(requestedY, window.innerHeight - bounds.height - 6)
+    );
+    filesActionsDialog.style.left = `${Math.round(left)}px`;
+    filesActionsDialog.style.top = `${Math.round(top)}px`;
+    filesActionsDialog
+      .querySelector('.files-actions-buttons button:not([hidden])')
+      ?.focus({ preventScroll: true });
+  } else {
+    filesActionsDialog.style.removeProperty('left');
+    filesActionsDialog.style.removeProperty('top');
     filesActionsDialog.showModal();
+    filesActionsDialog.focus({ preventScroll: true });
   }
 }
 
-function closeFilesActions() {
+function closeFilesActions(options = {}) {
   filesActionTarget = null;
   if (filesActionsDialog?.open) {
     filesActionsDialog.close();
   }
+  filesActionsDialog?.classList.remove('files-action-sheet');
+  if (
+    options.restoreFocus !== false &&
+    viewMode === 'files' &&
+    filesPrimaryPointerIsFine()
+  ) {
+    filesListElement?.focus({ preventScroll: true });
+  }
 }
 
-function closeFilesPreview() {
-  if (filesPreviewBody) {
-    filesPreviewBody.textContent = '';
+function closeFilesPreview(options = {}) {
+  filesPreviewRequestId += 1;
+  filesPreviewTargetName = '';
+  filesPreviewRequestedName = '';
+  for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
+    if (body) {
+      body.textContent = '';
+    }
   }
   if (filesPreviewDialog?.open) {
     filesPreviewDialog.close();
   }
+  if (filesPreviewPane) {
+    filesPreviewPane.hidden = true;
+  }
+  if (
+    options.restoreFocus !== false &&
+    viewMode === 'files' &&
+    filesPrimaryPointerIsFine()
+  ) {
+    filesListElement?.focus({ preventScroll: true });
+  }
+}
+
+function openFilesOptions() {
+  updateFilesHiddenControls();
+  if (filesOptionsDialog && !filesOptionsDialog.open) {
+    filesOptionsDialog.showModal();
+    filesOptionsDialog.focus({ preventScroll: true });
+  }
+}
+
+function closeFilesOptions() {
+  if (filesOptionsDialog?.open) {
+    filesOptionsDialog.close();
+  }
+}
+
+function validateFilesEntryName(name) {
+  if (!name) {
+    return 'Enter a name.';
+  }
+  if (name.length > 180) {
+    return 'Use 180 characters or fewer.';
+  }
+  if (new TextEncoder().encode(name).length > 255) {
+    return 'This name is too large for the filesystem.';
+  }
+  if (name !== name.trim()) {
+    return 'Remove spaces from the beginning or end.';
+  }
+  if (
+    name === '.' ||
+    name === '..' ||
+    /[\/\\\0-\x1f\x7f]/.test(name)
+  ) {
+    return 'Names cannot be “.”, “..”, contain slashes, or control characters.';
+  }
+  return '';
+}
+
+function openFilesNameDialog(mode, target = null) {
+  if (!filesWritable) {
+    setStatus('This location is read-only', { sticky: true });
+    return false;
+  }
+  if (mode === 'rename' && !target) {
+    return false;
+  }
+  filesNameGeneration += 1;
+  filesNameMode = mode === 'rename' ? 'rename' : 'create';
+  filesNameTarget = target;
+  filesNameOriginRoot = filesRootId;
+  filesNameOriginPath = filesPath || '';
+  closeFilesActions({ restoreFocus: false });
+  closeFilesOptions();
+  if (filesNameTitle) {
+    filesNameTitle.textContent =
+      filesNameMode === 'rename' ? 'Rename item' : 'New folder';
+  }
+  if (filesNameLabel) {
+    filesNameLabel.textContent =
+      filesNameMode === 'rename' ? 'New name' : 'Folder name';
+  }
+  if (filesNameSubmit) {
+    filesNameSubmit.textContent =
+      filesNameMode === 'rename' ? 'Rename' : 'Create';
+    filesNameSubmit.disabled = false;
+  }
+  if (filesNameError) {
+    filesNameError.textContent = '';
+  }
+  if (filesNameInput) {
+    filesNameInput.value = filesNameMode === 'rename' ? target.name : '';
+  }
+  if (filesNameDialog && !filesNameDialog.open) {
+    filesNameDialog.showModal();
+  }
+  window.requestAnimationFrame(() => {
+    filesNameInput?.focus({ preventScroll: true });
+    if (filesNameMode === 'rename' && target?.type === 'file') {
+      const dotIndex = target.name.lastIndexOf('.');
+      filesNameInput?.setSelectionRange(
+        0,
+        dotIndex > 0 ? dotIndex : target.name.length
+      );
+    } else {
+      filesNameInput?.select();
+    }
+  });
+  return true;
+}
+
+function closeFilesNameDialog(options = {}) {
+  filesNameGeneration += 1;
+  if (filesNameDialog?.open) {
+    filesNameDialog.close();
+  }
+  filesNameMode = '';
+  filesNameTarget = null;
+  filesNameOriginRoot = '';
+  filesNameOriginPath = '';
+  if (filesNameError) {
+    filesNameError.textContent = '';
+  }
+  if (
+    options.restoreFocus !== false &&
+    viewMode === 'files' &&
+    filesPrimaryPointerIsFine()
+  ) {
+    filesListElement?.focus({ preventScroll: true });
+  }
+}
+
+async function submitFilesName() {
+  if (filesNameSubmit?.disabled) {
+    return;
+  }
+  const generation = filesNameGeneration;
+  const mode = filesNameMode;
+  const target = filesNameTarget;
+  const originRoot = filesNameOriginRoot;
+  const originPath = filesNameOriginPath;
+  const name = filesNameInput?.value || '';
+  const validationError = validateFilesEntryName(name);
+  if (validationError) {
+    if (filesNameError) {
+      filesNameError.textContent = validationError;
+    }
+    filesNameInput?.focus({ preventScroll: true });
+    return;
+  }
+  if (!mode || (mode === 'rename' && !target)) {
+    return;
+  }
+  if (filesNameSubmit) {
+    filesNameSubmit.disabled = true;
+  }
+  if (filesNameError) {
+    filesNameError.textContent = '';
+  }
+  try {
+    if (mode === 'rename') {
+      await api('/api/fs/entry', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          root: target.root,
+          path: target.path,
+          name
+        })
+      });
+      if (
+        generation === filesNameGeneration &&
+        filesRootId === target.root &&
+        filesPath === originPath &&
+        (
+          filesPreviewTargetName === target.name ||
+          filesPreviewRequestedName === target.name
+        )
+      ) {
+        closeFilesPreview({ restoreFocus: false });
+      }
+      setStatus(`Renamed ${target.name} to ${name}`);
+    } else {
+      await api('/api/fs/directory', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          root: originRoot,
+          path: originPath,
+          name
+        })
+      });
+      setStatus(`Created ${name}`);
+    }
+    const dialogStillCurrent =
+      generation === filesNameGeneration && filesNameDialog?.open;
+    if (dialogStillCurrent) {
+      closeFilesNameDialog({ restoreFocus: false });
+    }
+    const refreshed = await refreshFilesListingAfterMutation(
+      originRoot,
+      originPath,
+      dialogStillCurrent ? { name } : {}
+    );
+    if (refreshed && filesPrimaryPointerIsFine() && !filesNameDialog?.open) {
+      filesListElement?.focus({ preventScroll: true });
+    }
+  } catch (error) {
+    if (generation !== filesNameGeneration || !filesNameDialog?.open) {
+      setStatus(error.message || 'Operation failed', { sticky: true });
+      return;
+    }
+    if (filesNameError) {
+      filesNameError.textContent = error.message || 'Operation failed';
+    }
+    filesNameInput?.focus({ preventScroll: true });
+  } finally {
+    if (
+      filesNameSubmit &&
+      filesNameDialog?.open &&
+      generation === filesNameGeneration
+    ) {
+      filesNameSubmit.disabled = false;
+    }
+  }
 }
 
 async function previewFilesTarget(target) {
+  const targetDirectory = target.path
+    .split('/')
+    .slice(0, -1)
+    .join('/');
   const query = new URLSearchParams({
     root: target.root,
     path: target.path
   });
-  const preview = await api(`/api/fs/read?${query.toString()}`);
-  if (filesPreviewTitle) {
-    filesPreviewTitle.textContent = target.name;
+  const requestId = ++filesPreviewRequestId;
+  filesPreviewRequestedName = target.name;
+  let preview;
+  try {
+    preview = await api(`/api/fs/read?${query.toString()}`);
+  } catch (error) {
+    if (requestId !== filesPreviewRequestId) {
+      return;
+    }
+    throw error;
   }
-  if (filesPreviewBody) {
-    filesPreviewBody.textContent = preview.text || '';
+  if (
+    requestId !== filesPreviewRequestId ||
+    viewMode !== 'files' ||
+    filesRootId !== target.root ||
+    filesPath !== targetDirectory
+  ) {
+    return;
   }
-  closeFilesActions();
-  if (filesPreviewDialog && !filesPreviewDialog.open) {
+  for (const title of [filesPreviewTitle, filesPreviewPaneTitle]) {
+    if (title) {
+      title.textContent = target.name;
+    }
+  }
+  for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
+    if (body) {
+      body.textContent = preview.text || '';
+    }
+  }
+  filesPreviewTargetName = target.name;
+  closeFilesActions({ restoreFocus: false });
+  if (
+    filesPrimaryPointerIsFine() &&
+    window.matchMedia?.('(min-width: 840px)').matches
+  ) {
+    if (filesPreviewPane) {
+      filesPreviewPane.hidden = false;
+    }
+  } else if (filesPreviewDialog && !filesPreviewDialog.open) {
     filesPreviewDialog.showModal();
   }
 }
@@ -3614,6 +7239,13 @@ async function deleteFilesTarget(target) {
   if (!ok) {
     return;
   }
+  const deletedIndex = filesVisibleEntries.findIndex(
+    (entry) => entry.name === target.name
+  );
+  const targetDirectory = target.path
+    .split('/')
+    .slice(0, -1)
+    .join('/');
   const query = new URLSearchParams({
     root: target.root,
     path: target.path
@@ -3621,7 +7253,9 @@ async function deleteFilesTarget(target) {
   await api(`/api/fs/entry?${query.toString()}`, { method: 'DELETE' });
   setStatus(`Deleted ${target.name}`);
   closeFilesActions();
-  await refreshFilesListing();
+  await refreshFilesListingAfterMutation(target.root, targetDirectory, {
+    index: Math.max(0, deletedIndex)
+  });
 }
 
 async function uploadFilesSelected(fileList) {
@@ -3637,12 +7271,14 @@ async function uploadFilesSelected(fileList) {
     setStatus('File is too large (max 20 MB)', { sticky: true });
     return;
   }
+  const uploadRootId = filesRootId;
+  const uploadPath = filesPath || '';
   try {
     setStatus(`Uploading ${file.name}…`, { sticky: true });
     const buffer = await file.arrayBuffer();
     const query = new URLSearchParams({
-      root: filesRootId,
-      path: filesPath || '',
+      root: uploadRootId,
+      path: uploadPath,
       filename: file.name
     });
     await api(`/api/fs/upload?${query.toString()}`, {
@@ -3654,13 +7290,25 @@ async function uploadFilesSelected(fileList) {
       body: buffer
     });
     setStatus(`Uploaded ${file.name}`);
-    await refreshFilesListing();
+    await refreshFilesListingAfterMutation(uploadRootId, uploadPath, {
+      name: file.name
+    });
   } catch (error) {
     setStatus(error.message || 'Upload failed', { sticky: true });
   } finally {
     if (filesUploadInput) {
       filesUploadInput.value = '';
     }
+    if (filesUploadDesktopInput) {
+      filesUploadDesktopInput.value = '';
+    }
+  }
+}
+
+function openSettingsDialog() {
+  setSettingsTab(loadLastSettingsTab());
+  if (settingsDialogElement && !settingsDialogElement.open) {
+    settingsDialogElement.showModal();
   }
 }
 
@@ -3732,12 +7380,21 @@ function renderSessions() {
     const button = document.createElement('button');
     button.type = 'button';
     const isActive = session.name === activeSession;
-    button.className = isActive
-      ? 'session active closable'
-      : 'session';
-    button.textContent = session.name;
+    item.classList.toggle('active', isActive);
+    button.className = isActive ? 'session active' : 'session';
+    const profile = keyProfileForSession(session.name);
+    const sessionName = document.createElement('span');
+    sessionName.className = 'session-name';
+    sessionName.textContent = session.name;
+    const profileBadge = document.createElement('span');
+    profileBadge.className = 'session-profile-label';
+    profileBadge.textContent = profile.name;
+    profileBadge.dataset.shortLabel = shortProfileLabel(profile);
+    profileBadge.title = `Profile: ${profile.name}`;
+    button.append(sessionName, profileBadge);
     button.title =
       `${session.windows} window(s), ${session.attached} client(s). ` +
+      `Profile: ${profile.name}. ` +
       'Long-press to rename.';
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
@@ -3746,7 +7403,9 @@ function renderSessions() {
       const closeButton = document.createElement('button');
       closeButton.type = 'button';
       closeButton.className = 'session-close';
-      closeButton.textContent = '×';
+      closeButton.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+        '<path d="m4 4 8 8M12 4l-8 8" /></svg>';
       closeButton.title = `Kill ${session.name}`;
       closeButton.setAttribute('aria-label', `Kill session ${session.name}`);
       closeButton.addEventListener('click', () => killSession(session.name));
@@ -3759,6 +7418,9 @@ function renderSessions() {
 }
 
 async function refreshSessions(selectFirst = false, quiet = false) {
+  if (qaShellMode) {
+    return;
+  }
   try {
     const value = await api('/api/sessions');
     sessions = value.sessions;
@@ -3769,7 +7431,7 @@ async function refreshSessions(selectFirst = false, quiet = false) {
       disconnect();
     }
     renderSessions();
-    if (selectFirst && !activeSession && sessions.length > 0) {
+    if (selectFirst && !qaShellMode && !activeSession && sessions.length > 0) {
       const remembered = rememberedSession();
       const selected =
         sessions.find((session) => session.name === remembered) || sessions[0];
@@ -3958,8 +7620,11 @@ function scrollTerminal(direction) {
     if (direction === 'bottom') {
       terminal.scrollToBottom();
     } else {
-      terminal.scrollPages(direction === 'up' ? -1 : 1);
+      scrollTerminalLinesClamped(
+        (direction === 'up' ? -1 : 1) * Math.max(1, terminal.rows - 1)
+      );
     }
+    scheduleTerminalScrollClamp();
     return;
   }
 
@@ -4013,6 +7678,7 @@ function captureKeyboardLayoutLock() {
   keyboardLayoutLock.top = 0;
   document.documentElement.classList.add('keyboard-open');
   document.documentElement.classList.remove('standalone-reserved-bottom');
+  updateEffectiveSafeAreaInsets();
   document.documentElement.style.setProperty(
     '--app-height',
     `${keyboardLayoutLock.height}px`
@@ -4022,13 +7688,53 @@ function captureKeyboardLayoutLock() {
   document.documentElement.style.setProperty('--app-top', '0px');
 }
 
-function clearLockedAppGeometry() {
+/**
+ * Pin body height to the real interactive viewport (visualViewport / innerHeight).
+ * On iOS standalone, CSS 100dvh often disagrees with hit-testing until the first
+ * terminal gesture — leaving the footer visible but untappable.
+ */
+function pinPageToOrigin() {
+  window.scrollTo(0, 0);
+  document.documentElement.scrollTop = 0;
+  document.body.scrollTop = 0;
+}
+
+function applyRestingAppHeight(options = {}) {
+  const force = options.force === true;
+  if (
+    selectionViewportLock ||
+    (!force &&
+      (keyboardLayoutLock ||
+        keyboardDismissing ||
+        document.documentElement.classList.contains('keyboard-open')))
+  ) {
+    return;
+  }
+  const viewport = window.visualViewport;
+  const height = Math.round(
+    viewport?.height ||
+      window.innerHeight ||
+      document.documentElement.clientHeight ||
+      0
+  );
+  if (height <= 0) {
+    return;
+  }
+  lastAppliedViewportHeight = height;
+  lastAppliedViewportTop = 0;
+  document.documentElement.style.setProperty('--app-height', `${height}px`);
+  document.documentElement.style.setProperty('--app-top', '0px');
+  pinPageToOrigin();
+}
+
+function clearLockedAppGeometry(options = {}) {
   lastAppliedViewportHeight = null;
   lastAppliedViewportTop = null;
-  document.documentElement.style.removeProperty('--app-height');
-  document.documentElement.style.removeProperty('--app-top');
   document.documentElement.classList.remove('keyboard-open');
-  window.scrollTo(0, 0);
+  // Prefer an explicit resting height over bare 100dvh (standalone hit-test).
+  applyRestingAppHeight(options);
+  updateEffectiveSafeAreaInsets();
+  pinPageToOrigin();
 }
 
 function releaseKeyboardLayoutLock() {
@@ -4043,7 +7749,8 @@ function releaseKeyboardLayoutLock() {
   keyboardDismissPollTimer = null;
   // Drop the frozen keyboard-open geometry immediately so the grid can grow
   // again; then re-sync through the keyboard close animation.
-  clearLockedAppGeometry();
+  clearLockedAppGeometry({ force: true });
+  updateEffectiveSafeAreaInsets();
   scheduleFit();
   let attempts = 0;
   const pollKeyboardClosed = () => {
@@ -4059,10 +7766,11 @@ function releaseKeyboardLayoutLock() {
       return;
     }
     attempts += 1;
-    window.scrollTo(0, 0);
+    pinPageToOrigin();
     if (!keyboardViewportIsReduced() || attempts >= 24) {
       keyboardDismissing = false;
-      clearLockedAppGeometry();
+      clearLockedAppGeometry({ force: true });
+      updateEffectiveSafeAreaInsets();
       scheduleFit();
       scheduleVisualViewportUpdate();
       return;
@@ -4075,6 +7783,7 @@ function releaseKeyboardLayoutLock() {
     document.documentElement.style.setProperty('--app-top', '0px');
     lastAppliedViewportHeight = height;
     lastAppliedViewportTop = 0;
+    pinPageToOrigin();
     scheduleFit();
     keyboardDismissPollTimer = window.setTimeout(pollKeyboardClosed, 50);
   };
@@ -4273,7 +7982,7 @@ function applyTerminalTouchScroll(touch) {
   const direction = scrollPixelAccumulator > 0 ? -1 : 1;
   scrollPixelAccumulator = 0;
   if (terminal.modes.mouseTrackingMode === 'none') {
-    terminal.scrollLines(direction * steps);
+    scrollTerminalLinesClamped(direction * steps);
   } else {
     sendTmuxWheel(
       direction < 0 ? 64 : 65,
@@ -4649,7 +8358,7 @@ function installTouchScrolling() {
       touchMoved = true;
       const steps = Math.min(6, Math.max(1, Math.floor(Math.abs(delta) / 18)));
       if (terminal.modes.mouseTrackingMode === 'none') {
-        terminal.scrollLines(delta > 0 ? -steps : steps);
+        scrollTerminalLinesClamped(delta > 0 ? -steps : steps);
       } else {
         sendTmuxWheel(
           delta > 0 ? 64 : 65,
@@ -4700,6 +8409,7 @@ function fit() {
       Math.max(0, Math.min(previousViewportY, buffer.baseY))
     );
   }
+  scheduleTerminalScrollClamp();
   if (
     socket?.readyState === WebSocket.OPEN &&
     (terminal.cols !== lastSentTerminalCols ||
@@ -4719,7 +8429,6 @@ function fit() {
 
 function disconnect() {
   stopNativeDeleteRepeat();
-  intentionalClose = true;
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (socket) {
@@ -4729,6 +8438,7 @@ function disconnect() {
   lastSentTerminalCols = null;
   lastSentTerminalRows = null;
   activeSession = null;
+  syncActiveKeyProfileUi();
   clearConnectionWatch();
   setConnectionState('idle');
   setHeaderCollapsed(false);
@@ -4751,13 +8461,14 @@ async function connect(name) {
     updateTermControlsEnabled();
     return;
   }
-  intentionalClose = true;
   clearTimeout(reconnectTimer);
-  if (socket) {
-    socket.close();
+  const retiredSocket = socket;
+  socket = null;
+  if (retiredSocket) {
+    retiredSocket.close();
   }
-  intentionalClose = false;
   activeSession = name;
+  syncActiveKeyProfileUi();
   setConnectionState('connecting', `Connecting to ${name}…`);
   setStatus(`Connecting to ${name}…`, { sticky: true });
   armConnectionWatch(name);
@@ -4782,13 +8493,17 @@ async function connect(name) {
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  socket = new WebSocket(
+  const nextSocket = new WebSocket(
     `${protocol}//${window.location.host}/ws?session=${encodeURIComponent(name)}`
   );
+  socket = nextSocket;
   lastSentTerminalCols = null;
   lastSentTerminalRows = null;
-  socket.binaryType = 'arraybuffer';
-  socket.addEventListener('open', () => {
+  nextSocket.binaryType = 'arraybuffer';
+  nextSocket.addEventListener('open', () => {
+    if (socket !== nextSocket) {
+      return;
+    }
     clearConnectionWatch();
     lastConnectionDetail = `Connected to ${name}`;
     setConnectionState('connected', lastConnectionDetail);
@@ -4797,17 +8512,24 @@ async function connect(name) {
     updateTermControlsEnabled();
     fit();
   });
-  socket.addEventListener('message', (event) => {
+  nextSocket.addEventListener('message', (event) => {
+    if (socket !== nextSocket) {
+      return;
+    }
     terminal.write(
       typeof event.data === 'string' ? event.data : decoder.decode(event.data)
     );
   });
-  socket.addEventListener('close', () => {
+  nextSocket.addEventListener('close', () => {
     stopNativeDeleteRepeat();
     updateTermControlsEnabled();
-    if (intentionalClose || activeSession !== name) {
+    if (
+      socket !== nextSocket ||
+      activeSession !== name
+    ) {
       return;
     }
+    socket = null;
     setCtrlArmed(false);
     lastConnectionDetail = `Disconnected from ${name}; reconnecting…`;
     setConnectionState('connecting', lastConnectionDetail);
@@ -4815,7 +8537,10 @@ async function connect(name) {
     armConnectionWatch(name);
     reconnectTimer = setTimeout(() => connect(name), 1500);
   });
-  socket.addEventListener('error', () => {
+  nextSocket.addEventListener('error', () => {
+    if (socket !== nextSocket) {
+      return;
+    }
     lastConnectionDetail = `Connection error for ${name}. Tap the status dot to retry.`;
     setConnectionState('error', lastConnectionDetail);
     setStatus(lastConnectionDetail, { sticky: true });
@@ -4882,9 +8607,11 @@ async function renameSession(name) {
     // tmux keeps the same session attached after rename; only client labels
     // and remembered state need to update.
     renameSessionTheme(name, renamed);
+    renameSessionKeyProfileAssignment(name, renamed);
     if (activeSession === name) {
       activeSession = renamed;
       rememberSession(renamed);
+      syncActiveKeyProfileUi();
       renderHeaderSummary();
     }
     await refreshSessions(false, true);
@@ -4920,7 +8647,7 @@ function writeTextToClipboardLegacy(text) {
     copied = document.execCommand('copy');
   } catch (error) {
     clientDebug('copy-legacy-error', {
-      message: String(error?.message || error).slice(0, 120)
+      errorName: error?.name || 'Error'
     });
     copied = false;
   }
@@ -4951,7 +8678,6 @@ async function copyTerminalSelection(options = {}) {
       clearAfter,
       extractedLength: text.length,
       extractedLines: text ? text.split('\n').length : 0,
-      extractedPreview: text.slice(0, 48).replace(/[^\x20-\x7E\n]/g, '?'),
       apiEmpty: apiText.length === 0 && text.length > 0
     })
   );
@@ -4969,8 +8695,7 @@ async function copyTerminalSelection(options = {}) {
       clipboardOk = true;
     } catch (error) {
       clientDebug('copy-clipboard-error', {
-        name: error?.name || 'Error',
-        message: String(error?.message || error).slice(0, 120)
+        errorName: error?.name || 'Error'
       });
     }
   }
@@ -5155,8 +8880,7 @@ async function readClipboardPayloadBestEffort() {
     } catch (err) {
       error = String(err?.message || err).slice(0, 80);
       clientDebug('paste-clipboard-read', {
-        reason: 'read-failed',
-        message: error
+        reason: 'read-failed'
       });
     }
   }
@@ -5195,13 +8919,12 @@ async function pasteImageBlob(blob) {
     clientDebug('paste-image', {
       bytes: saved.bytes || blob.size,
       mimeType: saved.mimeType || blob.type || 'image/*',
-      pathLength: pathText.trim().length,
-      displayPath: shown
+      pathLength: pathText.trim().length
     });
     return true;
   } catch (error) {
     clientDebug('paste-image-error', {
-      message: String(error?.message || error).slice(0, 120)
+      errorName: error?.name || 'Error'
     });
     setStatus(error.message || 'Image paste failed');
     return false;
@@ -5264,8 +8987,7 @@ async function pasteClipboard() {
   if (error) {
     setStatus('Clipboard unavailable');
     clientDebug('paste-text-error', {
-      reason: 'clipboard-read-failed',
-      error
+      reason: 'clipboard-read-failed'
     });
     return;
   }
@@ -5366,6 +9088,13 @@ document.addEventListener(
 );
 // Hardware keyboard → PTY when session is active but focus is on chrome.
 document.addEventListener('keydown', handleHardwareKeyboardBridge, true);
+window.addEventListener('blur', stopNativeDeleteRepeat);
+window.addEventListener('pagehide', stopNativeDeleteRepeat);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopNativeDeleteRepeat();
+  }
+});
 
 viewModeElement?.addEventListener('click', (event) => {
   const button = event.target.closest('[data-view-mode]');
@@ -5375,24 +9104,49 @@ viewModeElement?.addEventListener('click', (event) => {
   setViewMode(button.dataset.viewMode);
 });
 filesUpButton?.addEventListener('click', () => {
-  if (!filesListing || filesListing.parent === null || filesListing.parent === undefined) {
-    return;
-  }
-  filesPath = filesListing.parent;
-  saveFilesNav();
-  void refreshFilesListing();
+  navigateFilesParent();
+});
+filesLocationSelect?.addEventListener('change', () => {
+  switchFilesRoot(filesLocationSelect.value);
+});
+filesNewFolderDesktopButton?.addEventListener('click', () => {
+  openFilesNameDialog('create');
 });
 filesRefreshButton?.addEventListener('click', () => {
   void refreshFilesListing();
 });
+filesRefreshDesktopButton?.addEventListener('click', () => {
+  void refreshFilesListing();
+});
 filesSettingsButton?.addEventListener('click', () => {
-  setSettingsTab(loadLastSettingsTab());
-  if (settingsDialogElement && !settingsDialogElement.open) {
-    settingsDialogElement.showModal();
-  }
+  openFilesOptions();
+});
+filesSettingsDesktopButton?.addEventListener('click', () => {
+  openSettingsDialog();
 });
 filesUploadInput?.addEventListener('change', () => {
   void uploadFilesSelected(filesUploadInput.files);
+});
+filesUploadDesktopInput?.addEventListener('change', () => {
+  void uploadFilesSelected(filesUploadDesktopInput.files);
+});
+filesUploadTriggers.forEach((trigger) => {
+  trigger.addEventListener('keydown', (event) => {
+    if (
+      trigger.getAttribute('aria-disabled') === 'true' ||
+      (event.key !== 'Enter' && event.key !== ' ')
+    ) {
+      return;
+    }
+    event.preventDefault();
+    trigger.querySelector('input[type="file"]')?.click();
+  });
+});
+filesListElement?.addEventListener('keydown', handleFilesListKeydown);
+filesListElement?.addEventListener('focus', () => {
+  if (filesSelectedIndex < 0 && filesVisibleEntries.length > 0) {
+    setFilesSelection(0, { scroll: false });
+  }
 });
 filesActionsClose?.addEventListener('click', () => {
   closeFilesActions();
@@ -5413,6 +9167,12 @@ filesActionDownload?.addEventListener('click', () => {
     setStatus(error.message || 'Download failed');
   });
 });
+filesActionRename?.addEventListener('click', () => {
+  if (!filesActionTarget) {
+    return;
+  }
+  openFilesNameDialog('rename', filesActionTarget);
+});
 filesActionInsert?.addEventListener('click', () => {
   if (!filesActionTarget) {
     return;
@@ -5430,6 +9190,39 @@ filesActionDelete?.addEventListener('click', () => {
 filesPreviewClose?.addEventListener('click', () => {
   closeFilesPreview();
 });
+filesPreviewPaneClose?.addEventListener('click', () => {
+  closeFilesPreview();
+});
+filesOptionsClose?.addEventListener('click', () => {
+  closeFilesOptions();
+});
+filesOptionNewFolder?.addEventListener('click', () => {
+  openFilesNameDialog('create');
+});
+filesOptionHidden?.addEventListener('change', () => {
+  filesShowHidden = filesOptionHidden.checked;
+  saveFilesShowHidden();
+  updateFilesHiddenControls();
+  if (filesListing) {
+    renderFilesListing(filesListing);
+  } else {
+    void refreshFilesListing();
+  }
+});
+filesNameClose?.addEventListener('click', () => {
+  closeFilesNameDialog();
+});
+filesNameCancel?.addEventListener('click', () => {
+  closeFilesNameDialog();
+});
+filesNameForm?.addEventListener('submit', (event) => {
+  event.preventDefault();
+  void submitFilesName();
+});
+filesOptionSettings?.addEventListener('click', () => {
+  closeFilesOptions();
+  openSettingsDialog();
+});
 filesActionsDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeFilesActions();
@@ -5438,15 +9231,74 @@ filesPreviewDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeFilesPreview();
 });
+filesOptionsDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeFilesOptions();
+});
+filesNameDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeFilesNameDialog();
+});
+document.addEventListener('pointerdown', (event) => {
+  if (
+    filesActionsDialog?.open &&
+    !filesActionsDialog.matches(':modal') &&
+    !filesActionsDialog.contains(event.target)
+  ) {
+    closeFilesActions({ restoreFocus: false });
+  }
+});
+document.addEventListener('keydown', (event) => {
+  if (
+    event.key === 'Escape' &&
+    filesActionsDialog?.open &&
+    !filesActionsDialog.matches(':modal')
+  ) {
+    event.preventDefault();
+    closeFilesActions();
+  }
+});
+window.addEventListener('resize', () => {
+  scheduleFooterPinLayout();
+  if (filesActionsDialog?.open && !filesActionsDialog.matches(':modal')) {
+    closeFilesActions({ restoreFocus: false });
+  }
+  if (
+    filesPreviewPane &&
+    !filesPreviewPane.hidden &&
+    !window.matchMedia?.('(min-width: 840px)').matches
+  ) {
+    closeFilesPreview({ restoreFocus: false });
+  }
+  if (filesListing && viewMode === 'files') {
+    renderFilesBreadcrumb(filesListing);
+  }
+});
 
 document.querySelector('#create').addEventListener('click', createSession);
 headerSummaryButton.addEventListener('click', () => {
+  // The row stays in place while the picker is open, so it toggles.
+  if (headerPickerOpen()) {
+    setHeaderCollapsed(true);
+    return;
+  }
   setHeaderCollapsed(false);
   refreshSessions(false, true);
 });
-document
-  .querySelector('#header-expanded')
-  .addEventListener('pointerdown', scheduleHeaderCollapse);
+connectionDotElement.addEventListener('click', (event) => {
+  event.preventDefault();
+  event.stopPropagation();
+  forceReconnectActiveSession();
+});
+// Any interaction with the picker — pointer, keyboard, or scrolling a long
+// session list — defers auto-collapse.
+// Capture, because `scroll` on the session list does not bubble.
+for (const activity of ['pointerdown', 'keydown', 'focusin', 'scroll']) {
+  headerExpandedElement?.addEventListener(activity, scheduleHeaderCollapse, {
+    capture: true,
+    passive: true
+  });
+}
 document
   .querySelector('#collapse-header')
   .addEventListener('click', () => setHeaderCollapsed(true));
@@ -5499,9 +9351,61 @@ drawerKeysButton?.addEventListener('click', () => {
 drawerSnipsButton?.addEventListener('click', () => {
   setFooterDrawer('snips');
 });
-drawerFindButton?.addEventListener('click', () => {
-  closeFooterDrawer();
+footerPinOverflowButton?.addEventListener('click', () => {
+  if (footerDrawer === 'snips' && footerSnipsInOverflow) {
+    closeFooterDrawer();
+  } else {
+    setFooterDrawer('pins');
+  }
+});
+quickMenuProfileList?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-profile-id]');
+  if (!button || !quickMenuProfileList.contains(button)) {
+    return;
+  }
+  assignActiveSessionKeyProfile(button.dataset.profileId);
+  closeQuickMenu();
+});
+quickMenuProfileList?.addEventListener('keydown', (event) => {
+  if (event.altKey || event.ctrlKey || event.metaKey) {
+    return;
+  }
+  if (moveQuickMenuProfileFocus(event.key)) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+});
+quickMenuCloseButton?.addEventListener('click', closeQuickMenu);
+quickMenuFindButton?.addEventListener('click', () => {
+  closeQuickMenu();
   openFindBar();
+});
+quickMenuRenameButton?.addEventListener('click', () => {
+  const session = activeSession;
+  closeQuickMenu();
+  void renameSession(session);
+});
+quickMenuReconnectButton?.addEventListener('click', () => {
+  closeQuickMenu();
+  forceReconnectActiveSession();
+});
+quickMenuSettingsButton?.addEventListener('click', () => {
+  closeQuickMenu();
+  openSettingsDialog();
+});
+// Tapping the app outside an open session picker dismisses it. Taps over the
+// terminal land on #picker-scrim, so they never reach the session; other
+// controls (find bar, footer) stay one-tap. Without a session the expanded bar
+// is the resting state that the empty view points at, so it is left alone.
+document.addEventListener('pointerdown', (event) => {
+  if (
+    !activeSession ||
+    !headerPickerOpen() ||
+    appHeaderElement.contains(event.target)
+  ) {
+    return;
+  }
+  setHeaderCollapsed(true);
 });
 settingsTabsElement?.addEventListener('click', (event) => {
   const tab = event.target.closest('[data-settings-tab]');
@@ -5510,15 +9414,8 @@ settingsTabsElement?.addEventListener('click', (event) => {
   }
   setSettingsTab(tab.dataset.settingsTab);
 });
-document.querySelector('#settings').addEventListener('click', () => {
-  setSettingsTab(loadLastSettingsTab());
-  if (!settingsDialogElement.open) {
-    settingsDialogElement.showModal();
-  }
-});
-document.querySelector('#create-collapsed')?.addEventListener('click', () => {
-  void createSession();
-});
+document.querySelector('#settings').addEventListener('click', openQuickMenu);
+headerSettingsButton?.addEventListener('click', openQuickMenu);
 document.querySelector('#settings-close').addEventListener('click', () => {
   settingsDialogElement.close();
 });
@@ -5530,13 +9427,16 @@ shortcutEditorList?.addEventListener('click', (event) => {
   }
   const id = item.dataset.shortcutId;
   const action = button.dataset.action;
-  if (action === 'up') {
+  if (action === 'pin') {
+    toggleProfilePin(editorKeyProfile().id, 'key', id);
+  } else if (action === 'up') {
     moveShortcut(id, -1);
   } else if (action === 'down') {
     moveShortcut(id, 1);
   } else if (action === 'remove') {
     removeShortcut(id);
   }
+  button.closest('details')?.removeAttribute('open');
 });
 shortcutAddButton?.addEventListener('click', () => {
   const id = shortcutAddSelect?.value;
@@ -5546,6 +9446,49 @@ shortcutAddButton?.addEventListener('click', () => {
 });
 shortcutResetButton?.addEventListener('click', () => {
   resetShortcuts();
+});
+keyProfileSelect?.addEventListener('change', () => {
+  selectKeyProfileForEditor(keyProfileSelect.value);
+});
+keyProfileDefaultSelect?.addEventListener('change', () => {
+  setDefaultKeyProfile(keyProfileDefaultSelect.value);
+});
+keyProfileNewButton?.addEventListener('click', createKeyProfile);
+keyProfileDuplicateButton?.addEventListener('click', duplicateKeyProfile);
+keyProfileRenameButton?.addEventListener('click', renameKeyProfile);
+keyProfileDeleteButton?.addEventListener('click', deleteKeyProfile);
+for (const button of [
+  keyProfileNewButton,
+  keyProfileDuplicateButton,
+  keyProfileRenameButton,
+  keyProfileDeleteButton
+]) {
+  button?.addEventListener('click', () => {
+    button.closest('details')?.removeAttribute('open');
+  });
+}
+profileSnippetList?.addEventListener('change', (event) => {
+  if (!event.target.matches('input[type="checkbox"]')) {
+    return;
+  }
+  const ids = [...profileSnippetList.querySelectorAll(
+    'input[type="checkbox"]:checked'
+  )].map((input) => input.value);
+  saveProfileSnippetIds(ids);
+});
+profileSnippetList?.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-action="pin"]');
+  const item = event.target.closest('[data-snippet-id]');
+  if (!button || !item || !profileSnippetList.contains(item)) {
+    return;
+  }
+  toggleProfilePin(editorKeyProfile().id, 'snip', item.dataset.snippetId);
+});
+profileSnippetsAllButton?.addEventListener('click', () => {
+  saveProfileSnippetIds(null);
+});
+profileSnippetsNoneButton?.addEventListener('click', () => {
+  saveProfileSnippetIds([]);
 });
 customKeyTypeSelect?.addEventListener('change', () => {
   syncCustomKeyFormFields();
@@ -5578,18 +9521,45 @@ snippetSaveButton?.addEventListener('click', () => {
 snippetResetButton?.addEventListener('click', () => {
   void resetSnippetsToPresets();
 });
+preferencesSyncEnableButton?.addEventListener('click', () => {
+  void enablePreferencesSync();
+});
+preferencesSyncLoadButton?.addEventListener('click', () => {
+  void loadLatestSharedPreferences();
+});
+preferencesSyncReplaceButton?.addEventListener('click', () => {
+  void replaceSharedPreferences();
+});
+preferencesSyncRetryButton?.addEventListener('click', () => {
+  if (
+    preferencesSyncEnabled &&
+    preferencesWriteAllowed(
+      preferencesSyncIdentity,
+      preferencesSyncIdentityConfirmed
+    )
+  ) {
+    void flushPreferencesSync();
+  } else {
+    void loadPreferencesFromServer();
+  }
+});
 populateThemeSelect();
 applyTerminalTheme(terminalThemeName, { persist: false });
+loadKeyProfilesDocument();
+keyProfileEditorId = activeKeyProfile().id;
+renderKeyProfileControls();
 renderFooterPins();
 closeFooterDrawer();
 loadFilesNav();
 updateTermControlsEnabled();
 void loadAppConfig();
+prepareInitialPreferences();
+preferencesTrackingReady = true;
+void initializeSharedSetupAndSnippets();
 setViewMode(loadViewMode(), { persist: false });
 if (viewMode === 'files') {
   void ensureFilesRoots();
 }
-void loadSnippetsFromServer();
 terminalThemeElement.addEventListener('change', () => {
   applyTerminalTheme(terminalThemeElement.value, { persist: true });
 });
@@ -5609,6 +9579,49 @@ document.addEventListener('pointerdown', preserveKeyboardState, {
 });
 const resizeObserver = new ResizeObserver(scheduleFit);
 resizeObserver.observe(terminalElement);
+const footerPinResizeObserver = new ResizeObserver(scheduleFooterPinLayout);
+footerPinResizeObserver.observe(footerScrollElement);
+// The portrait session menu sizes itself against the real footer, which grows
+// when a Keys/Snips drawer is open.
+const footerElement = document.querySelector('footer');
+const publishFooterHeight = () => {
+  if (!footerElement) {
+    return;
+  }
+  const height = Math.round(footerElement.getBoundingClientRect().height);
+  // Publish only where the value is consumed — the portrait bottom bar. The
+  // landscape rail is a full-height column, and leaving its height behind would
+  // starve the portrait menu after a rotation.
+  const bottomBar = window.matchMedia?.(
+    '(orientation: portrait) and (pointer: coarse)'
+  ).matches;
+  if (height > 0 && bottomBar) {
+    document.documentElement.style.setProperty(
+      '--footer-height',
+      `${height}px`
+    );
+  } else {
+    document.documentElement.style.removeProperty('--footer-height');
+  }
+};
+const footerHeightResizeObserver = new ResizeObserver(publishFooterHeight);
+if (footerElement) {
+  footerHeightResizeObserver.observe(footerElement);
+  publishFooterHeight();
+}
+const handleViewportGeometryChange = () => {
+  applyRestingAppHeight();
+  publishFooterHeight();
+  scheduleVisualViewportUpdate();
+  scheduleLayoutDebug('viewport');
+};
+window.addEventListener('resize', handleViewportGeometryChange);
+window.addEventListener('orientationchange', handleViewportGeometryChange);
+window.visualViewport?.addEventListener('resize', handleViewportGeometryChange);
+window.visualViewport?.addEventListener('scroll', () => {
+  scheduleVisualViewportUpdate();
+  scheduleLayoutDebug('visual-viewport');
+});
 
 function keyboardViewportIsReduced() {
   const viewport = window.visualViewport;
@@ -5665,8 +9678,13 @@ function updateVisualViewport() {
     document.documentElement.clientHeight || window.innerHeight
   );
   if (keyboardDismissing && !terminalInputIsFocused()) {
-    // Keyboard close path owns geometry until the animation finishes.
-    window.scrollTo(0, 0);
+    // Follow the expanding viewport during keyboard close. Keeping the old
+    // keyboard-height lock here leaves the terminal bottom halfway up the
+    // screen after an iOS swipe-to-dismiss.
+    applyRestingAppHeight({ force: true });
+    updateEffectiveSafeAreaInsets();
+    pinPageToOrigin();
+    scheduleFit();
     return;
   }
   // Soft keyboard dismissed (viewport full again) while a lock remains —
@@ -5698,10 +9716,12 @@ function updateVisualViewport() {
     'standalone-reserved-bottom',
     !keyboardOpen && standaloneViewportReservesBottom(layoutHeight)
   );
+  // Recompute effective safe-area after keyboard-open class changes.
+  updateEffectiveSafeAreaInsets();
   if (!selectionViewportLock && !keyboardOpen && !pageZoomed) {
     keyboardLayoutLock = null;
     keyboardDismissing = false;
-    clearLockedAppGeometry();
+    applyRestingAppHeight();
     scheduleFit();
     return;
   }
@@ -5747,67 +9767,27 @@ function scheduleVisualViewportUpdate() {
   );
 }
 
-window.addEventListener('resize', scheduleVisualViewportUpdate);
-window.addEventListener('orientationchange', () => {
-  setTimeout(() => {
-    if (selectionViewportLock) {
-      selectionViewportLock = currentVisualViewportGeometry();
-    }
-    scheduleVisualViewportUpdate();
-  }, 150);
-});
-window.visualViewport?.addEventListener('resize', scheduleVisualViewportUpdate);
-window.visualViewport?.addEventListener('scroll', () => {
-  // Kill iOS keyboard rubber-band panning of the layout.
-  window.scrollTo(0, 0);
-  if (nativeTouchStartX !== null || keyboardLayoutLock || keyboardDismissing) {
-    if (keyboardLayoutLock && !keyboardDismissing) {
-      document.documentElement.style.setProperty(
-        '--app-height',
-        `${keyboardLayoutLock.height}px`
-      );
-      document.documentElement.style.setProperty('--app-top', '0px');
-    }
-    return;
-  }
-  scheduleVisualViewportUpdate();
-});
-window.addEventListener('blur', stopNativeDeleteRepeat);
-window.addEventListener('pagehide', stopNativeDeleteRepeat);
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    stopNativeDeleteRepeat();
-    return;
-  }
-  if (activeSession && socket?.readyState !== WebSocket.OPEN) {
-    lastConnectionDetail = `Reconnecting to ${activeSession}…`;
-    setConnectionState('connecting', lastConnectionDetail);
-    setStatus(lastConnectionDetail, { sticky: true });
-    connect(activeSession);
-  }
-});
-
-connectionDotElement.addEventListener('click', (event) => {
-  // Dot is inside the summary button; keep reconnect separate from expand.
-  event.preventDefault();
-  event.stopPropagation();
-  if (!activeSession) {
-    setHeaderCollapsed(false);
-    return;
-  }
-  if (
-    connectionState === 'connected' &&
-    socket?.readyState === WebSocket.OPEN
-  ) {
-    setStatus(`Connected to ${activeSession}`);
-    return;
-  }
-  forceReconnectActiveSession();
-});
-
+// Re-apply after full JS load (head script already ran once for first paint).
+applyViewportFitPolicy();
+applyRestingAppHeight();
 scheduleVisualViewportUpdate();
-refreshSessions(true);
-window.setInterval(
-  () => refreshSessions(false, true),
-  sessionRefreshMilliseconds
-);
+// Second pass after iOS settles standalone chrome (safe-area + innerHeight).
+window.setTimeout(() => {
+  applyViewportFitPolicy();
+  applyRestingAppHeight();
+  scheduleVisualViewportUpdate();
+  scheduleFit();
+}, 100);
+window.setTimeout(() => {
+  applyRestingAppHeight();
+  scheduleVisualViewportUpdate();
+  scheduleFit();
+  scheduleLayoutDebug('settled');
+}, 400);
+if (!qaShellMode) {
+  refreshSessions(true);
+  window.setInterval(
+    () => refreshSessions(false, true),
+    sessionRefreshMilliseconds
+  );
+}

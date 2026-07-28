@@ -44,7 +44,7 @@ if [[ -z "$origin_required" ]]; then
   exit 1
 fi
 
-for command_name in node npm systemctl tmux install; do
+for command_name in node npm systemctl tmux install mv; do
   command -v "$command_name" >/dev/null || {
     printf '%s\n' "install.sh: missing required command: ${command_name}" >&2
     exit 1
@@ -71,12 +71,21 @@ npm ci --omit=dev --no-audit --no-fund --prefix "$state_root"
 
 install -m 600 "${app_source}/server.js" "${state_root}/server.js"
 install -m 600 "${app_source}/fs-jail.js" "${state_root}/fs-jail.js"
+install -m 600 "${app_source}/diagnostics.js" "${state_root}/diagnostics.js"
+install -m 600 \
+  "${app_source}/preferences-store.js" \
+  "${state_root}/preferences-store.js"
 install -m 700 "${app_source}/attach-session" "${state_root}/attach-session"
 node --check "${state_root}/fs-jail.js"
+node --check "${state_root}/diagnostics.js"
+node --check "${state_root}/preferences-store.js"
 
 install -m 600 "${app_source}/public/index.html" "${state_root}/public/index.html"
 install -m 600 "${app_source}/public/app.css" "${state_root}/public/app.css"
 install -m 600 "${app_source}/public/app.js" "${state_root}/public/app.js"
+install -m 600 \
+  "${app_source}/public/viewport-init.js" \
+  "${state_root}/public/viewport-init.js"
 install -m 600 \
   "${app_source}/public/manifest.webmanifest" \
   "${app_source}/public/terminal.svg" \

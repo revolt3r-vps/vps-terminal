@@ -33,7 +33,25 @@ Missing `VPS_TERMINAL_ORIGIN` outside `LOCAL_DEV` causes startup failure.
 | `VPS_TERMINAL_FS_HOME` | enabled | Set `0` to disable home FS root |
 | `VPS_TERMINAL_FS_EXTRA` | unset | `id:label:path[:ro][,…]` extra FS roots |
 | `VPS_TERMINAL_DEV_EMAIL` | `dev@localhost.test` | Identity in LOCAL_DEV only |
+| `VPS_TERMINAL_CLIENT_DEBUG` | disabled | Set `1` for bounded metadata-only client diagnostics |
 | `HOME` | process home | State under `~/.local/share/vps-terminal` |
+
+## File locations
+
+The Files UI does not hardcode `Home`, `Projects`, or `Paste`. It renders the
+root catalog returned by the server for that installation:
+
+- `VPS_TERMINAL_FS_HOME=0` removes the home root.
+- `VPS_TERMINAL_PROJECT_ROOT` and `VPS_TERMINAL_PASTE_ROOT` change the built-in
+  project and paste locations.
+- `VPS_TERMINAL_FS_EXTRA=id:label:path[:ro]` adds an installation-specific
+  labeled root; append `:ro` for read-only access.
+
+These Locations are filesystem security boundaries, not client-side
+bookmarks. The UI may navigate and remember paths inside them, but it cannot
+add a root or escape one. Desktop and sufficiently large tablets show
+Locations in a sidebar; phones and short landscape windows use a compact
+native selector.
 
 ## On-disk state
 
@@ -41,7 +59,8 @@ Missing `VPS_TERMINAL_ORIGIN` outside `LOCAL_DEV` causes startup failure.
 |------|---------|
 | `~/.local/share/vps-terminal/run/terminal.sock` | Listen socket (when configured) |
 | `~/.local/share/vps-terminal/snippets.json` | User snippets |
-| `~/.local/share/vps-terminal/client-debug.log` | Optional client debug |
+| `~/.local/share/vps-terminal/preferences/*.json` | Opt-in per-login profile, pin, assignment, and theme setup (hashed identity filenames, 0600) |
+| `~/.local/share/vps-terminal/client-debug.log` | Opt-in metadata-only client debug (0600, bounded to 256 KiB) |
 | `~/paste/*` | Temporary paste images (pruned) |
 
 ## Auth header
@@ -54,6 +73,20 @@ X-Vps-Authenticated-Email: user@example.com
 
 The value must look like an email. There is no per-user permission model inside
 the app: any authenticated email gets full access as the service Unix user.
+
+The authenticated email also separates optional Shared setup documents.
+Filenames contain only a SHA-256 identity digest, not the email address. A
+matching digest is embedded in the authenticated, `no-store` app shell so the
+browser can choose the correct private cache before first paint without
+exposing the email. A browser must explicitly seed the first shared setup;
+after that, browsers using the same authenticated login load it automatically.
+Revision checks prevent a stale browser from silently replacing a newer setup.
+
+Shared setup includes profiles, keys, selected snippets, pins, tmux-session
+profile assignments, and themes. Active session, Terminal/Files view, current
+Files location, font size, open Settings tab, and dismissed hints remain
+device-local because they describe the current device or moment rather than
+durable configuration.
 
 ## Snippet defaults
 

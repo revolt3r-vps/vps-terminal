@@ -11,7 +11,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --no-audit --no-fund
 
-COPY server.js fs-jail.js attach-session ./
+COPY server.js fs-jail.js diagnostics.js preferences-store.js attach-session ./
 COPY public ./public
 COPY scripts/vendor-assets.sh ./scripts/vendor-assets.sh
 RUN bash scripts/vendor-assets.sh \

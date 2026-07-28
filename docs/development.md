@@ -17,6 +17,11 @@ node server.js
 Open `http://127.0.0.1:3099/`. Identity is `dev@localhost.test` (override with
 `VPS_TERMINAL_DEV_EMAIL`).
 
+Set `VPS_TERMINAL_CLIENT_DEBUG=1` to write bounded, metadata-only browser
+diagnostics to `~/.local/share/vps-terminal/client-debug.log`. The local
+workspace launcher enables this by default. Terminal contents, selected text,
+clipboard text, paths, session names, and credentials are discarded.
+
 **Never** enable `LOCAL_DEV` on a publicly reachable interface or a real VPS
 you care about.
 
@@ -26,6 +31,9 @@ you care about.
 npm test          # scripts/check.sh
 npm run check     # node --check on main sources
 ```
+
+Responsive browser QA, device profiles, artifacts, and the AI iteration loop
+are documented in [qa.md](qa.md).
 
 ## System packages for node-pty
 

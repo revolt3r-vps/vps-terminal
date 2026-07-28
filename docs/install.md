@@ -93,7 +93,7 @@ On **Debian/Ubuntu** as your normal user (with sudo):
 ```bash
 sudo apt-get update
 sudo apt-get install -y \
-  curl ca-certificates git build-essential python3 \
+  curl ca-certificates git build-essential coreutils python3 \
   tmux
 ```
 
@@ -267,7 +267,7 @@ If login fails, see [Troubleshooting](#troubleshooting) below and
 
 ## Troubleshooting
 
-### `install.sh: missing required command: node` (or `tmux`, `systemctl`)
+### `install.sh: missing required command: node` (or `tmux`, `mv`, `systemctl`)
 
 Install packages from [§2](#2-install-system-packages). For `systemctl --user`,
 enable linger and set `XDG_RUNTIME_DIR`.

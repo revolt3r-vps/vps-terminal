@@ -15,13 +15,15 @@
   "homepage": "https://github.com/revolt3r-vps/vps-terminal#readme",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check fs-jail.js && node --check public/app.js",
+    "check": "node --check server.js && node --check diagnostics.js && node --check fs-jail.js && node --check preferences-store.js && node --check public/app.js && node --check public/viewport-init.js",
     "vendor": "bash scripts/vendor-assets.sh",
     "test": "bash scripts/check.sh"
   },
   "files": [
     "server.js",
+    "diagnostics.js",
     "fs-jail.js",
+    "preferences-store.js",
     "attach-session",
     "public/**/*",
     "scripts/**/*",
