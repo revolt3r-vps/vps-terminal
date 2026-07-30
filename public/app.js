@@ -90,6 +90,7 @@ const connectionDotElement = document.querySelector('#connection-dot');
 const statusElement = document.querySelector('#status');
 const keyboardButton = document.querySelector('#keyboard');
 const pasteButton = document.querySelector('#paste');
+const pasteHistoryElement = document.querySelector('#paste-history');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
 const terminalLinkChip = document.querySelector('#terminal-link-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
@@ -203,6 +204,9 @@ const preferencesPendingCacheStorageKey =
 const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
 const footerPinsStorageKey = 'vps-terminal-footer-pins';
+const footerRecentChipsStorageKey = 'vps-terminal-footer-recent';
+const pasteHistoryStorageKey = 'vps-terminal-paste-history';
+const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
 const filesNavStorageKey = 'vps-terminal-files-nav';
 const filesShowHiddenStorageKey = 'vps-terminal-files-show-hidden';
@@ -322,7 +326,10 @@ const builtinShortcutCatalog = {
   f9: { label: 'F9', kind: 'sequence', sequence: '\u001b[20~' },
   f10: { label: 'F10', kind: 'sequence', sequence: '\u001b[21~' },
   f11: { label: 'F11', kind: 'sequence', sequence: '\u001b[23~' },
-  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' }
+  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' },
+  // Only reachable through the contextual vim chip set, and deliberately absent
+  // from builtinShortcutGroups: the picker offers keys, not editor commands.
+  'vim-write': { label: ':w', kind: 'sequence', sequence: ':w\r' }
 };
 // Grouped for the Settings → Keys add picker (order within groups is picker order).
 const builtinShortcutGroups = [
@@ -2144,6 +2151,7 @@ function activateShortcut(id) {
   if (!def) {
     return;
   }
+  noteChipUsed('key', id);
   if (def.kind === 'ctrl') {
     clearTerminalSelection();
     setCtrlArmed(!ctrlArmed);
@@ -2255,6 +2263,181 @@ function runFind(direction) {
     setStatus('Find failed');
     return false;
   }
+}
+
+// ---- Start of the pure footer rail block. ----
+// Written free of DOM and browser globals so it can be sliced out of the shipped
+// source for tests, the same way the keyboard transition block is.
+
+// How many chips the rail builds before the measure pass hides what does not fit.
+// The measure decides what is visible; this only bounds how much DOM is made.
+const maximumFooterRailChips = 10;
+
+/**
+ * Chip sets by foreground command, keyed on tmux `pane_current_command`.
+ *
+ * The point of the rail is to be right most of the time without being curated.
+ * Commands are matched as exact lowercase basenames — a prefix match would make
+ * `nodemon` an agent and `vimdiff` an editor, and both are wrong often enough to
+ * be worse than the fallback.
+ */
+const contextualChipSets = [
+  {
+    // Agent CLIs. `node` is here because Codex and most agent wrappers report it.
+    commands: ['claude', 'codex', 'node', 'aider', 'grok'],
+    ids: ['esc', 'shift-tab', 'ctrl-c', 'up']
+  },
+  {
+    commands: ['vim', 'nvim', 'vi', 'view'],
+    ids: ['esc', 'vim-write', 'ctrl-c', 'up']
+  },
+  {
+    commands: ['bash', 'zsh', 'sh', 'fish', 'ksh', 'dash'],
+    ids: ['tab', 'ctrl-r', 'ctrl-c', 'up']
+  },
+  {
+    // Pagers: scrolling and quitting, not editing.
+    commands: ['less', 'more', 'man', 'git'],
+    ids: ['space', 'up', 'down', 'ctrl-c']
+  }
+];
+
+/**
+ * Last resort, used only when pins, context and recents together produce nothing
+ * — a fresh profile watching an unrecognised command. An empty rail reads as
+ * broken, and these four are useful under anything.
+ */
+const defaultRailChipIds = ['esc', 'tab', 'up', 'ctrl-c'];
+
+/**
+ * Chip ids for a foreground command, or [] when the command is unknown. Empty is
+ * the honest answer: the caller falls back to pins and recents rather than
+ * emptying the rail.
+ */
+function contextualChipIdsForCommand(command) {
+  if (typeof command !== 'string' || command.length === 0) {
+    return [];
+  }
+  const normalized = command.trim().toLowerCase();
+  const set = contextualChipSets.find((entry) =>
+    entry.commands.includes(normalized)
+  );
+  return set ? [...set.ids] : [];
+}
+
+/**
+ * The rail, in order: pinned chips first, then the contextual set for whatever is
+ * running, then most-recently-used. Pins keep their slots because they are listed
+ * first and the measure pass hides from the end — so a contextual chip can never
+ * push a pin off the rail.
+ */
+function orderFooterRailChips(options = {}) {
+  const pins = options.pins || [];
+  const contextual = options.contextual || [];
+  const recent = options.recent || [];
+  const isKnown = options.isKnown || (() => true);
+  const limit = options.limit ?? maximumFooterRailChips;
+  const seen = new Set();
+  const chips = [];
+  const push = (kind, id, source) => {
+    const key = `${kind}:${id}`;
+    if (seen.has(key) || chips.length >= limit || !isKnown(kind, id)) {
+      return;
+    }
+    seen.add(key);
+    chips.push({ kind, id, source, pinned: source === 'pin' });
+  };
+  for (const pin of pins) {
+    push(pin.kind, pin.id, 'pin');
+  }
+  for (const id of contextual) {
+    push('key', id, 'contextual');
+  }
+  for (const entry of recent) {
+    push(entry.kind, entry.id, 'recent');
+  }
+  if (chips.length === 0) {
+    for (const id of options.fallback || defaultRailChipIds) {
+      push('key', id, 'default');
+    }
+  }
+  return chips;
+}
+
+/**
+ * Move a chip to the front of the recent list. Bounded, and it stores only the
+ * kind and id of a chip the user already has — no terminal content.
+ */
+function recordChipUse(recent, kind, id, limit = maximumFooterRailChips) {
+  const next = (recent || []).filter(
+    (entry) => entry.kind !== kind || entry.id !== id
+  );
+  next.unshift({ kind, id });
+  return next.slice(0, limit);
+}
+// ---- End of the pure footer rail block. ----
+
+// Most-recently-used chips, newest first. Chip identities only — never terminal
+// content — so this is ordinary preference data, not paste-buffer data.
+let footerRecentChips = loadFooterRecentChips();
+
+function loadFooterRecentChips() {
+  if (qaShellMode) {
+    return [];
+  }
+  try {
+    const raw = window.localStorage.getItem(footerRecentChipsStorageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter(
+        (entry) =>
+          entry &&
+          (entry.kind === 'key' || entry.kind === 'snip') &&
+          typeof entry.id === 'string' &&
+          entry.id.length > 0 &&
+          entry.id.length <= 64
+      )
+      .slice(0, maximumFooterRailChips)
+      .map((entry) => ({ kind: entry.kind, id: entry.id }));
+  } catch {
+    return [];
+  }
+}
+
+function saveFooterRecentChips() {
+  if (qaShellMode) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      footerRecentChipsStorageKey,
+      JSON.stringify(footerRecentChips)
+    );
+  } catch {
+    // Continue without persistence.
+  }
+}
+
+/**
+ * Deliberately does not re-render. Rebuilding the rail on the tap that is being
+ * handled would swap the DOM out from under the finger that pressed it; the new
+ * order lands on the next natural rebuild (session, profile, or command change).
+ */
+function noteChipUsed(kind, id) {
+  footerRecentChips = recordChipUse(footerRecentChips, kind, id);
+  saveFooterRecentChips();
+}
+
+/** The foreground command of the active session, or null when unknown. */
+function activeSessionCommand() {
+  if (!activeSession) {
+    return null;
+  }
+  const session = sessions.find((entry) => entry.name === activeSession);
+  return typeof session?.command === 'string' ? session.command : null;
 }
 
 function loadFooterPins(profile = activeKeyProfile()) {
@@ -2636,29 +2819,54 @@ function scheduleFooterPinLayout() {
   });
 }
 
+// What the rail was last built for, so a poll that changed nothing does not
+// rebuild the DOM under the user's finger.
+let footerRailCommand = null;
+
 function renderFooterPins() {
   if (!footerPinsElement) {
     return;
   }
+  const snippets = snippetsForProfile();
+  footerRailCommand = activeSessionCommand();
+  const chips = orderFooterRailChips({
+    pins: loadFooterPins(),
+    contextual: contextualChipIdsForCommand(footerRailCommand),
+    recent: footerRecentChips,
+    isKnown: (kind, id) =>
+      kind === 'key'
+        ? isKnownShortcutId(id)
+        : snippets.some((entry) => entry.id === id)
+  });
   footerPinsElement.replaceChildren();
-  for (const pin of loadFooterPins()) {
-    if (pin.kind === 'key') {
-      const button = createKeyChipButton(pin.id, { pinned: true });
+  for (const chip of chips) {
+    if (chip.kind === 'key') {
+      const button = createKeyChipButton(chip.id, { pinned: chip.pinned });
       if (button) {
+        button.dataset.chipSource = chip.source;
         footerPinsElement.append(button);
       }
       continue;
     }
-    const snippet = snippetsForProfile().find((entry) => entry.id === pin.id);
+    const snippet = snippets.find((entry) => entry.id === chip.id);
     if (!snippet) {
       continue;
     }
-    const button = createSnipChipButton(snippet, { pinned: true });
+    const button = createSnipChipButton(snippet, { pinned: chip.pinned });
     if (button) {
+      button.dataset.chipSource = chip.source;
       footerPinsElement.append(button);
     }
   }
   scheduleFooterPinLayout();
+}
+
+/** Rebuild the rail only when the foreground command actually moved. */
+function refreshFooterRailForCommand() {
+  if (activeSessionCommand() === footerRailCommand) {
+    return;
+  }
+  renderFooterPins();
 }
 
 function installChipLongPress(button, { onTap, onHold }) {
@@ -2828,6 +3036,7 @@ function runSnippet(id, options = {}) {
     setStatus('Connect a session first');
     return;
   }
+  noteChipUsed('snip', id);
   clearTerminalSelection();
   setCtrlArmed(false);
   let body = snippet.body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -8928,6 +9137,8 @@ async function refreshSessions(selectFirst = false, quiet = false) {
       disconnect();
     }
     renderSessions();
+    // The rail is keyed on the foreground command, which only this poll reports.
+    refreshFooterRailForCommand();
     if (selectFirst && !qaShellMode && !activeSession && sessions.length > 0) {
       const remembered = rememberedSession();
       const selected =
@@ -11181,9 +11392,88 @@ function pasteTextForImage(saved) {
   return candidate.endsWith(' ') ? candidate : `${candidate} `;
 }
 
+// ---- Start of the pure paste history block. ----
+// Written free of DOM and browser globals so it can be sliced out of the shipped
+// source for tests, the same way the keyboard transition block is.
+
+const maximumPasteHistoryEntries = 5;
+// Each entry keeps enough to paste and to preview. A terminal paste can be huge,
+// and the history is not the place to hold a whole file in memory.
+const maximumPasteHistoryEntryLength = 4096;
+const maximumPastePreviewLength = 48;
+
+/**
+ * One line describing an entry without showing it all: the first line truncated,
+ * then the real size. Control characters are stripped so a paste carrying escape
+ * sequences cannot redraw the popover it is listed in.
+ */
+function formatPasteEntryPreview(text) {
+  const value = typeof text === 'string' ? text : '';
+  const lines = value.split('\n');
+  // eslint-disable-next-line no-control-regex
+  const firstLine = lines[0].replace(/[\u0000-\u001f\u007f]/g, ' ').trim();
+  const truncated =
+    firstLine.length > maximumPastePreviewLength
+      ? `${firstLine.slice(0, maximumPastePreviewLength - 1)}…`
+      : firstLine;
+  const lineCount = lines.length;
+  const detail =
+    lineCount > 1
+      ? `${lineCount} lines · ${value.length} chars`
+      : `${value.length} chars`;
+  return {
+    // A paste of pure whitespace has no visible first line; say so rather than
+    // rendering a blank row that looks like a broken entry.
+    label: truncated || '(whitespace)',
+    detail
+  };
+}
+
+/**
+ * Newest first, deduplicated by exact text, capped in both count and per-entry
+ * size. Holds text only — the caller decides whether it is ever persisted.
+ */
+function createPasteHistory(limit = maximumPasteHistoryEntries) {
+  let entries = [];
+  return {
+    add(text) {
+      if (typeof text !== 'string' || text.length === 0) {
+        return null;
+      }
+      const value = text.slice(0, maximumPasteHistoryEntryLength);
+      // Re-pasting the same text moves it to the front rather than adding a
+      // second identical row.
+      entries = entries.filter((entry) => entry.text !== value);
+      const entry = { text: value, truncated: value.length < text.length };
+      entries.unshift(entry);
+      entries = entries.slice(0, limit);
+      return entry;
+    },
+    entries() {
+      return entries.map((entry) => ({ ...entry }));
+    },
+    size() {
+      return entries.length;
+    },
+    clear() {
+      entries = [];
+    },
+    replaceAll(values) {
+      entries = [];
+      // Oldest first, so the newest ends up at the front.
+      for (const value of [...(values || [])].reverse()) {
+        this.add(typeof value === 'string' ? value : value?.text);
+      }
+      return entries.length;
+    }
+  };
+}
+// ---- End of the pure paste history block. ----
+
 // Last text we successfully copied in-app (fallback only when OS clipboard
 // cannot be read). Never preferred over a live clipboard image.
 let appClipboardText = '';
+const pasteHistory = createPasteHistory();
 // Prefetch started on pointerdown; may fail — always allow a click retry.
 let pasteGesturePayload = null;
 
@@ -11405,6 +11695,10 @@ function insertPastedText(text) {
   } else {
     sendInput(pasted);
   }
+  // Remember what was actually pasted, so the history matches what the terminal
+  // received rather than what the clipboard held.
+  pasteHistory.add(pasted);
+  savePasteHistoryIfOptedIn();
   if (pasted.length !== text.length) {
     setStatus(`Paste limited to ${maximumPasteLength} characters`);
   }
@@ -11466,13 +11760,208 @@ async function pasteClipboard() {
   setStatus('Clipboard empty');
 }
 
+// ---- Paste history popover ----
+
+/**
+ * Persistence is opt-in and off by default. A terminal paste buffer is where
+ * tokens and passwords go, and entries in localStorage outlive the tab and are
+ * readable by anything running on this origin.
+ */
+function pasteHistoryPersistEnabled() {
+  if (qaShellMode) {
+    return false;
+  }
+  try {
+    return window.localStorage.getItem(pasteHistoryPersistStorageKey) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function savePasteHistoryIfOptedIn() {
+  if (!pasteHistoryPersistEnabled()) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(
+      pasteHistoryStorageKey,
+      JSON.stringify(pasteHistory.entries().map((entry) => entry.text))
+    );
+  } catch {
+    // Continue without persistence.
+  }
+}
+
+function restorePasteHistoryIfOptedIn() {
+  if (!pasteHistoryPersistEnabled()) {
+    return;
+  }
+  try {
+    const raw = window.localStorage.getItem(pasteHistoryStorageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (Array.isArray(parsed)) {
+      pasteHistory.replaceAll(parsed);
+    }
+  } catch {
+    // Leave the history empty.
+  }
+}
+
+function clearPasteHistory() {
+  pasteHistory.clear();
+  try {
+    window.localStorage.removeItem(pasteHistoryStorageKey);
+  } catch {
+    // Nothing to remove.
+  }
+  closePasteHistoryPopover();
+  setStatus('Paste history cleared');
+}
+
+function setPasteHistoryPersist(enabled) {
+  try {
+    if (enabled) {
+      window.localStorage.setItem(pasteHistoryPersistStorageKey, '1');
+      savePasteHistoryIfOptedIn();
+    } else {
+      window.localStorage.removeItem(pasteHistoryPersistStorageKey);
+      window.localStorage.removeItem(pasteHistoryStorageKey);
+    }
+  } catch {
+    // Continue without persistence.
+  }
+}
+
+function pasteHistoryPopoverIsOpen() {
+  return Boolean(pasteHistoryElement && !pasteHistoryElement.hidden);
+}
+
+function closePasteHistoryPopover() {
+  if (!pasteHistoryElement || pasteHistoryElement.hidden) {
+    return;
+  }
+  pasteHistoryElement.hidden = true;
+  pasteHistoryElement.replaceChildren();
+  pasteButton?.setAttribute('aria-expanded', 'false');
+}
+
+function createPasteHistoryItem(label, detail, onChoose) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'paste-popover-item';
+  item.setAttribute('role', 'menuitem');
+  const labelElement = document.createElement('span');
+  labelElement.className = 'paste-popover-label';
+  // textContent, never innerHTML: an entry is terminal text, not markup.
+  labelElement.textContent = label;
+  item.append(labelElement);
+  if (detail) {
+    const detailElement = document.createElement('span');
+    detailElement.className = 'paste-popover-detail';
+    detailElement.textContent = detail;
+    item.append(detailElement);
+  }
+  item.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onChoose();
+  });
+  return item;
+}
+
+function positionPasteHistoryPopover() {
+  if (!pasteHistoryElement || !pasteButton) {
+    return;
+  }
+  const anchor = pasteButton.getBoundingClientRect();
+  const width = pasteHistoryElement.offsetWidth;
+  const margin = 12;
+  const maximumLeft = Math.max(margin, window.innerWidth - width - margin);
+  pasteHistoryElement.style.left = `${Math.min(Math.max(anchor.left, margin), maximumLeft)}px`;
+  pasteHistoryElement.style.bottom = `${Math.max(margin, window.innerHeight - anchor.top + 8)}px`;
+}
+
+function openPasteHistoryPopover() {
+  if (!pasteHistoryElement) {
+    return;
+  }
+  pasteHistoryElement.replaceChildren();
+  const heading = document.createElement('div');
+  heading.className = 'paste-popover-heading';
+  // Named for what it is. Something copied in another app is legitimately
+  // absent, and without this label that reads as a bug.
+  heading.textContent = 'Pasted in this app';
+  pasteHistoryElement.append(heading);
+
+  // The system clipboard cannot be previewed on iOS without reading it, and a
+  // read needs a user gesture. A menu-item tap is its own gesture, so the read
+  // happens on tap and this row stays unlabelled until then.
+  pasteHistoryElement.append(
+    createPasteHistoryItem('Clipboard', 'read on tap', () => {
+      closePasteHistoryPopover();
+      void pasteClipboard();
+    })
+  );
+
+  for (const entry of pasteHistory.entries()) {
+    const preview = formatPasteEntryPreview(entry.text);
+    pasteHistoryElement.append(
+      createPasteHistoryItem(preview.label, preview.detail, () => {
+        closePasteHistoryPopover();
+        insertPastedText(entry.text);
+      })
+    );
+  }
+
+  const footer = document.createElement('div');
+  footer.className = 'paste-popover-footer';
+  const clearButton = document.createElement('button');
+  clearButton.type = 'button';
+  clearButton.textContent = 'Clear';
+  clearButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    clearPasteHistory();
+  });
+  const persistButton = document.createElement('button');
+  persistButton.type = 'button';
+  const persisted = pasteHistoryPersistEnabled();
+  persistButton.textContent = persisted ? 'Keep: on' : 'Keep: off';
+  persistButton.title = persisted
+    ? 'Stop keeping paste history after this tab closes'
+    : 'Keep paste history after this tab closes';
+  persistButton.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setPasteHistoryPersist(!persisted);
+    openPasteHistoryPopover();
+  });
+  footer.append(clearButton, persistButton);
+  pasteHistoryElement.append(footer);
+
+  pasteHistoryElement.hidden = false;
+  pasteButton?.setAttribute('aria-expanded', 'true');
+  positionPasteHistoryPopover();
+}
+
 async function pasteOrCopyClipboard() {
   if (terminalHasCopyableSelection()) {
     pasteGesturePayload = null;
+    closePasteHistoryPopover();
     await copyTerminalSelection({ source: 'button' });
     return;
   }
-  await pasteClipboard();
+  if (pasteHistoryPopoverIsOpen()) {
+    closePasteHistoryPopover();
+    return;
+  }
+  // With nothing in the history there is no choice to offer, so Paste still
+  // pastes. The popover only appears once picking one is a real decision.
+  if (pasteHistory.size() === 0) {
+    await pasteClipboard();
+    return;
+  }
+  openPasteHistoryPopover();
 }
 
 async function handleSelectionCopyChipClick(event) {
@@ -11798,6 +12287,43 @@ pasteButton.addEventListener('click', (event) => {
   event.preventDefault();
   void pasteOrCopyClipboard();
 });
+// Tapping away dismisses. Bound on pointerdown so it closes before the tap
+// reaches the terminal, and armed only while the popover is actually open.
+document.addEventListener(
+  'pointerdown',
+  (event) => {
+    if (!pasteHistoryPopoverIsOpen()) {
+      return;
+    }
+    if (
+      pasteHistoryElement?.contains(event.target) ||
+      pasteButton?.contains(event.target)
+    ) {
+      return;
+    }
+    closePasteHistoryPopover();
+  },
+  { capture: true }
+);
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && pasteHistoryPopoverIsOpen()) {
+    closePasteHistoryPopover();
+    pasteButton?.focus();
+  }
+});
+// The popover is position:fixed against the button's rect, so it has to move
+// when the footer does — a keyboard open is the common case.
+window.addEventListener('resize', () => {
+  if (pasteHistoryPopoverIsOpen()) {
+    positionPasteHistoryPopover();
+  }
+});
+window.visualViewport?.addEventListener('resize', () => {
+  if (pasteHistoryPopoverIsOpen()) {
+    positionPasteHistoryPopover();
+  }
+});
+restorePasteHistoryIfOptedIn();
 terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.

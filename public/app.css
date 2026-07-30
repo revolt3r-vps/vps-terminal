@@ -2759,6 +2759,14 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   line-height: 1;
 }
 
+/*
+ * One overflow mechanism, not two. updateFooterPinOverflow() hides every chip
+ * that does not fit and puts the count on the overflow button, so there is never
+ * anything left to scroll to — `overflow-x: auto` and `touch-action: pan-x` only
+ * advertised a gesture that could not do anything. `hidden` rather than
+ * `visible`, because the collapse measures scrollWidth against clientWidth and
+ * `visible` makes those equal.
+ */
 #footer-scroll {
   grid-column: 2;
   grid-row: 2;
@@ -2767,12 +2775,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   gap: var(--control-gap);
   align-items: center;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-  overscroll-behavior-x: contain;
-  overscroll-behavior-y: none;
-  scrollbar-width: none;
-  touch-action: pan-x;
+  overflow: hidden;
 }
 
 #settings {
@@ -2821,8 +2824,111 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
  * Keys/Snips drawer is open. Drawer sits on its own row above. Landscape
  * middle-replace (hide paste/pins) lives in the landscape media query. */
 
-#footer-scroll::-webkit-scrollbar {
+/* The rail no longer scrolls; the drawer is the one strip that still does. */
+#footer-drawer::-webkit-scrollbar {
   display: none;
+}
+
+/*
+ * Paste history: a compact popover anchored above the Paste button, sized to its
+ * content. Not a session-style sheet — switching sessions is deliberate, picking
+ * a paste is a glance, and one line per entry keeps the whole list inside thumb
+ * reach of the button that opened it.
+ */
+.paste-popover {
+  /* Fixed, not absolute: both `footer` and `#footer-scroll` are overflow:hidden,
+   * and a popover that sits above the footer would be clipped by either. Left
+   * and bottom are set from the Paste button's rect when it opens. */
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  max-width: min(320px, calc(100vw - 24px));
+  padding: 6px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+}
+
+.paste-popover[hidden] {
+  display: none !important;
+}
+
+.paste-popover-heading {
+  padding: 2px 8px 4px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.paste-popover-item {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+  width: 100%;
+  padding: 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--control-font);
+  text-align: left;
+  cursor: pointer;
+}
+
+.paste-popover-item:hover,
+.paste-popover-item:focus-visible {
+  background: var(--chip-active-bg, rgb(255 255 255 / 8%));
+}
+
+.paste-popover-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.paste-popover-detail {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.paste-popover-footer {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
+}
+
+.paste-popover-footer button {
+  flex: 1 1 auto;
+  padding: 6px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.paste-popover-footer button:hover,
+.paste-popover-footer button:focus-visible {
+  color: var(--fg);
+  background: var(--chip-active-bg, rgb(255 255 255 / 8%));
 }
 
 #files-hidden-toggle {
@@ -3298,11 +3404,9 @@ footer button {
     flex: 1 1 auto;
     min-height: 0;
     gap: 4px;
-    overflow-x: hidden;
-    overflow-y: auto;
-    overscroll-behavior-x: none;
-    overscroll-behavior-y: contain;
-    touch-action: pan-y;
+    /* Same single mechanism as portrait: the collapse hides what does not fit,
+     * measuring scrollHeight against clientHeight. */
+    overflow: hidden;
   }
 
   #footer-drawer {

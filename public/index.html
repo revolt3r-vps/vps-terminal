@@ -714,6 +714,11 @@
     </dialog>
 
     <footer aria-label="App shortcuts">
+      <!-- Anchored to the Paste button, but a child of the footer rather than of
+           #footer-scroll: that rail is overflow:hidden so the collapse can
+           measure it, and a popover inside it would be clipped. Its left edge is
+           set from the button's rect when it opens. -->
+      <div id="paste-history" class="paste-popover" hidden role="menu" aria-label="Recent pastes"></div>
       <!-- Term mode footer: drawer lives in #footer-main so landscape can
            swap it into the middle rail (replacing paste/keys/snips scroll). -->
       <div id="footer-term">
@@ -735,7 +740,7 @@
           <!-- Keys/Snips chips only; rare actions live in the Menu sheet. -->
           <div id="footer-drawer" hidden aria-label="Terminal tools drawer"></div>
           <div id="footer-scroll">
-            <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste">
+            <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste" aria-haspopup="menu" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
               </svg>

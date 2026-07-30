@@ -1093,6 +1093,23 @@ async function renameFsEntry(rootId, relativePath, nextName) {
   };
 }
 
+/**
+ * The foreground command of a session's active pane, as the footer rail keys its
+ * chip set on. A process can name itself almost anything, so this reaches the
+ * client as a short lowercase basename or null — never as a path, and never long
+ * enough to matter if it is echoed anywhere.
+ */
+function sanitizedPaneCommand(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const base = value.trim().split('/').pop() || '';
+  if (base.length === 0 || base.length > 32) {
+    return null;
+  }
+  return /^[A-Za-z0-9._-]+$/.test(base) ? base.toLowerCase() : null;
+}
+
 async function listSessions() {
   try {
     // Use '|' not tab: tmux 3.3.x can rewrite \t to '_' in -F output, which
@@ -1102,7 +1119,9 @@ async function listSessions() {
       [
         'list-sessions',
         '-F',
-        '#{session_name}|#{session_windows}|#{session_attached}'
+        // pane_current_command resolves against the session's active pane, so the
+        // footer rail gets the foreground command without a second tmux call.
+        '#{session_name}|#{session_windows}|#{session_attached}|#{pane_current_command}'
       ],
       { timeout: 3000, maxBuffer: 64 * 1024 }
     );
@@ -1111,11 +1130,12 @@ async function listSessions() {
       .split('\n')
       .filter(Boolean)
       .map((line) => {
-        const [name, windows, attached] = line.split('|');
+        const [name, windows, attached, command] = line.split('|');
         return {
           name,
           windows: Number(windows),
-          attached: Number(attached)
+          attached: Number(attached),
+          command: sanitizedPaneCommand(command)
         };
       })
       .filter((session) => validatedSessionName(session.name));
