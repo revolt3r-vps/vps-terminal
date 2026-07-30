@@ -18,7 +18,8 @@ const {
   parentRelativePath,
   createJailedDirectory,
   renameJailedEntry,
-  toDisplayPath
+  toDisplayPath,
+  assertInsideRoot
 } = require('./fs-jail');
 const {
   PreferencesStore,
@@ -87,7 +88,14 @@ const projectRoot =
   path.join(homeDirectory, 'projects');
 const publicRoot = path.join(__dirname, 'public');
 const attachSessionPath = path.join(__dirname, 'attach-session');
-const stateRoot = path.join(homeDirectory, '.local/share/vps-terminal');
+// Runtime state — preferences, snippets, pasted images, the client debug log —
+// is kept apart from the installed application when VPS_TERMINAL_STATE_DIR is
+// set, so reinstalling or clearing the app directory cannot delete user data.
+// Unset keeps the single-directory default, which is what a fresh install of
+// the public package expects.
+const stateRoot = process.env.VPS_TERMINAL_STATE_DIR
+  ? path.resolve(process.env.VPS_TERMINAL_STATE_DIR)
+  : path.join(homeDirectory, '.local/share/vps-terminal');
 const clientDebugLogPath = path.join(stateRoot, 'client-debug.log');
 const snippetsStorePath = path.join(stateRoot, 'snippets.json');
 const preferencesStore = new PreferencesStore(stateRoot);
@@ -241,6 +249,9 @@ const maximumFsListEntries = 500;
 const maximumFsPreviewBytes = 512 * 1024;
 const maximumFsUploadBytes = 20 * 1024 * 1024;
 const maximumFsFileNameLength = 180;
+// A path arriving from terminal output. Generous enough for a deep repo path,
+// short enough that a runaway line cannot be replayed as a filesystem probe.
+const maximumFsTerminalPathLength = 4096;
 const safeUploadFileNamePattern =
   /^[A-Za-z0-9][A-Za-z0-9._+-]{0,179}$/;
 // Files must live until the AI CLI reads them on send (usually seconds).
@@ -644,6 +655,160 @@ function fsRootFromQuery(rootId) {
 
 function rootDisplayPrefix(root) {
   return root.displayPrefix || `~/${root.id}`;
+}
+
+/**
+ * Map an absolute path back to the root that contains it.
+ *
+ * This is the inverse of the usual root+relative addressing, and it exists so a
+ * path printed in the terminal can be opened in the file browser. The client is
+ * never told where a root lives on disk, so this mapping has to happen here.
+ *
+ * Every failure is the same 404. A path outside every root and a path that does
+ * not exist must be indistinguishable, or this becomes an oracle for probing the
+ * filesystem outside the jail.
+ */
+async function resolveFsAbsolutePath(candidateAbsolute) {
+  const notFound = () => {
+    const error = new Error('not found');
+    error.statusCode = 404;
+    return error;
+  };
+  let candidateReal;
+  try {
+    // realpath first: containment has to be judged on the real path, or a
+    // symlink inside a root could point anywhere.
+    candidateReal = await fs.promises.realpath(candidateAbsolute);
+  } catch {
+    throw notFound();
+  }
+
+  // Roots may nest (home contains projects). The most specific one wins, so the
+  // location shown matches where the user would expect to find the file.
+  let best = null;
+  for (const root of Object.values(fsRootCatalog)) {
+    let rootReal;
+    try {
+      rootReal = await fs.promises.realpath(root.rootPath);
+    } catch {
+      continue;
+    }
+    try {
+      assertInsideRoot(rootReal, candidateReal);
+    } catch {
+      continue;
+    }
+    if (!best || rootReal.length > best.rootReal.length) {
+      best = { root, rootReal };
+    }
+  }
+  if (!best) {
+    throw notFound();
+  }
+
+  const relativePath = path
+    .relative(best.rootReal, candidateReal)
+    .split(path.sep)
+    .join('/');
+  // Re-enter through the jail rather than trusting the mapping above, so
+  // fs-jail stays the single authority on what may be reached.
+  const resolved = await resolveJailedPath(best.root.rootPath, relativePath, {
+    mustExist: true
+  });
+  return {
+    rootId: best.root.id,
+    relativePath: resolved.relativePath,
+    type: resolved.stats.isDirectory() ? 'dir' : 'file',
+    displayPath: toDisplayPath(
+      rootDisplayPrefix(best.root),
+      resolved.relativePath
+    )
+  };
+}
+
+/**
+ * The working directory of a session's active pane. Treated as untrusted input
+ * like any other path, and never logged.
+ */
+async function sessionCurrentDirectory(name) {
+  const session = validatedSessionName(name);
+  if (!session) {
+    return null;
+  }
+  try {
+    // list-panes rather than display-message: `display-message -t '=name'`
+    // targets the session but expands no pane variables, so it returns an empty
+    // string. Listing the current window's panes and taking the active one is
+    // explicit and does not depend on that quirk. '|' as the separator for the
+    // same reason as listSessions — tmux 3.3.x rewrites tabs in -F output.
+    const { stdout } = await execFileAsync(
+      'tmux',
+      [
+        'list-panes',
+        '-t',
+        `=${session}`,
+        '-F',
+        '#{pane_active}|#{pane_current_path}'
+      ],
+      { timeout: 3000, maxBuffer: 16 * 1024 }
+    );
+    for (const line of stdout.split('\n')) {
+      const separator = line.indexOf('|');
+      if (separator < 0) {
+        continue;
+      }
+      if (line.slice(0, separator) !== '1') {
+        continue;
+      }
+      const value = line.slice(separator + 1).trim();
+      if (path.isAbsolute(value)) {
+        return value;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve a path as printed in the terminal. Absolute and `~` forms need no
+ * session; a relative one is resolved against that session's current directory,
+ * read now rather than cached, because the shell's cwd moves.
+ */
+async function resolveFsTerminalPath(sessionName, rawPath) {
+  if (
+    typeof rawPath !== 'string' ||
+    rawPath.length === 0 ||
+    rawPath.length > maximumFsTerminalPathLength ||
+    rawPath.includes('\0')
+  ) {
+    const error = new Error('invalid path');
+    error.statusCode = 400;
+    throw error;
+  }
+  let candidate;
+  if (rawPath.startsWith('/')) {
+    candidate = rawPath;
+  } else if (rawPath === '~' || rawPath.startsWith('~/')) {
+    if (!homeDirectory) {
+      const error = new Error('not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    candidate = path.join(homeDirectory, rawPath.slice(1));
+  } else {
+    const cwd = await sessionCurrentDirectory(sessionName);
+    if (!cwd) {
+      const error = new Error('not found');
+      error.statusCode = 404;
+      throw error;
+    }
+    // Lexical only. `..` is normalized here and then re-judged against the real
+    // path by resolveFsAbsolutePath, which is what actually enforces the jail.
+    candidate = path.resolve(cwd, rawPath);
+  }
+  return resolveFsAbsolutePath(candidate);
 }
 
 function safeUploadFileName(name) {
@@ -1063,6 +1228,38 @@ const mimeTypes = new Map([
   ['.woff2', 'font/woff2']
 ]);
 const preferencesSubjectPlaceholder = '__VPS_PREFERENCES_SUBJECT__';
+const buildIdPlaceholder = '__VPS_BUILD_ID__';
+
+/**
+ * A short identifier for the running build, shown in Settings.
+ *
+ * Derived from the package version plus the client bundle's modification time, so
+ * it changes on every install without needing a build step or a git checkout — the
+ * public package has neither. Computed once at boot: a reinstall restarts the
+ * service, so a stale value cannot outlive the files it describes.
+ *
+ * This exists because "is the deploy live, or is my page stale?" is otherwise
+ * unanswerable from the client, and guessing wrong costs a debugging session.
+ */
+const buildId = (() => {
+  let version = '0.0.0';
+  try {
+    version = JSON.parse(
+      fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')
+    ).version || version;
+  } catch {
+    // An unreadable package.json should not stop the server booting.
+  }
+  let stamp = '0';
+  try {
+    stamp = Math.floor(
+      fs.statSync(path.join(publicRoot, 'app.js')).mtimeMs / 1000
+    ).toString(36);
+  } catch {
+    // Likewise: a missing bundle is a bigger problem, reported elsewhere.
+  }
+  return `${version}+${stamp}`;
+})();
 
 async function serveStatic(request, response) {
   const url = new URL(request.url, publicOrigin);
@@ -1087,7 +1284,8 @@ async function serveStatic(request, response) {
           .replaceAll(
             preferencesSubjectPlaceholder,
             email ? preferencesIdentity(email) : ''
-          ),
+          )
+          .replaceAll(buildIdPlaceholder, buildId),
         'utf8'
       );
     }
@@ -1266,6 +1464,15 @@ const server = http.createServer(async (request, response) => {
           writable: entry.writable !== false
         }))
       });
+      return;
+    }
+
+    if (request.method === 'GET' && url.pathname === '/api/fs/resolve') {
+      const resolved = await resolveFsTerminalPath(
+        url.searchParams.get('session'),
+        url.searchParams.get('path') || ''
+      );
+      sendJson(response, 200, resolved);
       return;
     }
 
@@ -1536,13 +1743,26 @@ server.on('upgrade', async (request, socket, head) => {
   try {
     const url = new URL(request.url, publicOrigin);
     const name = validatedSessionName(url.searchParams.get('session'));
-    if (
-      url.pathname !== '/ws' ||
-      !name ||
-      !authenticatedEmail(request) ||
-      !requestOriginIsValid(request) ||
-      connections.size + pendingConnections >= maximumConnections
-    ) {
+    // One opaque 403 for four different refusals made this impossible to diagnose
+    // from the outside. The reason is a fixed string — never the session name, the
+    // path, or the email — so it stays safe to log.
+    const refusal =
+      url.pathname !== '/ws'
+        ? 'path'
+        : !name
+          ? 'session-name'
+          : !authenticatedEmail(request)
+            ? 'auth'
+            : !requestOriginIsValid(request)
+              ? 'origin'
+              : connections.size + pendingConnections >= maximumConnections
+                ? 'capacity'
+                : null;
+    if (refusal) {
+      console.warn(
+        `vps-terminal: refused websocket upgrade (${refusal}) ` +
+          `connections=${connections.size} pending=${pendingConnections}`
+      );
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
       socket.destroy();
       return;
@@ -1556,8 +1776,8 @@ server.on('upgrade', async (request, socket, head) => {
     }
     await ensureTmuxCapabilities();
     websocketServer.handleUpgrade(request, socket, head, (websocket) => {
-      pendingConnections -= 1;
-      reservedSlot = false;
+      // The slot is released by the `finally` below, which runs whether or not this
+      // callback is synchronous. Releasing it here as well double-counted.
       websocketServer.emit('connection', websocket, request, name);
     });
   } catch {
@@ -1594,10 +1814,26 @@ websocketServer.on('connection', (websocket, request, name) => {
   connections.add(websocket);
 
   const lifetime = setTimeout(() => websocket.close(1000, 'session expired'), websocketLifetimeMs);
+  // A page that navigates away or is killed often leaves the socket half-open: no
+  // close frame arrives, so `connections` never shrinks. Pinging without checking
+  // for the pong meant those entries lived until the lifetime timer, and with
+  // maximumConnections at 10 roughly ten reloads locked the app out entirely —
+  // sessions still listed, but every upgrade was refused for capacity.
+  let awaitingPong = false;
+  websocket.on('pong', () => {
+    awaitingPong = false;
+  });
   const ping = setInterval(() => {
-    if (websocket.readyState === websocket.OPEN) {
-      websocket.ping();
+    if (websocket.readyState !== websocket.OPEN) {
+      return;
     }
+    if (awaitingPong) {
+      // Missed the previous round trip: the peer is gone.
+      websocket.terminate();
+      return;
+    }
+    awaitingPong = true;
+    websocket.ping();
   }, 30000);
 
   terminal.onData((data) => {

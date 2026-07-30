@@ -24,8 +24,28 @@ grep -Fq "VPS_TERMINAL_LOCAL_DEV === '1'" "$server"
 grep -Fq "request.headers['x-vps-authenticated-email']" "$server"
 grep -Fq "request.headers.origin === publicOrigin" "$server"
 grep -Fq 'const defaultSnippetPresets' "$server"
+# Clipboard wiring: tmux reports copies as OSC 52, and Ctrl/Cmd+V must be read
+# from the host clipboard rather than sent to the pty as ^V.
+grep -Fq 'registerOscHandler' "$client"
+grep -Fq 'function handleClipboardOsc(' "$client"
+grep -Fq 'function handleTerminalPasteEvent(' "$client"
+grep -Fq 'void pasteClipboard();' "$client"
+# The in-app text mirror must never stand in for a clipboard the browser read
+# successfully but would not hand over — that pastes unrelated older text.
+grep -Fq 'if (appClipboardText && error) {' "$client"
 grep -Fq "VPS_TERMINAL_CLIENT_DEBUG === '1'" "$server"
 grep -Fq 'appendBoundedClientDebugEntries' "$server"
+# T19 keyboard transition capture. The failure is intermittent and phone-only, so
+# the ring buffer has to stay sliceable for the unit test and reachable from the
+# Settings sheet — a dump nobody can read on the device is not a diagnosis.
+grep -Fq 'const maximumKeyboardTransitions' "$client"
+grep -Fq '// ---- End of the pure keyboard transition block. ----' "$client"
+grep -Fq 'function recordKeyboardTransition(' "$client"
+# The declined release is the transition the ticket is chasing; losing this call
+# site would leave a stuck conjunction invisible again.
+grep -Fq "recordKeyboardTransition('release-declined')" "$client"
+grep -Fq 'data-settings-panel="debug"' "${root}/public/index.html"
+grep -Fq 'keyboard-debug-dump' "${root}/public/index.html"
 grep -Fq 'VPS_TERMINAL_ORIGIN is required outside LOCAL_DEV' "$server"
 grep -Fq 'Set VPS_TERMINAL_SOCKET (recommended) or VPS_TERMINAL_HOST' "$server"
 

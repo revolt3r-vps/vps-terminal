@@ -48,6 +48,31 @@ terminal. The value must match the exact public URL, e.g.
 Yes, if both emails are allowlisted — but they **share one Linux user** and can
 see/kill each other’s tmux sessions. This is not multi-tenant hosting.
 
+## How do copy and paste work?
+
+**Copy.** Drag-select and press Ctrl/Cmd+C, or use the Copy chip after a
+long-press on touch. Inside tmux with `mouse on`, tmux — not the browser — owns
+the drag, and a repainting TUI drops the browser's selection anyway; both cases
+are covered because tmux reports its own copies as OSC 52 and the terminal
+writes those straight to your clipboard. Nothing extra to configure if tmux has
+`set-clipboard on` (or the default `external`) and the `xterm*:clipboard`
+terminal feature.
+
+**Paste.** Ctrl/Cmd+V pastes text or an image, and is handled in the browser
+rather than passed through as `^V`, which TUIs bind to their own actions. It
+uses the browser's own paste, so no clipboard permission prompt appears and
+screenshots come through — on desktop the async clipboard API often refuses to
+hand over an image, which would otherwise look like an empty clipboard. Text is
+pasted through the terminal's bracketed-paste path, so a multi-line paste stays
+one block. A copied image is uploaded to `~/paste/` and pasted as a path, which
+is how you hand a screenshot to a program running in the session. Shift+Insert
+and the footer Paste button read the clipboard directly instead, which is the
+path that can prompt for permission. A literal `^V` is still available from the
+on-screen Ctrl key.
+
+A clipboard *read* request from the session (`OSC 52` with `?`) is never
+answered, so nothing running in the terminal can read your clipboard.
+
 ## Docker or bare metal?
 
 Bare metal (or a normal VPS user + systemd) is the documented beginner path so

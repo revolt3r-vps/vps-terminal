@@ -15,6 +15,12 @@
 }
 
 :root {
+  /* Scrollbar geometry is fixed; the colours come from the active theme via
+   * applyAppTheme. The fallbacks cover first paint. */
+  --app-scrollbar-width: 8px;
+  --app-scrollbar-thumb: #3a4453;
+  --app-scrollbar-thumb-hover: #4d5a6d;
+  --app-scrollbar-track: transparent;
   color-scheme: dark;
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -940,6 +946,226 @@ body.files-view #files-name-dialog {
   color: var(--text);
 }
 
+/* Touch link chip. Sized to the product's touch baseline so a one-cell-wide link is
+ * still comfortably reachable — the chip is the target, not the glyphs. Positioned
+ * from JS at the tap point, clamped to the viewport. */
+#terminal-link-chip {
+  position: fixed;
+  z-index: 60;
+  min-height: 44px;
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font: var(--control-font);
+  /* Anchored just above the tap so a fingertip is not covering it. */
+  transform: translate(-50%, calc(-100% - 10px));
+  box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
+  cursor: pointer;
+}
+
+#terminal-link-chip:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+#terminal-link-chip:active {
+  background: var(--surface-pressed);
+}
+
+/* A fine pointer has the modifier gesture and never needs this. */
+@media (pointer: fine) {
+  #terminal-link-chip {
+    display: none;
+  }
+}
+
+/* Files view has no terminal cell for it to describe. Mirrors the Copy chip. */
+body.files-view #terminal-link-chip {
+  display: none !important;
+}
+
+/* Keyboard shortcuts reference in Settings. A read-only list, so the chords reuse the
+ * inline hint styling rather than inventing a second look for the same thing. */
+.settings-keys {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+#keybinding-reference {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  gap: 6px 10px;
+  margin: 8px 0 0;
+}
+
+#keybinding-reference dt {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+}
+
+/* The hint sits inline here rather than pushed to the end of a row. */
+#keybinding-reference .kbd-hint {
+  margin-inline-start: 0;
+  padding-inline-start: 0;
+}
+
+#keybinding-reference dd {
+  margin: 0;
+  color: var(--muted);
+  font: var(--control-font-label);
+}
+
+/* Keyboard hints. Never a tap target and never a tab stop — the control they sit
+ * beside already carries the action and its accessible name. */
+.kbd-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-inline-start: auto;
+  padding-inline-start: 8px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.kbd-hint kbd {
+  min-width: 1.25em;
+  padding: 1px 4px;
+  border: 1px solid var(--control-border);
+  border-radius: 4px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.78em;
+  line-height: 1.4;
+  text-align: center;
+}
+
+/* Scrollbars follow the active theme like every other surface. The terminal is
+ * excluded: xterm renders its own viewport scrollbar. */
+#files-list,
+#command-palette-list,
+#footer-drawer,
+#settings-dialog,
+#quick-menu-dialog,
+#files-preview-body,
+#files-preview-pane-body {
+  scrollbar-width: thin;
+  scrollbar-color: var(--app-scrollbar-thumb) var(--app-scrollbar-track);
+}
+
+#files-list::-webkit-scrollbar,
+#command-palette-list::-webkit-scrollbar,
+#footer-drawer::-webkit-scrollbar,
+#settings-dialog::-webkit-scrollbar,
+#quick-menu-dialog::-webkit-scrollbar,
+#files-preview-body::-webkit-scrollbar,
+#files-preview-pane-body::-webkit-scrollbar {
+  width: var(--app-scrollbar-width);
+  height: var(--app-scrollbar-width);
+}
+
+#files-list::-webkit-scrollbar-track,
+#command-palette-list::-webkit-scrollbar-track,
+#footer-drawer::-webkit-scrollbar-track,
+#settings-dialog::-webkit-scrollbar-track,
+#quick-menu-dialog::-webkit-scrollbar-track,
+#files-preview-body::-webkit-scrollbar-track,
+#files-preview-pane-body::-webkit-scrollbar-track {
+  background: var(--app-scrollbar-track);
+}
+
+#files-list::-webkit-scrollbar-thumb,
+#command-palette-list::-webkit-scrollbar-thumb,
+#footer-drawer::-webkit-scrollbar-thumb,
+#settings-dialog::-webkit-scrollbar-thumb,
+#quick-menu-dialog::-webkit-scrollbar-thumb,
+#files-preview-body::-webkit-scrollbar-thumb,
+#files-preview-pane-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--app-scrollbar-thumb);
+}
+
+@media (hover: hover) {
+  #files-list::-webkit-scrollbar-thumb:hover,
+  #command-palette-list::-webkit-scrollbar-thumb:hover,
+  #footer-drawer::-webkit-scrollbar-thumb:hover,
+  #settings-dialog::-webkit-scrollbar-thumb:hover,
+  #quick-menu-dialog::-webkit-scrollbar-thumb:hover,
+  #files-preview-body::-webkit-scrollbar-thumb:hover,
+  #files-preview-pane-body::-webkit-scrollbar-thumb:hover {
+    background: var(--app-scrollbar-thumb-hover);
+  }
+}
+
+/* Command palette: a keyboard surface, so it is sized for scanning a list rather
+ * than for thumbs, and it never appears on touch-only devices. Standalone on
+ * purpose — folding it into the dialog group above changed those dialogs' width. */
+#command-palette {
+  width: min(92vw, 460px);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--text);
+}
+
+#command-palette::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+#command-palette-input {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 8px 0;
+  padding: 8px 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+#command-palette-input:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 1px;
+}
+
+#command-palette-list {
+  max-height: min(50vh, 320px);
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.command-palette-option {
+  padding: 8px 10px;
+  border-radius: var(--control-radius);
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Selection follows the keyboard, and the input keeps DOM focus, so the selected
+ * row needs its own visible treatment rather than relying on :focus. Shape and a
+ * marker carry it as well as colour. */
+.command-palette-option[aria-selected='true'] {
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .command-palette-option {
+    transition: background-color 120ms ease;
+  }
+}
+
 /* Settings menus (Terminal Menu, File options) stay a small contextual card,
  * never a full-screen sheet — so they get a lighter scrim with no blur. */
 #files-options-dialog,
@@ -1843,7 +2069,9 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 .settings-tabs {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  /* Five tabs since Debug was added. minmax(0, 1fr) lets the labels shrink
+     rather than wrapping Debug onto a second row of its own. */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: var(--control-gap);
   margin-bottom: 12px;
   padding: 3px;
@@ -1855,7 +2083,9 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 .settings-tab {
   min-width: 0;
   min-height: var(--control-size);
-  padding: 0 6px;
+  /* Tighter than the 6px it was: five columns on a 320px sheet leave about 56px
+     each, and "Profiles" needs most of that. */
+  padding: 0 3px;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -2067,6 +2297,56 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 .settings-sync-actions button {
   flex: 1 1 140px;
   min-height: var(--control-size);
+}
+
+.settings-debug {
+  display: grid;
+  gap: 9px;
+  padding: 11px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+}
+
+.settings-debug-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.settings-debug-heading strong {
+  font-size: 13px;
+}
+
+.settings-debug-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--control-gap);
+}
+
+.settings-debug-actions button {
+  flex: 1 1 100px;
+  min-height: var(--control-size);
+}
+
+/* One transition per line, and the lines are long. Wrapping them would make the
+   flag columns impossible to scan, so the block scrolls in both axes instead of
+   pushing the settings sheet sideways. */
+.settings-debug-dump {
+  max-height: 42vh;
+  margin: 0;
+  padding: 8px;
+  overflow: auto;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface);
+  color: var(--text);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.45;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
 }
 
 .settings-profile-section {

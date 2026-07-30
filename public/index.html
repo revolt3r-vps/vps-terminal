@@ -6,6 +6,9 @@
       name="vps-preferences-subject"
       content="__VPS_PREFERENCES_SUBJECT__"
     >
+    <!-- Substituted per request by the server. Surfaced in Settings so a stale page
+         is obvious instead of being mistaken for a failed deploy. -->
+    <meta name="vps-build-id" content="__VPS_BUILD_ID__">
     <!-- Default cover for in-browser Safari; standalone drops cover ASAP (see script). -->
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <meta name="theme-color" content="#11151b">
@@ -331,6 +334,15 @@
       <div id="picker-scrim" hidden aria-hidden="true"></div>
       <div id="scroll-position" hidden aria-hidden="true" title="Scroll position"></div>
       <div id="scroll-thumb" aria-hidden="true"></div>
+      <!-- Touch has no Ctrl/Cmd, so a tap on a link offers this instead. A real
+           button, so a one-cell-wide link stays reachable at a proper touch size:
+           the chip is the target, not the glyphs. -->
+      <button
+        id="terminal-link-chip"
+        type="button"
+        aria-label="Open link"
+        hidden
+      ></button>
       <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
       <button id="selection-copy-chip" type="button" hidden>Copy</button>
       <div id="find-bar" hidden>
@@ -363,6 +375,7 @@
         <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Library</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Theme</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="debug" aria-selected="false">Debug</button>
       </div>
       <div class="settings-panels">
         <section
@@ -513,18 +526,11 @@
         >
           <label class="settings-field" for="terminal-theme">
             <span>Terminal theme</span>
-            <select id="terminal-theme">
-              <option value="matrix">Matrix</option>
-              <option value="groknight">Grok Night</option>
-              <option value="tokyonight">Tokyo Night</option>
-              <option value="rosepine">Rosé Pine Moon</option>
-              <option value="oscura">Oscura Midnight</option>
-              <option value="dracula">Dracula</option>
-              <option value="solarized">Solarized Dark</option>
-              <option value="nord">Nord</option>
-              <option value="monokai">Monokai</option>
-              <option value="gruvbox">Gruvbox Dark</option>
-            </select>
+            <!-- Options are built at runtime from terminalThemeLabels in app.js,
+                 which calls replaceChildren() on this element. Listing them here as
+                 well created a second source of truth that was discarded before it
+                 could be seen. -->
+            <select id="terminal-theme"></select>
           </label>
           <p class="settings-hint">Per-session theme is remembered when you change it.</p>
         </section>
@@ -560,10 +566,64 @@
             </div>
           </section>
           <p id="app-help-text" class="settings-hint"></p>
+          <!-- Built at runtime from the keybinding table, so it cannot describe a
+               chord that no longer exists. Hidden where no fine pointer is present:
+               none of these are reachable on a touch-only device. -->
+          <section
+            id="keybinding-reference-section"
+            class="settings-keys"
+            aria-labelledby="keybinding-reference-title"
+            hidden
+          >
+            <strong id="keybinding-reference-title">Keyboard shortcuts</strong>
+            <dl id="keybinding-reference"></dl>
+          </section>
           <div class="settings-install">
             <button id="install-app" type="button">Install web app</button>
             <p id="install-help"></p>
           </div>
+          <!-- Which build this page is actually running. A page loaded before a
+               deploy keeps serving the old bundle, which is indistinguishable from
+               a deploy that never landed unless it says so. -->
+          <p id="app-build-id" class="settings-hint"></p>
+        </section>
+        <!-- Keyboard geometry is derived from six interacting flags whose release
+             needs all six false at once. The failure is intermittent and only
+             reproduces on a phone, where there is no devtools console to read, so
+             the transitions have to be dumpable from inside the app. -->
+        <section
+          class="settings-panel"
+          data-settings-panel="debug"
+          role="tabpanel"
+          aria-label="Debug"
+          hidden
+        >
+          <section class="settings-debug" aria-labelledby="keyboard-debug-title">
+            <div class="settings-debug-heading">
+              <strong id="keyboard-debug-title">Keyboard transitions</strong>
+              <span id="keyboard-debug-count" class="settings-sync-status"></span>
+            </div>
+            <p class="settings-hint">
+              The last 50 changes to the six flags that decide keyboard layout.
+              <code>blockedBy</code> names the flags holding the frozen height —
+              when the UI stops reacting to the keyboard, that is the stuck one.
+              Repeats of the same event and flag state fold into one line with a
+              count.
+            </p>
+            <p id="keyboard-debug-state" class="settings-hint"></p>
+            <div class="settings-debug-actions">
+              <button id="keyboard-debug-refresh" type="button">Refresh</button>
+              <button id="keyboard-debug-copy" type="button">Copy dump</button>
+              <button
+                id="keyboard-debug-clear"
+                type="button"
+                class="settings-secondary"
+              >
+                Clear
+              </button>
+            </div>
+            <pre id="keyboard-debug-dump" class="settings-debug-dump" tabindex="0"></pre>
+          </section>
         </section>
       </div>
     </dialog>
@@ -607,6 +667,50 @@
         <button id="quick-menu-reconnect" type="button">Reconnect session</button>
         <button id="quick-menu-settings" type="button">Terminal settings</button>
       </div>
+    </dialog>
+    <!-- Keyboard-only, desktop-only: opened with mod+K while focus is outside the
+         terminal. Adds no persistent chrome. -->
+    <dialog
+      id="command-palette"
+      aria-labelledby="command-palette-title"
+      tabindex="-1"
+    >
+      <div class="settings-heading">
+        <strong id="command-palette-title">Commands</strong>
+        <button
+          id="command-palette-close"
+          class="icon-button"
+          type="button"
+          title="Close commands"
+          aria-label="Close commands"
+        >
+          ×
+        </button>
+      </div>
+      <input
+        id="command-palette-input"
+        type="text"
+        role="combobox"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="Type to filter"
+        aria-label="Filter commands"
+        aria-controls="command-palette-list"
+        aria-autocomplete="list"
+        aria-expanded="true"
+      >
+      <ul id="command-palette-list" role="listbox" aria-label="Commands"></ul>
+      <!-- A live region: when a query matches nothing the options vanish and
+           aria-activedescendant is removed, which is silence otherwise. -->
+      <p
+        id="command-palette-empty"
+        class="settings-hint"
+        role="status"
+        aria-live="polite"
+        hidden
+      >
+        No matching command
+      </p>
     </dialog>
 
     <footer aria-label="App shortcuts">

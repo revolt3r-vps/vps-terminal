@@ -64,6 +64,11 @@ const headerSummaryButton = document.querySelector('#header-summary');
 const headerExpandedElement = document.querySelector('#header-expanded');
 const currentSessionElement = document.querySelector('#current-session');
 const activeProfileElement = document.querySelector('#active-profile');
+const commandPaletteDialog = document.querySelector('#command-palette');
+const commandPaletteInput = document.querySelector('#command-palette-input');
+const commandPaletteList = document.querySelector('#command-palette-list');
+const commandPaletteEmpty = document.querySelector('#command-palette-empty');
+const commandPaletteClose = document.querySelector('#command-palette-close');
 const quickMenuDialog = document.querySelector('#quick-menu-dialog');
 const quickMenuCloseButton = document.querySelector('#quick-menu-close');
 const quickMenuProfileSection = document.querySelector('#quick-menu-profile');
@@ -86,6 +91,7 @@ const statusElement = document.querySelector('#status');
 const keyboardButton = document.querySelector('#keyboard');
 const pasteButton = document.querySelector('#paste');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
+const terminalLinkChip = document.querySelector('#terminal-link-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
 const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
@@ -165,6 +171,23 @@ const decoder = new TextDecoder();
 const activeSessionStorageKey = 'vps-terminal-active-session';
 const terminalFontSizeStorageKey = 'vps-terminal-font-size';
 const terminalThemeStorageKey = 'vps-terminal-theme';
+// Written by applyAppTheme, read before first paint by viewport-init.js.
+//
+// One colour was not enough: :root defines dark defaults for every theme token and
+// `body` paints `var(--surface)`, so setting only the html background left the body
+// painting dark over it. These are the tokens that decide what the first frame looks
+// like; the rest can wait for app.js.
+const terminalThemePaintStorageKey = 'vps-terminal-theme-paint';
+const terminalThemePaintTokens = [
+  '--surface',
+  '--surface-raised',
+  '--surface-deep',
+  '--terminal-bg',
+  '--text',
+  '--muted',
+  '--border',
+  '--accent'
+];
 const sessionThemeStorageKey = 'vps-terminal-session-themes';
 // Legacy keys are read once when creating the initial Shell profile.
 const shortcutsStorageKey = 'vps-terminal-shortcuts';
@@ -187,6 +210,27 @@ const settingsLastTabStorageKey = 'vps-terminal-settings-tab';
 const qaShellMode =
   new URLSearchParams(window.location.search).get('qa-shell') === '1';
 const connectionConnectTimeoutMs = 10000;
+// Reconnect pacing. A socket that never opened is a different failure from one that
+// dropped after working: the first is the server refusing us — capacity, auth, a dead
+// session — and retrying it twice a second forever is what kept the connection cap
+// exhausted, since every stale tab did it too. A drop after a working session is
+// usually a network blip and deserves a prompt retry.
+const reconnectBaseDelayMs = 1500;
+const reconnectMaxDelayMs = 30000;
+// After this many failures in a row, stop claiming to be "connecting" and say what is
+// happening. Retries continue in the background.
+const reconnectAttemptsBeforeError = 3;
+
+/**
+ * Delay before retry attempt `attempt` (1-based). Doubles, capped.
+ */
+function reconnectDelayForAttempt(attempt) {
+  // A non-finite attempt count would produce a NaN delay, and setTimeout treats NaN as
+  // zero — a spin loop against a server that is already refusing us.
+  const safe = Number.isFinite(attempt) ? attempt : 1;
+  const steps = Math.max(0, Math.min(safe - 1, 10));
+  return Math.min(reconnectBaseDelayMs * 2 ** steps, reconnectMaxDelayMs);
+}
 const pinHintStorageKey = 'vps-terminal-pin-hint-seen';
 const maximumPasteLength = 16384;
 const chipLongPressMilliseconds = 480;
@@ -453,6 +497,10 @@ const starterProfileSnippetCandidateGroups = [
   ['pastes', 'paste-ls']
 ];
 // Display labels for the settings picker (order is picker order).
+// The picker's contents. populateThemeSelect() calls replaceChildren(), so the
+// <option> elements in index.html are discarded before they are ever seen — this map
+// is the only thing that decides what a user can pick. Adding a theme without adding
+// it here leaves it unreachable, which is exactly what happened once.
 const terminalThemeLabels = {
   matrix: 'Matrix',
   groknight: 'Grok Night',
@@ -463,7 +511,11 @@ const terminalThemeLabels = {
   solarized: 'Solarized Dark',
   nord: 'Nord',
   monokai: 'Monokai',
-  gruvbox: 'Gruvbox Dark'
+  gruvbox: 'Gruvbox Dark',
+  pierrelight: 'Pierre Light',
+  latte: 'Catppuccin Latte',
+  rosepinedawn: 'Rosé Pine Dawn',
+  gruvboxlight: 'Gruvbox Light'
 };
 const terminalThemes = {
   // Former Termius Dark — green-on-navy classic.
@@ -697,6 +749,108 @@ const terminalThemes = {
     brightMagenta: '#d3869b',
     brightCyan: '#8ec07c',
     brightWhite: '#ebdbb2'
+  },
+  // --- Light themes. All three palettes come from the Shiki themes T3 Code ships,
+  // including its own house theme, so the ANSI colours are the authors' rather than
+  // guesses at light equivalents. See THIRD_PARTY_NOTICES.md.
+  //
+  // Kept last so the picker reads dark-then-light.
+  pierrelight: {
+    // T3 Code's own. Crisp: near-black on white, one blue accent.
+    background: '#ffffff',
+    foreground: '#0a0a0a',
+    cursor: '#009fff',
+    cursorAccent: '#ffffff',
+    selectionBackground: 'rgba(0, 159, 255, 0.24)',
+    black: '#1d1d1d',
+    red: '#d52c36',
+    green: '#18a46c',
+    yellow: '#d5a910',
+    blue: '#1a85d4',
+    magenta: '#bd2e90',
+    cyan: '#1ca1c7',
+    white: '#bcbcbc',
+    brightBlack: '#5c5c5c',
+    brightRed: '#d52c36',
+    brightGreen: '#77a42a',
+    brightYellow: '#b98f0d',
+    brightBlue: '#1a85d4',
+    brightMagenta: '#bd2e90',
+    brightCyan: '#1ca1c7',
+    brightWhite: '#8a8a8a'
+  },
+  latte: {
+    // Catppuccin Latte. Softer: warm off-white, muted ink.
+    background: '#eff1f5',
+    foreground: '#4c4f69',
+    cursor: '#dc8a78',
+    cursorAccent: '#eff1f5',
+    selectionBackground: 'rgba(124, 127, 147, 0.30)',
+    black: '#5c5f77',
+    red: '#d20f39',
+    green: '#40a02b',
+    yellow: '#df8e1d',
+    blue: '#1e66f5',
+    magenta: '#ea76cb',
+    cyan: '#179299',
+    white: '#acb0be',
+    brightBlack: '#6c6f85',
+    brightRed: '#de293e',
+    brightGreen: '#49af3d',
+    brightYellow: '#c78108',
+    brightBlue: '#456eff',
+    brightMagenta: '#d359b0',
+    brightCyan: '#2d9fa8',
+    brightWhite: '#8c91a1'
+  },
+  gruvboxlight: {
+    // Gruvbox Light Medium. The warm end of the range: a genuinely cream page, and
+    // the counterpart to Gruvbox Dark above.
+    background: '#fbf1c7',
+    foreground: '#3c3836',
+    cursor: '#af3a03',
+    cursorAccent: '#fbf1c7',
+    selectionBackground: 'rgba(104, 157, 106, 0.30)',
+    black: '#a89984',
+    red: '#cc241d',
+    green: '#798104',
+    yellow: '#b57614',
+    blue: '#458588',
+    magenta: '#b16286',
+    cyan: '#689d6a',
+    white: '#7c6f64',
+    brightBlack: '#7c6f64',
+    brightRed: '#9d0006',
+    brightGreen: '#79740e',
+    brightYellow: '#8f6413',
+    brightBlue: '#076678',
+    brightMagenta: '#8f3f71',
+    brightCyan: '#427b58',
+    brightWhite: '#3c3836'
+  },
+  rosepinedawn: {
+    // Rosé Pine Dawn. Warm rosy off-white — the counterpart to Rosé Pine Moon above.
+    background: '#faf4ed',
+    foreground: '#575279',
+    cursor: '#d7827e',
+    cursorAccent: '#faf4ed',
+    selectionBackground: 'rgba(110, 106, 134, 0.24)',
+    black: '#9893a5',
+    red: '#b4637a',
+    green: '#286983',
+    yellow: '#a06a1c',
+    blue: '#56949f',
+    magenta: '#907aa9',
+    cyan: '#b2635f',
+    white: '#575279',
+    brightBlack: '#797593',
+    brightRed: '#9c4f65',
+    brightGreen: '#215772',
+    brightYellow: '#8a5a17',
+    brightBlue: '#3f7c86',
+    brightMagenta: '#7d6795',
+    brightCyan: '#a05451',
+    brightWhite: '#575279'
   }
 };
 let sessions = [];
@@ -709,6 +863,11 @@ let socket = null;
 let lastSentTerminalCols = null;
 let lastSentTerminalRows = null;
 let reconnectTimer = null;
+// Consecutive failures to establish a socket. Reset the moment one opens.
+let reconnectAttempts = 0;
+// The session a connect() is currently opening a socket for, so a concurrent connect
+// for the same session does not open a second one.
+let connectingSession = null;
 let touchLastY = null;
 let touchMoved = false;
 let pinchStartDistance = null;
@@ -1065,6 +1224,7 @@ function openQuickMenu() {
     return;
   }
   renderQuickMenu();
+  renderKeybindingHints();
   updateTermControlsEnabled();
   if (!quickMenuDialog.open) {
     quickMenuDialog.showModal();
@@ -1197,6 +1357,9 @@ function forceReconnectActiveSession() {
   }
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
+  // An explicit retry is a fresh start: without this the user waits out whatever
+  // backoff the automatic attempts had reached, having just asked for it now.
+  reconnectAttempts = 0;
   lastConnectionDetail = `Reconnecting to ${activeSession}…`;
   setConnectionState('connecting', lastConnectionDetail);
   setStatus(lastConnectionDetail, { sticky: true });
@@ -2055,7 +2218,10 @@ function closeFindBar() {
     !holdKeyboardLayoutForSelection &&
     !terminal?.hasSelection()
   ) {
+    recordKeyboardTransition('find-close');
     releaseKeyboardLayoutLock();
+  } else {
+    recordKeyboardTransition('find-close-held');
   }
 }
 
@@ -2556,7 +2722,7 @@ function installChipLongPress(button, { onTap, onHold }) {
 function setSettingsTab(tabId) {
   const migrated =
     tabId === 'keys' ? 'profiles' : tabId === 'snips' ? 'library' : tabId;
-  const allowed = new Set(['profiles', 'library', 'theme', 'app']);
+  const allowed = new Set(['profiles', 'library', 'theme', 'app', 'debug']);
   const active = allowed.has(migrated) ? migrated : 'profiles';
   try {
     window.localStorage.setItem(settingsLastTabStorageKey, active);
@@ -2585,6 +2751,9 @@ function setSettingsTab(tabId) {
     updateInstallSettings();
     updateAppHelpPanel();
     updatePreferencesSyncUi();
+  }
+  if (active === 'debug') {
+    renderKeyboardTransitionDump();
   }
 }
 
@@ -3618,6 +3787,7 @@ function clearTerminalSelection() {
   // Selection is done — allow the keyboard-dismiss resize to finish now.
   if (holdKeyboardLayoutForSelection) {
     holdKeyboardLayoutForSelection = false;
+    recordKeyboardTransition('selection-cleared');
     if (!terminalInputIsFocused()) {
       releaseKeyboardLayoutLock();
     }
@@ -3788,6 +3958,211 @@ function selectionDebugSnapshot(extra = {}) {
     xtermTouchSelecting,
     ...extra
   };
+}
+
+// ---- Keyboard transition ring buffer (T19) — start of the pure block. ----
+// Keyboard geometry is derived from six interacting flags: keyboardLayoutLock,
+// selectionViewportLock, keyboardDismissing, holdKeyboardLayoutForSelection,
+// terminal.hasSelection() and terminalInputIsFocused(). Restoring the resting
+// layout needs all six false at once. One flag left true holds the frozen
+// keyboard height, and from the outside that is indistinguishable from a
+// keyboard event the page never received.
+//
+// The failure is intermittent and only reproduces on a phone, so the capture
+// ships before any fix. Nothing below the marker touches the DOM or a browser
+// global, so test/keyboard-transitions.test.js slices this block out of the
+// shipped bundle the way the keybinding and OSC 52 blocks are.
+
+const maximumKeyboardTransitions = 50;
+
+// Recorded on every entry, in the order the dump prints them.
+const keyboardTransitionFlagNames = [
+  'terminalFocused',
+  'holdForSelection',
+  'hasSelection',
+  'selectionLock',
+  'dismissing',
+  'layoutLock',
+  'keyboardReduced'
+];
+
+// Any one of these true keeps releaseKeyboardLayoutLock() and the release branch
+// in updateVisualViewport() from restoring the resting layout. layoutLock is not
+// here: it is the thing being released, not a reason to hold it.
+const keyboardReleaseBlockerNames = [
+  'terminalFocused',
+  'holdForSelection',
+  'hasSelection',
+  'selectionLock',
+  'dismissing',
+  'keyboardReduced'
+];
+
+function keyboardReleaseBlockers(flags) {
+  return keyboardReleaseBlockerNames.filter((name) => Boolean(flags?.[name]));
+}
+
+function keyboardTransitionSignature(event, flags) {
+  const state = keyboardTransitionFlagNames
+    .map((name) => (flags?.[name] ? '1' : '0'))
+    .join('');
+  return `${event}|${state}`;
+}
+
+function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
+  const entries = [];
+  let sequence = 0;
+  let dropped = 0;
+  return {
+    /**
+     * Push a transition, or fold it into the previous entry when the event name
+     * and all seven flags are unchanged.
+     *
+     * Folding is what makes a stuck state readable. A release declined 200 times
+     * in a row becomes one line with a count, instead of 200 lines that push
+     * every transition leading up to the stuck state out of the buffer.
+     */
+    record(event, flags, at = 0, extra = null) {
+      const signature = keyboardTransitionSignature(event, flags);
+      const previous = entries[entries.length - 1];
+      if (previous && previous.signature === signature) {
+        previous.count += 1;
+        previous.lastAt = at;
+        if (extra) {
+          previous.extra = extra;
+        }
+        return previous;
+      }
+      sequence += 1;
+      const entry = {
+        sequence,
+        event,
+        at,
+        lastAt: at,
+        count: 1,
+        signature,
+        flags: { ...flags },
+        blockedBy: keyboardReleaseBlockers(flags),
+        extra: extra || null
+      };
+      entries.push(entry);
+      if (entries.length > limit) {
+        dropped += entries.length - limit;
+        entries.splice(0, entries.length - limit);
+      }
+      return entry;
+    },
+    entries() {
+      return entries.slice();
+    },
+    dropped() {
+      return dropped;
+    },
+    clear() {
+      entries.length = 0;
+      dropped = 0;
+      sequence = 0;
+    }
+  };
+}
+
+function formatKeyboardTransitionFlags(flags) {
+  const lockHeight = flags?.layoutLockHeight;
+  const selectionLockHeight = flags?.selectionLockHeight;
+  return [
+    `focus=${flags?.terminalFocused ? 'y' : 'n'}`,
+    `hold=${flags?.holdForSelection ? 'y' : 'n'}`,
+    `sel=${flags?.hasSelection ? 'y' : 'n'}`,
+    `selLock=${flags?.selectionLock ? selectionLockHeight ?? 'y' : 'n'}`,
+    `dis=${flags?.dismissing ? 'y' : 'n'}`,
+    `lock=${flags?.layoutLock ? lockHeight ?? 'y' : 'n'}`,
+    `reduced=${flags?.keyboardReduced ? 'y' : 'n'}`,
+    `open=${flags?.keyboardOpenClass ? 'y' : 'n'}`,
+    `vv=${flags?.viewportHeight ?? '?'}`,
+    `lay=${flags?.layoutHeight ?? '?'}`
+  ].join(' ');
+}
+
+function formatKeyboardTransitions(entries, options = {}) {
+  const dropped = options.dropped || 0;
+  const lines = [];
+  if (dropped > 0) {
+    lines.push(`... ${dropped} earlier transition(s) dropped`);
+  }
+  if (entries.length === 0) {
+    lines.push('(no keyboard transitions recorded)');
+    return lines.join('\n');
+  }
+  entries.forEach((entry) => {
+    const repeat = entry.count > 1 ? ` x${entry.count}` : '';
+    const span =
+      entry.count > 1 && entry.lastAt !== entry.at
+        ? `..+${entry.lastAt}ms`
+        : '';
+    const blocked =
+      entry.blockedBy.length > 0 ? entry.blockedBy.join(',') : '-';
+    const extra = entry.extra
+      ? ` ${Object.entries(entry.extra)
+          .map(([key, value]) => `${key}=${value}`)
+          .join(' ')}`
+      : '';
+    lines.push(
+      `#${entry.sequence} +${entry.at}ms${span} ${entry.event}${repeat}` +
+        ` blockedBy=${blocked} ${formatKeyboardTransitionFlags(entry.flags)}${extra}`
+    );
+  });
+  return lines.join('\n');
+}
+// ---- End of the pure keyboard transition block. ----
+
+const keyboardTransitionLog = createKeyboardTransitionLog();
+
+/**
+ * Read the six flags plus the geometry needed to tell a real keyboard close from
+ * a stuck lock. keyboardViewportIsReduced() reads clientHeight, so this is a
+ * layout read — every caller already sits on a path that reflows.
+ */
+function keyboardTransitionFlags() {
+  const root = document.documentElement;
+  const viewport = window.visualViewport;
+  return {
+    terminalFocused: terminalInputIsFocused(),
+    holdForSelection: holdKeyboardLayoutForSelection,
+    hasSelection: Boolean(terminal?.hasSelection?.()),
+    selectionLock: Boolean(selectionViewportLock),
+    selectionLockHeight: selectionViewportLock?.height ?? null,
+    dismissing: keyboardDismissing,
+    layoutLock: Boolean(keyboardLayoutLock),
+    layoutLockHeight: keyboardLayoutLock?.height ?? null,
+    keyboardReduced: keyboardViewportIsReduced(),
+    keyboardOpenClass: root.classList.contains('keyboard-open'),
+    viewportHeight: Math.round(viewport?.height || window.innerHeight || 0),
+    layoutHeight: Math.round(root.clientHeight || window.innerHeight || 0)
+  };
+}
+
+function recordKeyboardTransition(event, extra = null) {
+  try {
+    const at = Math.round(window.performance?.now?.() || 0);
+    const entry = keyboardTransitionLog.record(
+      event,
+      keyboardTransitionFlags(),
+      at,
+      extra
+    );
+    // Only the first of a folded run reaches clientDebug. The repeats are what
+    // the ring buffer exists to bound, and shipping each one defeats that.
+    if (entry.count === 1) {
+      clientDebug('keyboard-transition', {
+        event: entry.event,
+        blockedBy: entry.blockedBy.join(',') || '-',
+        ...entry.flags,
+        ...(extra || {})
+      });
+    }
+  } catch {
+    // Diagnostics must never break the keyboard path.
+  }
 }
 
 function readBufferRangeText(start, end) {
@@ -4037,6 +4412,7 @@ function beginLongPressTerminalSelection(clientX, clientY) {
     keyboardDismissing = false;
     clearTimeout(keyboardDismissPollTimer);
     keyboardDismissPollTimer = null;
+    recordKeyboardTransition('selection-long-press-hold');
   }
   if (terminalInputIsFocused()) {
     terminal.blur();
@@ -4137,6 +4513,811 @@ function startNativeDeleteRepeat(deleteSequence) {
  * (reload, new tab, close tab, address bar, print, quit, devtools).
  * When the xterm textarea is focused, xterm still owns shell Ctrl chords.
  */
+// Command palette.
+//
+// Keyboard-only and desktop-only, and deliberately unreachable while the terminal
+// has focus: `Ctrl+K` is readline's kill-line, and the terminal is the product, so
+// the shell keeps it.
+//
+// That leaves the palette for the times focus is on header or footer chrome, or
+// there is no session. Note it is *not* reachable once focus moves inside the Files
+// panel, because that counts as uiCapture and Files owns its own keyboard contract.
+// It adds no persistent control, so it costs nothing when unused. Discoverability
+// improves once T7 puts chord hints beside the actions themselves.
+//
+// The filter is a pure function so it can be sliced out and tested.
+// Everything to the end-of-block marker is free of DOM and browser globals.
+function normalizePaletteQuery(query) {
+  return String(query ?? '')
+    .toLowerCase()
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+/**
+ * Every term has to appear somewhere in the label or its keywords. Terms are
+ * matched independently, so "files hidden" finds "Show hidden files" regardless of
+ * word order, and a stray space never empties the list.
+ */
+function paletteCommandMatches(command, terms) {
+  if (terms.length === 0) {
+    return true;
+  }
+  const haystack = `${command.label} ${command.keywords || ''}`.toLowerCase();
+  return terms.every((term) => haystack.includes(term));
+}
+
+function filterPaletteCommands(commands, query) {
+  const terms = normalizePaletteQuery(query);
+  return commands.filter(
+    (command) =>
+      (typeof command.available !== 'function' || command.available()) &&
+      paletteCommandMatches(command, terms)
+  );
+}
+
+// Wrap so ArrowUp from the first entry lands on the last: the list is short and a
+// dead end at either edge is worse than wrapping.
+function nextPaletteIndex(index, count, delta) {
+  if (count <= 0) {
+    return -1;
+  }
+  return (((index + delta) % count) + count) % count;
+}
+// End of the pure palette block.
+
+// The palette dispatches existing actions; it never owns behaviour of its own.
+// `available` keeps an action that cannot work right now out of the list entirely,
+// rather than offering it and failing.
+function commandPaletteCommands() {
+  const hasSession = Boolean(activeSession);
+  const commands = [
+    {
+      id: 'view.terminal',
+      label: 'Show Terminal',
+      keywords: 'term view switch',
+      available: () => viewMode !== 'term',
+      run: () => setViewMode('term')
+    },
+    {
+      id: 'view.files',
+      label: 'Show Files',
+      keywords: 'browser folder view switch',
+      available: () => viewMode !== 'files',
+      run: () => setViewMode('files')
+    },
+    {
+      id: 'find.open',
+      label: 'Find in scrollback',
+      keywords: 'search grep',
+      available: () => hasSession,
+      run: () => openFindBar()
+    },
+    {
+      id: 'session.new',
+      label: 'New session',
+      keywords: 'create tmux',
+      run: () => void createSession()
+    },
+    {
+      id: 'session.picker',
+      label: 'Switch session…',
+      keywords: 'sessions list picker',
+      run: () => {
+        setHeaderCollapsed(false);
+        refreshSessions(false, true);
+      }
+    },
+    {
+      id: 'session.rename',
+      label: 'Rename session',
+      keywords: 'title name',
+      available: () => hasSession,
+      run: () => void renameSession(activeSession)
+    },
+    {
+      id: 'session.reconnect',
+      label: 'Reconnect session',
+      keywords: 'retry transport socket',
+      available: () => hasSession,
+      run: () => forceReconnectActiveSession()
+    },
+    {
+      id: 'menu.open',
+      label: 'Open Menu',
+      keywords: 'sheet profile actions',
+      available: () => hasSession,
+      run: () => openQuickMenu()
+    },
+    {
+      id: 'settings.open',
+      label: 'Open Settings',
+      keywords: 'preferences theme profiles library',
+      run: () => openSettingsDialog()
+    }
+  ];
+  // One entry per other session, so switching is a single action rather than
+  // opening the picker and then choosing.
+  for (const session of sessions) {
+    if (session.name === activeSession) {
+      continue;
+    }
+    commands.push({
+      id: `session.connect:${session.name}`,
+      label: `Connect to ${session.name}`,
+      keywords: 'session switch attach',
+      run: () => void connect(session.name)
+    });
+  }
+  return commands;
+}
+
+let commandPaletteVisible = [];
+let commandPaletteIndex = -1;
+let commandPaletteReturnFocus = null;
+
+function isCommandPaletteOpen() {
+  return Boolean(commandPaletteDialog?.open);
+}
+
+function renderCommandPalette() {
+  if (!commandPaletteList) {
+    return;
+  }
+  commandPaletteVisible = filterPaletteCommands(
+    commandPaletteCommands(),
+    commandPaletteInput?.value
+  );
+  if (commandPaletteVisible.length === 0) {
+    commandPaletteIndex = -1;
+  } else if (commandPaletteIndex < 0 || commandPaletteIndex >= commandPaletteVisible.length) {
+    commandPaletteIndex = 0;
+  }
+  commandPaletteList.replaceChildren();
+  commandPaletteVisible.forEach((command, index) => {
+    const item = document.createElement('li');
+    item.id = `command-palette-option-${index}`;
+    item.className = 'command-palette-option';
+    item.setAttribute('role', 'option');
+    item.setAttribute('aria-selected', String(index === commandPaletteIndex));
+    item.textContent = command.label;
+    // Pointer selection mirrors keyboard selection so both agree on what Enter
+    // would run.
+    item.addEventListener('pointermove', () => {
+      if (commandPaletteIndex !== index) {
+        commandPaletteIndex = index;
+        syncCommandPaletteSelection();
+      }
+    });
+    item.addEventListener('click', () => runCommandPaletteSelection(index));
+    commandPaletteList.append(item);
+  });
+  if (commandPaletteEmpty) {
+    commandPaletteEmpty.hidden = commandPaletteVisible.length > 0;
+  }
+  commandPaletteInput?.setAttribute(
+    'aria-expanded',
+    String(commandPaletteVisible.length > 0)
+  );
+  syncCommandPaletteSelection();
+}
+
+function syncCommandPaletteSelection() {
+  if (!commandPaletteList) {
+    return;
+  }
+  const options = [...commandPaletteList.children];
+  options.forEach((option, index) => {
+    option.setAttribute('aria-selected', String(index === commandPaletteIndex));
+  });
+  const active = options[commandPaletteIndex];
+  if (active) {
+    // The input keeps DOM focus so typing continues to filter; the listbox
+    // selection is announced through aria-activedescendant instead.
+    commandPaletteInput?.setAttribute('aria-activedescendant', active.id);
+    active.scrollIntoView({ block: 'nearest' });
+  } else {
+    commandPaletteInput?.removeAttribute('aria-activedescendant');
+  }
+}
+
+function moveCommandPaletteSelection(delta) {
+  commandPaletteIndex = nextPaletteIndex(
+    commandPaletteIndex,
+    commandPaletteVisible.length,
+    delta
+  );
+  syncCommandPaletteSelection();
+}
+
+function runCommandPaletteSelection(index = commandPaletteIndex) {
+  const command = commandPaletteVisible[index];
+  if (!command) {
+    return;
+  }
+  // Close first: several of these open another surface, and two transient
+  // surfaces at once is exactly what the design principles forbid.
+  closeCommandPalette({ restoreFocus: false });
+  command.run();
+}
+
+function openCommandPalette() {
+  if (!commandPaletteDialog || isCommandPaletteOpen()) {
+    return;
+  }
+  // One transient surface at a time — but only where the picker is genuinely
+  // transient. With no session the expanded bar is the resting state the empty view
+  // points at, and nothing here re-expands it on close, so collapsing it would
+  // strand the user. Same qualifier the Escape binding uses.
+  closeFooterDrawer();
+  if (activeSession) {
+    setHeaderCollapsed(true);
+  }
+  commandPaletteReturnFocus =
+    document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  if (commandPaletteInput) {
+    commandPaletteInput.value = '';
+  }
+  commandPaletteIndex = 0;
+  renderCommandPalette();
+  commandPaletteDialog.showModal();
+  commandPaletteInput?.focus({ preventScroll: true });
+}
+
+function closeCommandPalette(options = {}) {
+  if (!commandPaletteDialog?.open) {
+    return;
+  }
+  if (options.restoreFocus === false) {
+    // The command about to run owns focus from here — several of them open another
+    // surface, and returning focus to the invoker first would fight that.
+    commandPaletteReturnFocus = null;
+  }
+  // State reset and focus restoration live in the dialog's `close` listener, so
+  // Escape and the backdrop take the same path as this call.
+  commandPaletteDialog.close();
+}
+
+// Keybindings: one table, resolved against focus context.
+//
+// Everything from here to the end-of-block marker is free of DOM and browser
+// globals so `test/` can slice it out and assert on it, the same way the
+// terminal-link and OSC 52 blocks are tested.
+//
+// This replaces per-chord `if` blocks scattered across three call sites. Ctrl/Cmd+F
+// alone lived in the xterm handler, in a document listener, and as a "skip here"
+// branch in the hardware bridge that existed only to stop the three from fighting.
+// A chord's meaning belongs in one place, keyed by what currently has focus.
+//
+// "Keybinding" deliberately, not "shortcut": a Shortcut here is already a Keys
+// drawer chip that sends a sequence to the pty, which is a different thing.
+function platformIsApple() {
+  const platform =
+    navigator.userAgentData?.platform || navigator.platform || navigator.userAgent || '';
+  return /mac|iphone|ipad|ipod/i.test(platform);
+}
+
+const keybindingKeyAliases = { esc: 'escape', ' ': 'space', spacebar: 'space' };
+// Punctuation reported by `code`, so a binding matches regardless of layout.
+const keybindingCodeAliases = {
+  BracketLeft: '[',
+  BracketRight: ']',
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Backslash: '\\',
+  Semicolon: ';',
+  Quote: "'",
+  Minus: '-',
+  Equal: '=',
+  Backquote: '`'
+};
+
+function normalizeKeybindingKey(value) {
+  const lower = String(value ?? '').toLowerCase();
+  return keybindingKeyAliases[lower] ?? lower;
+}
+
+function parseKeybinding(binding, isApple = false) {
+  const spec = {
+    key: '',
+    ctrl: false,
+    meta: false,
+    shift: false,
+    alt: false
+  };
+  for (const raw of String(binding).toLowerCase().split('+')) {
+    const part = raw.trim();
+    if (!part) {
+      continue;
+    }
+    if (part === 'mod') {
+      spec[isApple ? 'meta' : 'ctrl'] = true;
+    } else if (part === 'ctrl' || part === 'control') {
+      spec.ctrl = true;
+    } else if (part === 'meta' || part === 'cmd') {
+      spec.meta = true;
+    } else if (part === 'shift') {
+      spec.shift = true;
+    } else if (part === 'alt' || part === 'option') {
+      spec.alt = true;
+    } else {
+      spec.key = normalizeKeybindingKey(part);
+    }
+  }
+  return spec;
+}
+
+// `key` alone is layout-dependent: on a Cyrillic or Dvorak layout the physical F
+// reports something else entirely. `code` covers that, and its aliases cover
+// punctuation.
+// Anything a binding could name. The pressed label wins over the physical key
+// whenever it is one of these.
+const keybindingNameableKeys = new Set(Object.values(keybindingCodeAliases));
+
+function isNameableKeybindingKey(value) {
+  return /^[a-z0-9]$/.test(value) || keybindingNameableKeys.has(value);
+}
+
+function keybindingEventKeys(event) {
+  const primary = normalizeKeybindingKey(event.key);
+  const keys = new Set([primary]);
+  // The `code` fallback must not apply in either direction, or a remapped layout loses chords the
+  // shell needs. On Dvorak physical KeyF types `u`, so falling back to the code let
+  // `mod+f` claim Ctrl+U and steal kill-line. The mirror case is just as real:
+  // physical Semicolon types `s` there, so an unconditional alias lookup would let
+  // `mod+;` claim Ctrl+S — XOFF, a C0 control.
+  if (isNameableKeybindingKey(primary)) {
+    return keys;
+  }
+  // Reached only for a label no binding could name — Cyrillic, Greek, Arabic —
+  // where every letter binding would otherwise be unreachable.
+  const code = typeof event.code === 'string' ? event.code : '';
+  const letter = /^Key([A-Z])$/.exec(code);
+  if (letter) {
+    keys.add(letter[1].toLowerCase());
+  }
+  const digit = /^Digit(\d)$/.exec(code);
+  if (digit) {
+    keys.add(digit[1]);
+  }
+  const alias = keybindingCodeAliases[code];
+  if (alias) {
+    keys.add(alias);
+  }
+  return keys;
+}
+
+// Modifiers match exactly, so a binding for `mod+f` does not also swallow
+// `Ctrl+Shift+F`. `mod` is resolved once while compiling: Cmd on Apple and Ctrl
+// elsewhere.
+function keybindingMatchesEvent(spec, event) {
+  if (!spec.key || !keybindingEventKeys(event).has(spec.key)) {
+    return false;
+  }
+  if (spec.ctrl !== Boolean(event.ctrlKey)) {
+    return false;
+  }
+  if (spec.meta !== Boolean(event.metaKey)) {
+    return false;
+  }
+  return (
+    spec.shift === Boolean(event.shiftKey) && spec.alt === Boolean(event.altKey)
+  );
+}
+
+// `when` supports a bare context name, `!name`, and `&&` between them. That is
+// all the bindings need; anything richer would be a parser to maintain for no
+// current caller. An unknown name evaluates false rather than passing silently,
+// so a typo disables its binding instead of firing it everywhere — and a test
+// asserts every name in the table exists.
+function evaluateKeybindingWhen(when, context) {
+  if (!when) {
+    return true;
+  }
+  return String(when)
+    .split('&&')
+    .every((clause) => {
+      const trimmed = clause.trim();
+      const negated = trimmed.startsWith('!');
+      const name = (negated ? trimmed.slice(1) : trimmed).trim();
+      if (!name || !Object.hasOwn(context, name)) {
+        return false;
+      }
+      return negated ? !context[name] : Boolean(context[name]);
+    });
+}
+
+/**
+ * `context` may be a value or a thunk. As a thunk it is built at most once, and
+ * only after some binding's key already matched — this runs on every keystroke
+ * in the terminal, and the context costs several DOM traversals plus a selection
+ * read.
+ */
+function resolveKeybinding(bindings, event, context) {
+  const provider = typeof context === 'function' ? context : () => context;
+  let resolved;
+  let built = false;
+  for (const binding of bindings) {
+    if (!keybindingMatchesEvent(binding.spec, event)) {
+      continue;
+    }
+    if (!built) {
+      resolved = provider();
+      built = true;
+    }
+    if (!evaluateKeybindingWhen(binding.when, resolved)) {
+      continue;
+    }
+    return binding;
+  }
+  return null;
+}
+
+function compileKeybindings(table, isApple = false) {
+  return table.map((binding) => ({
+    ...binding,
+    spec: parseKeybinding(binding.key, isApple)
+  }));
+}
+
+// Render a chord for display. Apple gets the glyphs its users expect; everything
+// else spells the modifiers out.
+const keybindingDisplayOrder = ['ctrl', 'alt', 'shift', 'meta'];
+const keybindingDisplayNames = {
+  arrowleft: '←',
+  arrowright: '→',
+  arrowup: '↑',
+  arrowdown: '↓',
+  escape: 'Esc',
+  backspace: '⌫',
+  insert: 'Ins',
+  space: 'Space'
+};
+
+function keybindingModifierLabel(modifier, isApple) {
+  if (isApple) {
+    return { ctrl: '⌃', alt: '⌥', shift: '⇧', meta: '⌘' }[modifier];
+  }
+  return { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', meta: 'Meta' }[modifier];
+}
+
+function keybindingKeyLabel(key) {
+  if (Object.hasOwn(keybindingDisplayNames, key)) {
+    return keybindingDisplayNames[key];
+  }
+  return key.length === 1 ? key.toUpperCase() : key;
+}
+
+/**
+ * The parts of a chord, in a stable order. Returned as an array so a caller can
+ * render each part as its own <kbd> rather than parsing a joined string.
+ */
+function keybindingLabelParts(spec, isApple = false) {
+  const parts = [];
+  for (const modifier of keybindingDisplayOrder) {
+    if (spec[modifier]) {
+      parts.push(keybindingModifierLabel(modifier, isApple));
+    }
+  }
+  parts.push(keybindingKeyLabel(spec.key));
+  return parts;
+}
+
+/**
+ * The chord bound to a command, or null when nothing is. Derived from the compiled
+ * table, so a hint cannot describe a binding that no longer exists.
+ */
+function keybindingLabelForCommand(bindings, command, isApple = false) {
+  const binding = bindings.find((entry) => entry.command === command);
+  return binding ? keybindingLabelParts(binding.spec, isApple) : null;
+}
+// End of the pure keybinding block.
+
+// Order matters: the first match wins, so Escape closes Find before the session
+// picker, which is the precedence these chords already had.
+const keybindingTable = compileKeybindings([
+  { key: 'mod+f', command: 'find.open', when: '!uiCapture' },
+  // Ctrl+K is readline's kill-line, so this is available only while focus is
+  // outside the terminal. finePointer gates it by capability: the palette is a
+  // keyboard surface and has no place on a touch-only device.
+  {
+    key: 'mod+k',
+    command: 'palette.open',
+    when: '!terminalFocus && !uiCapture && finePointer'
+  },
+  {
+    key: 'mod+c',
+    command: 'terminal.copySelection',
+    when: 'terminalFocus && terminalSelection'
+  },
+  { key: 'mod+v', command: 'terminal.paste', when: 'terminalFocus' },
+  // The conventional copy/paste chords in Linux terminals. They worked before this
+  // table because the old handler compared `event.key` case-insensitively, and
+  // `Shift` makes it 'C'. xterm emits nothing for ctrl+shift+letter, so without
+  // these the chords are silently dead rather than falling through.
+  //
+  // Literally `ctrl`, not `mod`: this pair is not platform-relative. `mod` would
+  // make it Cmd+Shift+C on Apple, which is Chrome's inspect-element rather than a
+  // terminal convention, and would stop the named chord working there at all.
+  {
+    key: 'ctrl+shift+c',
+    command: 'terminal.copySelection',
+    when: 'terminalFocus && terminalSelection'
+  },
+  { key: 'ctrl+shift+v', command: 'terminal.paste', when: 'terminalFocus' },
+  { key: 'shift+insert', command: 'clipboard.paste', when: 'terminalFocus' },
+  // Native text-editing chords translated to the escape sequences readline
+  // actually binds. xterm sends `\e[1;3D` for Alt+Left, which bash does not bind
+  // by default, so word movement silently did nothing before this.
+  //
+  // Alt+Arrow is browser-back on Windows/Linux and Cmd+Arrow is browser-back on
+  // macOS. Claiming both is deliberate: navigating away from a live terminal by
+  // accident costs far more than the gesture is worth here.
+  { key: 'alt+arrowleft', command: 'terminal.wordLeft', when: 'terminalFocus' },
+  { key: 'alt+arrowright', command: 'terminal.wordRight', when: 'terminalFocus' },
+  {
+    key: 'alt+backspace',
+    command: 'terminal.deleteWordLeft',
+    when: 'terminalFocus'
+  },
+  // Apple only: Cmd+Arrow means line start/end there, while on Windows/Linux the
+  // same chord belongs to the browser and no shell convention claims it.
+  {
+    key: 'meta+arrowleft',
+    command: 'terminal.lineStart',
+    when: 'terminalFocus && applePlatform'
+  },
+  {
+    key: 'meta+arrowright',
+    command: 'terminal.lineEnd',
+    when: 'terminalFocus && applePlatform'
+  },
+  {
+    key: 'meta+backspace',
+    command: 'terminal.deleteToLineStart',
+    when: 'terminalFocus && applePlatform'
+  },
+  // The find input owns its Escape key at the target phase. Keep this binding
+  // for terminal/chrome focus without also closing the bar from document
+  // capture before the input's existing handler runs.
+  { key: 'escape', command: 'find.close', when: 'findOpen && !uiCapture' },
+  {
+    // terminalOpen and !filesView came from the bridge branch this replaced.
+    // Without a session the expanded bar is the resting state the empty view
+    // points at, so Escape leaves it alone — the same rule the pointer gesture
+    // follows.
+    key: 'escape',
+    command: 'picker.close',
+    when:
+      'pickerOpen && terminalOpen && !filesView && !terminalFocus && !uiCapture'
+  }
+], platformIsApple());
+
+// What each command is called in the shortcuts reference. Every command needs one, or
+// it appears in the table and nowhere a user can read it.
+const keybindingCommandLabels = {
+  'find.open': 'Find in scrollback',
+  'find.close': 'Close find',
+  'palette.open': 'Commands',
+  'picker.close': 'Close session picker',
+  'terminal.copySelection': 'Copy selection',
+  'terminal.paste': 'Paste',
+  'clipboard.paste': 'Paste',
+  'terminal.wordLeft': 'Move back one word',
+  'terminal.wordRight': 'Move forward one word',
+  'terminal.deleteWordLeft': 'Delete previous word',
+  'terminal.lineStart': 'Jump to line start',
+  'terminal.lineEnd': 'Jump to line end',
+  'terminal.deleteToLineStart': 'Delete to line start'
+};
+
+const keybindingCommands = {
+  'find.open': { run: () => openFindBar() },
+  'palette.open': { run: () => openCommandPalette() },
+  'find.close': { run: () => closeFindBar() },
+  'picker.close': { run: () => setHeaderCollapsed(true), stopPropagation: true },
+  'terminal.copySelection': {
+    run: () => void copyTerminalSelection({ source: 'keyboard' })
+  },
+  // Deliberately does not preventDefault: the browser's own paste has to run so
+  // handleTerminalPasteEvent receives clipboardData, which carries images without
+  // a permission prompt. Returning false to xterm is what stops the pty seeing ^V.
+  'terminal.paste': { run: () => expectNativePasteEvent(), preventDefault: false },
+  'clipboard.paste': { run: () => void pasteClipboard() },
+  // Readline's own bindings, not the terminal's modified-arrow sequences.
+  'terminal.wordLeft': { run: () => sendTerminalSequence('\u001bb') },
+  'terminal.wordRight': { run: () => sendTerminalSequence('\u001bf') },
+  'terminal.deleteWordLeft': { run: () => sendTerminalSequence('\u001b\u007f') },
+  'terminal.lineStart': { run: () => sendTerminalSequence('\u0001') },
+  'terminal.lineEnd': { run: () => sendTerminalSequence('\u0005') },
+  'terminal.deleteToLineStart': { run: () => sendTerminalSequence('\u0015') }
+};
+
+// Deliver a literal sequence to the pty and keep the mobile input primer in step,
+// the same pair the native Backspace path uses.
+function sendTerminalSequence(sequence) {
+  sendInput(sequence);
+  scheduleNativeTerminalInputPrime();
+}
+
+/**
+ * Put the chord for `command` beside a control, as <kbd> parts.
+ *
+ * Only where a hardware keyboard is plausible: a hint is noise on a touch-only
+ * device, and principle 9 asks for short labels over unexplained decoration. The
+ * hint is not a tab stop and never a tap target.
+ */
+function renderKeybindingHint(element, command) {
+  if (!element) {
+    return;
+  }
+  element.querySelector('.kbd-hint')?.remove();
+  if (!window.matchMedia?.('(pointer: fine)').matches) {
+    return;
+  }
+  const parts = keybindingLabelForCommand(
+    keybindingTable,
+    command,
+    platformIsApple()
+  );
+  if (!parts) {
+    return;
+  }
+  const hint = document.createElement('span');
+  hint.className = 'kbd-hint';
+  // Hidden from assistive tech: the control already has an accessible name, and
+  // spelling the glyphs out adds noise rather than information.
+  hint.setAttribute('aria-hidden', 'true');
+  for (const part of parts) {
+    const key = document.createElement('kbd');
+    key.textContent = part;
+    hint.append(key);
+  }
+  element.append(hint);
+}
+
+/**
+ * Where a binding applies, in words.
+ *
+ * Worth stating: `Ctrl+K` opening the palette only outside the terminal is otherwise
+ * a mystery, and the readline chords only inside it. Anything else is unqualified
+ * rather than guessed at.
+ */
+function keybindingScopeLabel(when) {
+  if (!when) {
+    return '';
+  }
+  if (when.includes('!terminalFocus')) {
+    return 'outside the terminal';
+  }
+  if (when.includes('terminalFocus')) {
+    return 'in the terminal';
+  }
+  return '';
+}
+
+/**
+ * One row per command, with every chord bound to it.
+ *
+ * Derived from the compiled table so it cannot drift, and grouped by command because
+ * two chords for one action — Ctrl+C and Ctrl+Shift+C both copy — read as duplicates
+ * otherwise. Apple-only bindings are dropped off Apple and vice versa, since a chord
+ * that cannot fire is worse than absent.
+ */
+function keybindingReferenceRows(bindings, isApple = platformIsApple()) {
+  const rows = new Map();
+  for (const binding of bindings) {
+    const label = keybindingCommandLabels[binding.command];
+    if (!label) {
+      continue;
+    }
+    if (binding.when?.includes('applePlatform') && !isApple) {
+      continue;
+    }
+    const chord = keybindingLabelParts(binding.spec, isApple).join(' ');
+    const scope = keybindingScopeLabel(binding.when);
+    // Keyed by what the reader sees, not by command id: Ctrl+V and Shift+Insert are
+    // separate commands that both mean Paste, and two rows reading "Paste" look like
+    // two different actions.
+    const key = `${label}|${scope}`;
+    const existing = rows.get(key);
+    if (existing) {
+      if (!existing.chords.includes(chord)) {
+        existing.chords.push(chord);
+      }
+      continue;
+    }
+    rows.set(key, {
+      command: binding.command,
+      label,
+      scope,
+      chords: [chord]
+    });
+  }
+  return [...rows.values()];
+}
+
+function renderKeybindingReference() {
+  const section = document.querySelector('#keybinding-reference-section');
+  const list = document.querySelector('#keybinding-reference');
+  if (!section || !list) {
+    return;
+  }
+  // `any-pointer: fine` rather than `pointer: fine`: a tablet with a trackpad and a
+  // keyboard has a coarse *primary* pointer but can still use every chord here.
+  const usable = Boolean(window.matchMedia?.('(any-pointer: fine)').matches);
+  const rows = usable ? keybindingReferenceRows(keybindingTable) : [];
+  section.hidden = rows.length === 0;
+  list.replaceChildren();
+  for (const row of rows) {
+    const term = document.createElement('dt');
+    for (const chord of row.chords) {
+      const hint = document.createElement('span');
+      hint.className = 'kbd-hint';
+      for (const part of chord.split(' ')) {
+        const key = document.createElement('kbd');
+        key.textContent = part;
+        hint.append(key);
+      }
+      term.append(hint);
+    }
+    const description = document.createElement('dd');
+    description.textContent = row.scope
+      ? `${row.label} — ${row.scope}`
+      : row.label;
+    list.append(term, description);
+  }
+}
+
+function renderKeybindingHints() {
+  renderKeybindingHint(quickMenuFindButton, 'find.open');
+}
+
+function keybindingContext(event) {
+  return {
+    terminalFocus: terminalInputIsFocused(),
+    terminalSelection: terminalHasCopyableSelection(),
+    findOpen: isFindBarOpen(),
+    pickerOpen: headerPickerOpen(),
+    filesView: viewMode === 'files',
+    terminalOpen: Boolean(terminal && activeSession && !terminalElement?.hidden),
+    applePlatform: platformIsApple(),
+    // Capability, not user-agent: a hardware keyboard is what makes a keyboard-only
+    // surface worth offering.
+    finePointer: Boolean(window.matchMedia?.('(pointer: fine)').matches),
+    uiCapture: isHardwareKeyboardUiCaptureTarget(event?.target)
+  };
+}
+
+/**
+ * Resolve and run a binding for this event. Returns true when one fired, so the
+ * caller can stop the key going anywhere else.
+ */
+function runMatchingKeybinding(event) {
+  if (event.type !== 'keydown' || event.isComposing) {
+    return false;
+  }
+  const binding = resolveKeybinding(keybindingTable, event, () =>
+    keybindingContext(event)
+  );
+  if (!binding) {
+    return false;
+  }
+  const command = keybindingCommands[binding.command];
+  if (!command) {
+    return false;
+  }
+  if (command.preventDefault !== false) {
+    event.preventDefault();
+  }
+  if (command.stopPropagation) {
+    event.stopPropagation();
+  }
+  command.run();
+  return true;
+}
+
 function isBrowserReservedHardwareChord(event) {
   if (!event || event.isComposing) {
     return false;
@@ -4309,40 +5490,9 @@ function hardwareKeySequence(event) {
 }
 
 function handleNativeTerminalKeyEvent(event) {
-  // Ctrl/Cmd+F opens scrollback find (all platforms).
-  if (
-    event.type === 'keydown' &&
-    !event.isComposing &&
-    (event.key === 'f' || event.key === 'F') &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.altKey
-  ) {
-    event.preventDefault();
-    openFindBar();
-    return false;
-  }
-  // Ctrl/Cmd+C copies an active selection instead of sending SIGINT. xterm's
-  // selection is its own internal model, not a native browser Selection —
-  // the DOM renderer only *looks* selected — so the browser's native copy
-  // shortcut has nothing to act on by itself. Desktop/fine-pointer chrome
-  // also has no footer, so the mobile copy button/chip aren't reachable
-  // here either; reuse the same copyTerminalSelection() they call so the
-  // clipboard-write path (and its iOS-safe fallback) stays in one place.
-  if (
-    event.type === 'keydown' &&
-    !event.isComposing &&
-    (event.key === 'c' || event.key === 'C') &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.altKey &&
-    terminalHasCopyableSelection()
-  ) {
-    event.preventDefault();
-    void copyTerminalSelection({ source: 'keyboard' });
-    return false;
-  }
-  if (event.type === 'keydown' && event.key === 'Escape' && isFindBarOpen()) {
-    event.preventDefault();
-    closeFindBar();
+  // Chrome chords come from the keybinding table; returning false keeps the key
+  // out of the pty. Everything below is terminal input handling, not a binding.
+  if (runMatchingKeybinding(event)) {
     return false;
   }
   // Keep Tab inside the terminal (don't move focus to footer/chrome).
@@ -4409,29 +5559,9 @@ function handleHardwareKeyboardBridge(event) {
   if (terminalInputIsFocused()) {
     return;
   }
-  // Find open but focus elsewhere (e.g. footer): Esc closes find first.
-  if (event.key === 'Escape' && isFindBarOpen()) {
-    event.preventDefault();
-    closeFindBar();
-    return;
-  }
-  // Then the session picker, which is an overlay in portrait. Focus inside the
-  // terminal or another UI capture target already returned above, so Escape
-  // still reaches the PTY and dialogs.
-  if (event.key === 'Escape' && headerPickerOpen()) {
-    event.preventDefault();
-    event.stopPropagation();
-    setHeaderCollapsed(true);
-    return;
-  }
-  // Ctrl/Cmd+F is handled by the global find listener; skip here.
-  if (
-    (event.key === 'f' || event.key === 'F') &&
-    (event.ctrlKey || event.metaKey) &&
-    !event.altKey
-  ) {
-    return;
-  }
+  // Escape-closes-Find, Escape-closes-picker, and Ctrl/Cmd+F are keybindings now.
+  // The listener above runs first and marks the event handled, so the
+  // defaultPrevented check at the top of this function skips them.
   if (isBrowserReservedHardwareChord(event)) {
     return;
   }
@@ -4689,6 +5819,20 @@ function saveSessionThemes(map) {
   return cleaned;
 }
 
+/**
+ * How hard xterm should work to keep foregrounds readable.
+ *
+ * 1 disables the adjustment, which is what dark themes want: a TUI's chosen colours
+ * are already legible there and nudging them changes how its author's palette looks.
+ * On a light theme the same colours are often near-invisible — dim grey and
+ * near-background truecolor both assume something dark behind them — so ask for the
+ * WCAG AA ratio and let xterm lift whatever falls short.
+ */
+function terminalMinimumContrastRatio(themeName) {
+  const theme = terminalThemes[resolveThemeName(themeName)];
+  return theme && isLightHexColor(theme.background) ? 4.5 : 1;
+}
+
 function themeForSession(sessionName) {
   if (!sessionName) {
     return rememberedTerminalThemeName();
@@ -4749,7 +5893,11 @@ const terminalThemeAccentKeys = {
   solarized: 'blue',
   nord: 'blue',
   monokai: 'magenta',
-  gruvbox: 'yellow'
+  gruvbox: 'yellow',
+  pierrelight: 'cursor',
+  latte: 'blue',
+  rosepinedawn: 'magenta',
+  gruvboxlight: 'blue'
 };
 
 function mixHexColors(base, overlay, overlayWeight) {
@@ -4777,6 +5925,37 @@ function mixHexColors(base, overlay, overlayWeight) {
   return `#${mixed
     .map((channel) => channel.toString(16).padStart(2, '0'))
     .join('')}`;
+}
+
+function hexColorLuminance(value) {
+  const match = /^#([0-9a-f]{6})$/i.exec(value || '');
+  if (!match) {
+    return 0;
+  }
+  const packed = Number.parseInt(match[1], 16);
+  const channels = [
+    (packed >> 16) & 255,
+    (packed >> 8) & 255,
+    packed & 255
+  ].map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+}
+
+/**
+ * Whether a surface is light enough that contrast has to be gained by darkening.
+ *
+ * Every derivation below used to assume a dark background and mix toward white.
+ * On a light theme that is backwards: it lowers contrast instead of raising it, and
+ * `ensureHexColorContrast` could never reach its target ratio so it returned pure
+ * white. This is the one decision the rest of the palette hangs off.
+ */
+function isLightHexColor(value) {
+  return hexColorLuminance(value) > 0.4;
 }
 
 function hexColorContrast(foreground, background) {
@@ -4838,6 +6017,11 @@ function applyAppTheme(themeName) {
     0.08
   );
   const accentSurface = mixHexColors(theme.background, accent, 0.24);
+  // On a light background, contrast is gained by darkening, not lightening. Without
+  // this every text token mixed toward white, so "strong" text came out *lighter*
+  // than normal text and the contrast guards below could never reach their ratio.
+  const light = isLightHexColor(theme.background);
+  const contrastTarget = light ? '#000000' : '#ffffff';
   const danger = theme.brightRed || theme.red;
   const dangerSurface = mixHexColors(theme.background, danger, 0.18);
   const root = document.documentElement;
@@ -4852,24 +6036,36 @@ function applyAppTheme(themeName) {
     '--muted': ensureHexColorContrast(
       mixHexColors(theme.background, theme.foreground, 0.62),
       raisedSurface,
-      3
+      3,
+      contrastTarget
     ),
-    '--text': mixHexColors(theme.foreground, '#ffffff', 0.08),
-    '--text-strong': mixHexColors(theme.foreground, '#ffffff', 0.22),
+    '--text': mixHexColors(theme.foreground, contrastTarget, 0.08),
+    '--text-strong': mixHexColors(theme.foreground, contrastTarget, 0.22),
     '--accent': accent,
     '--accent-surface': accentSurface,
     '--accent-text': ensureHexColorContrast(
       mixHexColors(theme.foreground, accent, 0.22),
       accentSurface,
-      4.5
+      4.5,
+      contrastTarget
     ),
     '--danger': ensureHexColorContrast(
       danger,
       dangerSurface,
-      4.5
+      4.5,
+      contrastTarget
     ),
     '--danger-surface': dangerSurface,
-    '--focus-ring': mixHexColors(accent, '#ffffff', 0.24)
+    '--focus-ring': mixHexColors(accent, contrastTarget, 0.24),
+    // Scrollbars were the one surface a theme did not own, so a light theme still
+    // showed a dark thumb. Derived from the same foreground mix as the borders.
+    '--app-scrollbar-thumb': mixHexColors(theme.background, theme.foreground, 0.28),
+    '--app-scrollbar-thumb-hover': mixHexColors(
+      theme.background,
+      theme.foreground,
+      0.42
+    ),
+    '--app-scrollbar-track': mixHexColors(theme.background, theme.foreground, 0.06)
   };
   for (const [property, value] of Object.entries(variables)) {
     root.style.setProperty(property, value);
@@ -4877,6 +6073,26 @@ function applyAppTheme(themeName) {
   document
     .querySelector('meta[name="theme-color"]')
     ?.setAttribute('content', theme.background);
+  // Cached for the pre-paint script in viewport-init.js. Storing resolved values
+  // rather than the theme name keeps the palette and its derivations in one place: a
+  // second copy over there would drift the first time either changed.
+  try {
+    window.localStorage.setItem(
+      terminalThemePaintStorageKey,
+      JSON.stringify({
+        // Drives color-scheme, so native controls and scrollbars match from the
+        // first frame rather than flipping once app.js runs.
+        scheme: light ? 'light' : 'dark',
+        vars: Object.fromEntries(
+          terminalThemePaintTokens
+            .filter((name) => variables[name])
+            .map((name) => [name, variables[name]])
+        )
+      })
+    );
+  } catch {
+    // A first paint without the cache just falls back to the built-in colours.
+  }
 }
 
 function applyTerminalTheme(name, options = {}) {
@@ -4891,6 +6107,8 @@ function applyTerminalTheme(name, options = {}) {
   }
   if (terminal) {
     terminal.options.theme = terminalThemes[resolved];
+    terminal.options.minimumContrastRatio =
+      terminalMinimumContrastRatio(resolved);
   }
   applyAppTheme(resolved);
   if (!persist) {
@@ -6352,6 +7570,8 @@ function setViewMode(mode, options = {}) {
   if (next === 'files') {
     closeFindBar();
     closeFooterDrawer();
+    // It describes a terminal cell, so it has no meaning here.
+    hideTerminalLinkChip();
     terminal?.blur();
     // Collapse session chrome — not used in Files.
     setHeaderCollapsed(true);
@@ -7361,7 +8581,89 @@ async function uploadFilesSelected(fileList) {
   }
 }
 
+/**
+ * Show the build this page is running, read from the shell the server rendered.
+ *
+ * A reload is the only way to pick up a new bundle, so when this disagrees with the
+ * deployed build the page is stale — which otherwise looks exactly like a deploy
+ * that did not land.
+ */
+function renderAppBuildId() {
+  const target = document.querySelector('#app-build-id');
+  if (!target) {
+    return;
+  }
+  const build = document
+    .querySelector('meta[name="vps-build-id"]')
+    ?.getAttribute('content');
+  // Unsubstituted means the file was opened without the server, so say nothing
+  // rather than showing the placeholder.
+  if (!build || build.startsWith('__')) {
+    target.hidden = true;
+    return;
+  }
+  target.hidden = false;
+  target.textContent = `Build ${build} — reload to pick up a new one.`;
+}
+
+// Built when the panel renders, copied verbatim by the Copy button. Copying reads
+// this rather than the live log: writeTextToClipboardLegacy() focuses a carrier
+// textarea, which moves focus and would add transitions to the dump being copied.
+let lastKeyboardTransitionDumpText = '';
+
+/**
+ * Render the keyboard transition ring buffer into Settings → Debug.
+ *
+ * iOS Safari has no reachable console, so a dump that cannot be read and copied
+ * from inside the app is no use on the one device that reproduces the bug.
+ */
+function renderKeyboardTransitionDump() {
+  const dumpElement = document.querySelector('#keyboard-debug-dump');
+  if (!dumpElement) {
+    return;
+  }
+  const stateElement = document.querySelector('#keyboard-debug-state');
+  const countElement = document.querySelector('#keyboard-debug-count');
+  const entries = keyboardTransitionLog.entries();
+  const dropped = keyboardTransitionLog.dropped();
+  const body = formatKeyboardTransitions(entries, { dropped });
+  dumpElement.textContent = body;
+  if (countElement) {
+    countElement.textContent = `${entries.length}/${maximumKeyboardTransitions}`;
+  }
+  // Reading the panel must not record a transition, so this snapshots the flags
+  // without going through recordKeyboardTransition().
+  const flags = keyboardTransitionFlags();
+  const blockers = keyboardReleaseBlockers(flags);
+  if (stateElement) {
+    stateElement.textContent =
+      blockers.length > 0
+        ? `Holding now: ${blockers.join(', ')}`
+        : 'Holding now: nothing.';
+  }
+  const build =
+    document
+      .querySelector('meta[name="vps-build-id"]')
+      ?.getAttribute('content') || 'unknown';
+  lastKeyboardTransitionDumpText = [
+    'vps-terminal keyboard transitions',
+    `build=${build}`,
+    `ua=${navigator.userAgent}`,
+    `displayMode=${document.documentElement.dataset.displayMode || 'browser'}`,
+    `orientation=${
+      window.matchMedia('(orientation: landscape)').matches
+        ? 'landscape'
+        : 'portrait'
+    }`,
+    `now blockedBy=${blockers.join(',') || '-'} ${formatKeyboardTransitionFlags(flags)}`,
+    '',
+    body
+  ].join('\n');
+}
+
 function openSettingsDialog() {
+  renderAppBuildId();
+  renderKeybindingReference();
   setSettingsTab(loadLastSettingsTab());
   if (settingsDialogElement && !settingsDialogElement.open) {
     settingsDialogElement.showModal();
@@ -7533,6 +8835,30 @@ async function ensureTerminal() {
         fastScrollSensitivity: 5,
         scrollSensitivity: 1,
         scrollback: 10000,
+        // Raise washed-out foregrounds to a readable ratio. This exists for light
+        // themes: our light palettes invert the ANSI black/white that TUIs written
+        // for dark backgrounds assume, so dim text and near-background truecolor —
+        // Claude Code's status line, for one — come out unreadable. Kept at 1 (off)
+        // on dark themes, where those apps already look as their authors intended.
+        minimumContrastRatio: terminalMinimumContrastRatio(terminalThemeName),
+        // OSC 8 hyperlinks are handled by xterm's own provider, not ours. With no
+        // handler set it opens them from a plain left-click after a `confirm()`,
+        // which contradicts the modifier gate everywhere else. `ls
+        // --hyperlink=auto`, eza, gh, and delta all emit OSC 8, so route
+        // activation through the same check.
+        //
+        // Only activation: their hover decoration comes from xterm and cannot be
+        // gated the same way. Non-http schemes were already refused before this
+        // — the vendored provider runs that check whenever no handler is set — so
+        // `allowNonHttpProtocols: false` restates the default rather than closing
+        // a hole. It stays for explicitness.
+        linkHandler: {
+          // Not activateTerminalLink directly: xterm calls this as
+          // (event, text, range), so its third argument would arrive where the
+          // link kind belongs. OSC 8 targets are always URLs.
+          activate: (event, text) => activateTerminalLink(event, text, 'url'),
+          allowNonHttpProtocols: false
+        },
         theme: terminalThemes[terminalThemeName]
       });
       fitAddon = new FitAddon.FitAddon();
@@ -7542,7 +8868,14 @@ async function ensureTerminal() {
         terminal.loadAddon(searchAddon);
       }
       terminal.open(terminalElement);
+      terminal.parser?.registerOscHandler?.(52, handleClipboardOsc);
+      terminal.registerLinkProvider?.({ provideLinks: provideTerminalLinks });
+      installTerminalLinkModifierTracking();
+      terminalElement.addEventListener('paste', handleTerminalPasteEvent, {
+        capture: true
+      });
       terminal.textarea?.addEventListener('focus', () => {
+        recordKeyboardTransition('terminal-focus');
         keyboardDismissing = false;
         clearTimeout(keyboardDismissPollTimer);
         keyboardDismissPollTimer = null;
@@ -7557,6 +8890,10 @@ async function ensureTerminal() {
           if (terminalInputIsFocused() || keyboardViewportIsReduced()) {
             captureKeyboardLayoutLock();
             scheduleFit();
+          } else {
+            // Blur landed inside the 320 ms animation window, so nothing is
+            // frozen and the lock the rest of the code expects never exists.
+            recordKeyboardTransition('focus-settle-skipped');
           }
         }, 320);
       });
@@ -7566,7 +8903,10 @@ async function ensureTerminal() {
         setKeyboardButtonState(false);
         // Do not expand layout while a long-press selection is in progress.
         if (!holdKeyboardLayoutForSelection && !terminal?.hasSelection()) {
+          recordKeyboardTransition('terminal-blur');
           releaseKeyboardLayoutLock();
+        } else {
+          recordKeyboardTransition('terminal-blur-held');
         }
       });
       terminal.onSelectionChange(() => {
@@ -7578,7 +8918,13 @@ async function ensureTerminal() {
           !terminalInputIsFocused()
         ) {
           holdKeyboardLayoutForSelection = false;
+          recordKeyboardTransition('selection-change-release');
           releaseKeyboardLayoutLock();
+        } else if (holdKeyboardLayoutForSelection || terminal?.hasSelection()) {
+          // Only when a selection or its hold is live. xterm fires this on every
+          // write that clears an empty selection, which is ~20 events during boot
+          // and tells us nothing about keyboard geometry.
+          recordKeyboardTransition('selection-change');
         }
       });
       terminal.textarea?.addEventListener('compositionstart', () => {
@@ -7600,6 +8946,11 @@ async function ensureTerminal() {
         { capture: true }
       );
       terminal.attachCustomKeyEventHandler(handleNativeTerminalKeyEvent);
+      // Baseline, so a dump always opens with a known state. xterm focuses the
+      // helper textarea inside terminal.open(), which happens before the focus
+      // listener above exists — without this the first entry in the buffer is
+      // whatever incidental event came next.
+      recordKeyboardTransition('startup');
       terminal.element?.classList.toggle(
         'native-touch-selection',
         nativeTouchSelection
@@ -7608,7 +8959,15 @@ async function ensureTerminal() {
         sendInput(data);
         scheduleNativeTerminalInputPrime();
       });
-      terminal.onScroll(showScrollPosition);
+      terminal.onScroll(() => {
+        showScrollPosition();
+        // The chip points at one cell of one row, so a scroll invalidates it —
+        // except the reflow from the keyboard the offering tap just raised, which
+        // would otherwise dismiss the chip immediately.
+        if (window.performance.now() >= terminalLinkChipSettleUntil) {
+          hideTerminalLinkChip();
+        }
+      });
       terminal.refresh(0, terminal.rows - 1);
       installTouchScrolling();
     })();
@@ -7649,6 +9008,9 @@ function handleTerminalTap(clientX, clientY) {
     terminal.rows,
     Math.max(1, Math.floor(((clientY - bounds.top) / bounds.height) * terminal.rows) + 1)
   );
+  // A tap on a link offers the chip. Deliberately before the focus handling below,
+  // and additive: the tap still positions the cursor and raises the keyboard.
+  offerTerminalLinkOnTap(clientX, clientY);
   // Open keyboard on a plain tap when closed. Prefer the lower area (prompt),
   // but any non-scroll tap should also bring up the keyboard for typing.
   const nearPrompt = row > terminal.rows - 8;
@@ -7726,6 +9088,7 @@ function scheduleFit() {
 
 function captureKeyboardLayoutLock() {
   if (keyboardDismissing && !holdKeyboardLayoutForSelection) {
+    recordKeyboardTransition('capture-declined');
     return;
   }
   keyboardLayoutLock = currentVisualViewportGeometry();
@@ -7742,6 +9105,10 @@ function captureKeyboardLayoutLock() {
   // Keep the app pinned to the visible top; do not track later visualViewport
   // rubber-band pans (those look like the whole page is scrolling).
   document.documentElement.style.setProperty('--app-top', '0px');
+  // Recorded last so the entry carries the height that was frozen. Every other
+  // event records the state it produced, and a 'capture' reading lock=n would
+  // read as a capture that did not happen.
+  recordKeyboardTransition('capture');
 }
 
 /**
@@ -7797,8 +9164,13 @@ function releaseKeyboardLayoutLock() {
   // Keep frozen keyboard geometry while a long-press selection is active so
   // the terminal does not refit and drop the selection.
   if (holdKeyboardLayoutForSelection || terminal?.hasSelection()) {
+    // The prime suspect for T19: a selection that is never cleared holds the
+    // frozen height for the rest of the page's life. Folded, so a stuck state
+    // reads as one line with a large count.
+    recordKeyboardTransition('release-declined');
     return;
   }
+  recordKeyboardTransition('release-begin');
   keyboardLayoutLock = null;
   keyboardDismissing = true;
   clearTimeout(keyboardDismissPollTimer);
@@ -7815,16 +9187,24 @@ function releaseKeyboardLayoutLock() {
     // not cancel dismiss when the OS already hid the keyboard.
     if (terminalInputIsFocused()) {
       keyboardDismissing = false;
+      recordKeyboardTransition('dismiss-poll-refocused', { attempts });
       return;
     }
     if (holdKeyboardLayoutForSelection || terminal?.hasSelection()) {
       keyboardDismissing = false;
+      recordKeyboardTransition('dismiss-poll-selection', { attempts });
       return;
     }
     attempts += 1;
     pinPageToOrigin();
     if (!keyboardViewportIsReduced() || attempts >= 24) {
       keyboardDismissing = false;
+      // attempts >= 24 means the viewport never grew back — a real stuck close
+      // rather than a normal one, and the two must be told apart in the dump.
+      recordKeyboardTransition('dismiss-poll-done', {
+        attempts,
+        exhausted: attempts >= 24
+      });
       clearLockedAppGeometry({ force: true });
       updateEffectiveSafeAreaInsets();
       scheduleFit();
@@ -7841,6 +9221,9 @@ function releaseKeyboardLayoutLock() {
     lastAppliedViewportTop = 0;
     pinPageToOrigin();
     scheduleFit();
+    // Folds into one entry whose count is the number of 50 ms ticks the close
+    // took, so a close that ran the poll out is visible without 24 lines.
+    recordKeyboardTransition('dismiss-poll-follow');
     keyboardDismissPollTimer = window.setTimeout(pollKeyboardClosed, 50);
   };
   keyboardDismissPollTimer = window.setTimeout(pollKeyboardClosed, 50);
@@ -7965,6 +9348,7 @@ function lockSelectionViewportIfKeyboardOpen() {
     selectionViewportLock = currentVisualViewportGeometry();
   }
   applySelectionViewportLockStyles();
+  recordKeyboardTransition('selection-viewport-lock');
 }
 
 function currentVisualViewportGeometry() {
@@ -7982,6 +9366,7 @@ function releaseSelectionViewport() {
   selectionViewportGestureActive = false;
   lastAppliedViewportHeight = null;
   lastAppliedViewportTop = null;
+  recordKeyboardTransition('selection-viewport-release');
   scheduleVisualViewportUpdate();
 }
 
@@ -8485,6 +9870,10 @@ function fit() {
 
 function disconnect() {
   stopNativeDeleteRepeat();
+  // Any in-flight connect is now void; leaving the flag set would block the next one.
+  connectingSession = null;
+  // The chip refers to a cell in this session's buffer.
+  hideTerminalLinkChip();
   clearTimeout(reconnectTimer);
   reconnectTimer = null;
   if (socket) {
@@ -8517,6 +9906,29 @@ async function connect(name) {
     updateTermControlsEnabled();
     return;
   }
+  // A connect for this session is already opening a socket. Without this, a click that
+  // lands while the app is auto-connecting the remembered session opens a second socket
+  // for the same pane, and the loser is discarded — which counts against the server's
+  // connection cap until it is reaped.
+  //
+  // The guard has to be released on every exit, including a rejection: an earlier
+  // version cleared it only on the success path, so one failed ensureTerminal() left
+  // the flag set and every later connect became a silent no-op.
+  if (connectingSession === name) {
+    return;
+  }
+  connectingSession = name;
+  try {
+    await openSessionSocket(name);
+  } finally {
+    if (connectingSession === name) {
+      connectingSession = null;
+    }
+  }
+}
+
+async function openSessionSocket(name) {
+
   clearTimeout(reconnectTimer);
   const retiredSocket = socket;
   socket = null;
@@ -8556,8 +9968,18 @@ async function connect(name) {
   lastSentTerminalCols = null;
   lastSentTerminalRows = null;
   nextSocket.binaryType = 'arraybuffer';
+  let socketDidOpen = false;
   nextSocket.addEventListener('open', () => {
+    socketDidOpen = true;
+    // A working connection clears the debt: the next failure starts from the short
+    // delay again rather than inheriting a long one.
+    reconnectAttempts = 0;
     if (socket !== nextSocket) {
+      // Superseded before it finished connecting — another connect() replaced it.
+      // Returning without closing left this one open on the server forever, and the
+      // server caps concurrent connections, so a handful of reloads exhausted the
+      // cap and every later upgrade was refused.
+      nextSocket.close(1000, 'superseded');
       return;
     }
     clearConnectionWatch();
@@ -8587,11 +10009,25 @@ async function connect(name) {
     }
     socket = null;
     setCtrlArmed(false);
-    lastConnectionDetail = `Disconnected from ${name}; reconnecting…`;
-    setConnectionState('connecting', lastConnectionDetail);
+    // A socket that opened and then dropped starts the count again; one that never
+    // opened was refused, and repeated refusals back off.
+    reconnectAttempts = socketDidOpen ? 1 : reconnectAttempts + 1;
+    const delay = reconnectDelayForAttempt(reconnectAttempts);
+    if (reconnectAttempts >= reconnectAttemptsBeforeError) {
+      // Stop saying "reconnecting" when it has failed repeatedly. The close event used
+      // to overwrite the error state the error event had just set, so the actionable
+      // message only ever flickered.
+      lastConnectionDetail =
+        `Cannot reach ${name}. Retrying every ` +
+        `${Math.round(delay / 1000)}s — tap the status dot to retry now.`;
+      setConnectionState('error', lastConnectionDetail);
+    } else {
+      lastConnectionDetail = `Disconnected from ${name}; reconnecting…`;
+      setConnectionState('connecting', lastConnectionDetail);
+      armConnectionWatch(name);
+    }
     setStatus(lastConnectionDetail, { sticky: true });
-    armConnectionWatch(name);
-    reconnectTimer = setTimeout(() => connect(name), 1500);
+    reconnectTimer = setTimeout(() => connect(name), delay);
   });
   nextSocket.addEventListener('error', () => {
     if (socket !== nextSocket) {
@@ -8675,6 +10111,777 @@ async function renameSession(name) {
   } catch (error) {
     window.alert(error.message);
   }
+}
+
+// Terminal links: pure detection and resolution. Everything from here to the
+// end-of-block marker is free of DOM and browser globals so `test/` can slice
+// it out of the shipped source and assert on it directly, the same way the
+// OSC 52 decoder below is tested.
+//
+// Detection is deliberately conservative. Terminal output is mostly prose and
+// diagnostics, so a wrong link that navigates somewhere unexpected is worse
+// than a path left as plain text.
+const terminalLinkUrlPattern = /https?:\/\/[^\s"'`<>]+/g;
+// Two alternatives, both deliberately narrow. Underlining half a build log in a
+// terminal-first product is worse than missing `src/Makefile`.
+//
+// A sigil form (`/`, `./`, `../`, `~/`) counts on its own, but only where the
+// sigil does not continue a word: without that lookbehind, `Proceed? y/n` yields
+// `/n`, `and/or` yields `/or`, and `1/10` yields `/10`.
+//
+// Windows path shapes are intentionally absent: this only ever talks to a Linux
+// VPS, so `C:\` would add ambiguity for no reachable target.
+//
+// A bare `a/b` form additionally needs a real extension on the last segment —
+// letter-initial, so `HTTP/1.1` and `0.15/0.20` are not filenames, and allowing
+// interior dots so `file.test.js` is not truncated to `file.test`. Without this,
+// `read/write`, `2026/07/30`, `192.168.1.10/24`, and `[13/Jul/2026:10:00:00]` all
+// matched.
+const terminalLinkPathPattern =
+  /(?<![A-Za-z0-9._~-])(?:~\/|\.{1,2}\/|\/)[^\s"'`<>]+|[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*\/[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\.[A-Za-z][A-Za-z0-9]{0,9}(?::\d+){0,2}/g;
+const terminalLinkTrailingPunctuationPattern = /[.,;:!?]+$/;
+
+// Compilers, linters, and shells all wrap paths in delimiters, so a match
+// frequently carries a closer that belongs to the surrounding sentence rather
+// than to the path: `(see /etc/nginx.conf)` or `["src/app.js"]`. Only drop a
+// closer that has no opener inside the match itself, so a genuinely bracketed
+// filename survives.
+function trimTerminalLinkDelimiters(value) {
+  let output = value.replace(terminalLinkTrailingPunctuationPattern, '');
+  const trimUnbalanced = (open, close) => {
+    while (output.endsWith(close)) {
+      const opens = output.split(open).length - 1;
+      const closes = output.split(close).length - 1;
+      if (opens >= closes) {
+        return;
+      }
+      output = output.slice(0, -1);
+    }
+  };
+  trimUnbalanced('(', ')');
+  trimUnbalanced('[', ']');
+  trimUnbalanced('{', '}');
+  return output;
+}
+
+function terminalLinkRangesOverlap(first, second) {
+  return first.start < second.end && second.start < first.end;
+}
+
+function collectTerminalLinkMatches(line, kind, pattern, existing) {
+  const matches = [];
+  pattern.lastIndex = 0;
+  for (const rawMatch of line.matchAll(pattern)) {
+    const raw = rawMatch[0];
+    const start = rawMatch.index ?? -1;
+    if (start < 0 || raw.length === 0) {
+      continue;
+    }
+    const trimmed = trimTerminalLinkDelimiters(raw);
+    if (trimmed.length === 0) {
+      continue;
+    }
+    // A URL contains slashes and dots, so the path pattern matches its tail as
+    // well. URLs are collected first and win the overlap.
+    if (kind === 'path' && /^https?:\/\//i.test(trimmed)) {
+      continue;
+    }
+    // A leading `//` means we matched the tail of some other scheme's URL
+    // (`ssh://host/repo.git`, `file:///etc`). Windows UNC paths are out of scope,
+    // so nothing legitimate starts this way.
+    if (kind === 'path' && trimmed.startsWith('//')) {
+      continue;
+    }
+    // A sigil path must not continue a word, or `Proceed? y/n` yields `/n`,
+    // `and/or` yields `/or`, and `1/10` yields `/10`. Done here rather than with a
+    // RegExp lookbehind: iOS Safari below 16.4 cannot parse one, and that fails
+    // the whole file rather than degrading. Bare matches need no such check —
+    // their first character class already starts them at a word boundary.
+    if (
+      kind === 'path' &&
+      start > 0 &&
+      /^[~./]/.test(trimmed) &&
+      /[A-Za-z0-9._~-]/.test(line[start - 1])
+    ) {
+      continue;
+    }
+    const candidate = { kind, text: trimmed, start, end: start + trimmed.length };
+    const collides = [...existing, ...matches].some((other) =>
+      terminalLinkRangesOverlap(candidate, other)
+    );
+    if (collides) {
+      continue;
+    }
+    matches.push(candidate);
+  }
+  return matches;
+}
+
+function extractTerminalLinks(line) {
+  const urlMatches = collectTerminalLinkMatches(
+    line,
+    'url',
+    terminalLinkUrlPattern,
+    []
+  );
+  const pathMatches = collectTerminalLinkMatches(
+    line,
+    'path',
+    terminalLinkPathPattern,
+    urlMatches
+  );
+  return [...urlMatches, ...pathMatches].sort((a, b) => a.start - b.start);
+}
+
+// `app.js:12:34`, `app.js:12`, or neither. A single trailing number is a line,
+// not a column, which is what every editor and compiler means by it.
+function splitTerminalLinkPosition(value) {
+  let path = value;
+  let line;
+  let column;
+  const first = path.match(/:(\d+)$/);
+  if (!first) {
+    return { path, line: undefined, column: undefined };
+  }
+  column = first[1];
+  path = path.slice(0, -first[0].length);
+  const second = path.match(/:(\d+)$/);
+  if (second) {
+    line = second[1];
+    path = path.slice(0, -second[0].length);
+  } else {
+    line = column;
+    column = undefined;
+  }
+  return { path, line, column };
+}
+
+// Map each string index produced by `translateToString` to its 1-based cell
+// column. The two are not interchangeable: a double-width glyph (CJK, emoji)
+// takes two cells but one string position, and a combining mark adds a string
+// position without advancing a cell. Treating an index as a column puts both the
+// underline and the click target in the wrong place on any row containing them.
+//
+// `line` only needs `length` and `getCell`. This mirrors xterm's own
+// translation: take each cell's characters (a blank cell reads as one space) and
+// advance by the cell's width, which skips the continuation cell of a wide glyph.
+//
+// Widths are kept alongside the columns because a range's end has to point at
+// the glyph's *last* cell, not its first, or a link ending in a wide glyph
+// underlines one cell short and rejects a click on that glyph's right half.
+//
+// `reusableCell` is optional and purely about allocation: xterm's `getCell(i)`
+// builds a fresh CellData per call, and this runs per row on every hover that
+// crosses a row boundary.
+function terminalLineColumnMap(line, reusableCell) {
+  if (typeof line?.getCell !== 'function') {
+    return undefined;
+  }
+  const columns = [];
+  const widths = [];
+  const cellCount = line.length ?? 0;
+  for (let cellIndex = 0; cellIndex < cellCount; ) {
+    const cell = reusableCell
+      ? line.getCell(cellIndex, reusableCell)
+      : line.getCell(cellIndex);
+    if (!cell) {
+      break;
+    }
+    const characters = cell.getChars() || ' ';
+    const width = cell.getWidth() || 1;
+    for (let offset = 0; offset < characters.length; offset += 1) {
+      columns.push(cellIndex + 1);
+      widths.push(width);
+    }
+    cellIndex += width;
+  }
+  return { columns, widths };
+}
+
+// A path longer than the window is stored across several buffer rows flagged
+// `isWrapped`. Reading only the clicked row would truncate the link, so walk
+// back to the row that started the logical line, then forward to its end, and
+// keep each row's slice offsets so a match can be mapped back to buffer
+// coordinates.
+function collectWrappedTerminalLinkLine(bufferLineNumber, getLine) {
+  const anchor = getLine(bufferLineNumber - 1);
+  if (!anchor) {
+    return null;
+  }
+  let startNumber = bufferLineNumber;
+  let startLine = anchor;
+  while (startNumber > 1 && startLine.isWrapped) {
+    const previous = getLine(startNumber - 2);
+    if (!previous) {
+      return null;
+    }
+    startNumber -= 1;
+    startLine = previous;
+  }
+  const segments = [];
+  let nextStartIndex = 0;
+  let currentNumber = startNumber;
+  for (;;) {
+    const currentLine = getLine(currentNumber - 1);
+    if (!currentLine) {
+      break;
+    }
+    const continues = getLine(currentNumber)?.isWrapped === true;
+    // Only the final row may be right-trimmed; trimming a continued row would
+    // delete padding that is part of the logical line.
+    const text = currentLine.translateToString(!continues);
+    segments.push({
+      bufferLineNumber: currentNumber,
+      text,
+      startIndex: nextStartIndex,
+      endIndex: nextStartIndex + text.length,
+      // The row itself, not its column map: the map is only read when a match
+      // actually lands in this segment, so rows with no link never build one.
+      // A map built from the untrimmed row still lines up with a right-trimmed
+      // `text`, which is only ever a prefix.
+      columnSource: currentLine
+    });
+    nextStartIndex += text.length;
+    if (!continues) {
+      break;
+    }
+    currentNumber += 1;
+  }
+  return { text: segments.map((segment) => segment.text).join(''), segments };
+}
+
+// xterm buffer coordinates are 1-based. Without a column map — a caller that
+// only supplied strings, as some unit tests do — the index is the best available
+// approximation, which is exact for single-width text.
+//
+// `atEnd` returns the glyph's last cell instead of its first, which only differs
+// for a double-width glyph.
+function terminalLinkColumnFor(segment, localIndex, atEnd) {
+  const map = segment.columnSource?.columnMap;
+  const column = map?.columns?.[localIndex];
+  if (column === undefined) {
+    return localIndex + 1;
+  }
+  return atEnd ? column + (map.widths?.[localIndex] ?? 1) - 1 : column;
+}
+
+function resolveTerminalLinkCharacter(segments, characterIndex, atEnd) {
+  for (const segment of segments) {
+    if (characterIndex < segment.endIndex) {
+      return {
+        x: terminalLinkColumnFor(segment, characterIndex - segment.startIndex, atEnd),
+        y: segment.bufferLineNumber
+      };
+    }
+  }
+  const last = segments[segments.length - 1];
+  const lastIndex = Math.max((last?.text.length ?? 1) - 1, 0);
+  return {
+    x: last ? terminalLinkColumnFor(last, lastIndex, atEnd) : 1,
+    y: last?.bufferLineNumber ?? 1
+  };
+}
+
+function resolveWrappedTerminalLinkRange(wrappedLine, match) {
+  return {
+    start: resolveTerminalLinkCharacter(wrappedLine.segments, match.start, false),
+    end: resolveTerminalLinkCharacter(wrappedLine.segments, match.end - 1, true)
+  };
+}
+
+/**
+ * Is `column` on `bufferLineNumber` inside this link's range?
+ *
+ * A range can span wrapped rows, so the first and last rows are bounded by the
+ * range's own columns while any row between them is covered end to end.
+ */
+function terminalLinkRangeContains(range, column, bufferLineNumber) {
+  if (bufferLineNumber < range.start.y || bufferLineNumber > range.end.y) {
+    return false;
+  }
+  if (bufferLineNumber === range.start.y && column < range.start.x) {
+    return false;
+  }
+  if (bufferLineNumber === range.end.y && column > range.end.x) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * The link covering a cell, or null. Used by the touch path, which has no hover to
+ * lean on and must decide from a tap position alone.
+ */
+function findTerminalLinkAtCell(bufferLineNumber, column, getLine) {
+  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, getLine);
+  if (!wrappedLine) {
+    return null;
+  }
+  for (const match of extractTerminalLinks(wrappedLine.text)) {
+    const range = resolveWrappedTerminalLinkRange(wrappedLine, match);
+    if (terminalLinkRangeContains(range, column, bufferLineNumber)) {
+      return { ...match, range };
+    }
+  }
+  return null;
+}
+
+// End of the pure terminal-link block.
+
+// URLs open in a new tab; paths resolve through /api/fs/resolve and open in the
+// Files view.
+//
+// Activation requires Ctrl/Cmd, which keeps an ordinary click free to position
+// the cursor and drag a selection — the terminal is the product, so a stray
+// click must never navigate. The underline and pointer cursor follow the
+// modifier rather than advertising a plain click that does nothing. Touch has no
+// modifier and is deliberately not covered here.
+//
+// Decoration state has to be written in two places because of how xterm handles
+// it. On hover it *snapshots* the `decorations` we provided, applies the cursor
+// and underline from that snapshot, and only then calls `hover` — after which it
+// replaces `link.decorations` with its own accessor-backed object. So the value
+// supplied at provide time decides the initial appearance, and every later
+// change must be written through the link's own `decorations` property.
+let terminalLinkModifierHeld = false;
+let hoveredTerminalLink = null;
+
+function terminalLinkModifierActive(event, isApple = platformIsApple()) {
+  // Cmd on Apple, Ctrl elsewhere — mutually exclusive, unlike the `mod` used for
+  // keyboard chords. Ctrl+click *is* the context-menu gesture on macOS, and
+  // whether it arrives as a secondary button or as button 0 plus a separate
+  // `contextmenu` event is engine-dependent, so accepting Ctrl there means the
+  // menu and the link can both appear. Alt and Shift are excluded because the
+  // terminal uses them for mouse reporting and for extending a selection.
+  const modifier = isApple
+    ? event.metaKey && !event.ctrlKey
+    : event.ctrlKey && !event.metaKey;
+  return Boolean(modifier && !event.altKey && !event.shiftKey);
+}
+
+function applyTerminalLinkDecorations() {
+  const decorations = hoveredTerminalLink?.decorations;
+  if (!decorations) {
+    return;
+  }
+  decorations.pointerCursor = terminalLinkModifierHeld;
+  decorations.underline = terminalLinkModifierHeld;
+}
+
+function setTerminalLinkModifierHeld(held) {
+  if (terminalLinkModifierHeld === held) {
+    return;
+  }
+  terminalLinkModifierHeld = held;
+  applyTerminalLinkDecorations();
+}
+
+function syncTerminalLinkModifier(event) {
+  setTerminalLinkModifierHeld(terminalLinkModifierActive(event));
+}
+
+const TERMINAL_PATH_LINK_UNRESOLVED_MESSAGE = 'That path is not available in Files';
+
+/**
+ * Open a path printed in the terminal in the Files view.
+ *
+ * The server does the resolving: it owns the mapping from an absolute path to a
+ * root, and it reads the session's working directory for a relative one, which
+ * is fresher than anything cached here. It answers a flat "not found" for a path
+ * outside its approved roots, so a failure here says nothing about the
+ * filesystem and is reported quietly — the click was, after all, a guess about
+ * arbitrary text.
+ */
+async function openTerminalPathLink(rawPath) {
+  const { path: pathText, line } = splitTerminalLinkPosition(rawPath);
+  const query = new URLSearchParams({ path: pathText });
+  if (activeSession) {
+    query.set('session', activeSession);
+  }
+  let resolved;
+  try {
+    resolved = await api(`/api/fs/resolve?${query.toString()}`);
+  } catch {
+    setStatus(TERMINAL_PATH_LINK_UNRESOLVED_MESSAGE);
+    return;
+  }
+  const isDirectory = resolved.type === 'dir';
+  const segments = String(resolved.relativePath || '').split('/');
+  const name = segments[segments.length - 1] || '';
+  const directory = isDirectory
+    ? resolved.relativePath
+    : segments.slice(0, -1).join('/');
+
+  closeFilesPreview({ restoreFocus: false });
+  filesRootId = resolved.rootId;
+  filesPath = directory;
+  filesSelectedName = '';
+  filesSelectedIndex = -1;
+  // Land on the file itself in the listing rather than just its folder.
+  filesRestoreSelectionName = isDirectory ? '' : name;
+  saveFilesNav();
+  // Before setViewMode, which fires its own un-awaited ensureFilesRoots(); that
+  // helper has no in-flight guard, so two /api/fs/roots requests would race.
+  await ensureFilesRoots();
+  setViewMode('files');
+  await refreshFilesListing();
+  if (isDirectory) {
+    return;
+  }
+  // `refreshFilesListing` falls back to the root when a directory cannot be
+  // listed, and `previewFilesTarget` then returns silently because its guard no
+  // longer matches — leaving the user somewhere unexpected with no explanation.
+  if (filesRootId !== resolved.rootId || filesPath !== directory) {
+    setStatus(`Opened ${resolved.rootId} — could not show ${name}`);
+    return;
+  }
+  try {
+    await previewFilesTarget({
+      root: resolved.rootId,
+      path: resolved.relativePath,
+      name,
+      type: 'file'
+    });
+  } catch (error) {
+    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
+    return;
+  }
+  if (line) {
+    // The preview pane has no line addressing yet, so a `file:12` link opens the
+    // right file at the top rather than pretending to jump.
+    setStatus(`Opened ${name} (line ${line} not shown)`);
+  }
+}
+
+// Shared by our own link provider and by xterm's OSC 8 handler, so both honour
+// the same gate.
+function activateTerminalLink(event, text, kind = 'url') {
+  // xterm binds mouseup with no button filter, so the button is checked here:
+  // a middle-click paste or a right-click on a link must not also open it.
+  //
+  // macOS Ctrl+click is settled separately, in terminalLinkModifierActive: the
+  // modifier there is Cmd on Apple and Ctrl elsewhere, so Ctrl+click cannot
+  // reach this at all on a Mac. This guard still earns its place for
+  // middle-click paste and for a right-click landing on a link.
+  if ((event.button ?? 0) !== 0) {
+    return;
+  }
+  if (!terminalLinkModifierActive(event)) {
+    return;
+  }
+  if (kind === 'path') {
+    void openTerminalPathLink(text);
+    return;
+  }
+  openTerminalUrlLink(text);
+}
+
+function openTerminalUrlLink(url) {
+  // Terminal output is untrusted — a process can print whatever it likes — so
+  // the scheme is re-checked here rather than relying on the match pattern
+  // alone. `noopener`/`noreferrer` stop the opened page reaching back into this
+  // one, which for an authenticated terminal session matters more than usual.
+  if (!/^https?:\/\//i.test(url)) {
+    return;
+  }
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+// xterm asks per buffer row and expects 1-based absolute buffer coordinates,
+// which is the space `collectWrappedTerminalLinkLine` already works in.
+function provideTerminalLinks(bufferLineNumber, callback) {
+  const buffer = terminal?.buffer?.active;
+  if (!buffer) {
+    callback(undefined);
+    return;
+  }
+  // One cell object reused for every column of every row, and a column map built
+  // only if something in that row is actually resolved to buffer coordinates.
+  const reusableCell = buffer.getNullCell?.();
+  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, (index) => {
+    const line = buffer.getLine(index);
+    if (!line) {
+      return undefined;
+    }
+    let columnMap;
+    return {
+      isWrapped: line.isWrapped,
+      translateToString: (trimRight) => line.translateToString(trimRight),
+      get columnMap() {
+        columnMap ??= terminalLineColumnMap(line, reusableCell);
+        return columnMap;
+      }
+    };
+  });
+  if (!wrappedLine) {
+    callback(undefined);
+    return;
+  }
+  const links = [];
+  for (const match of extractTerminalLinks(wrappedLine.text)) {
+    const link = {
+      range: resolveWrappedTerminalLinkRange(wrappedLine, match),
+      text: match.text,
+      // Read at hover time by xterm, so it has to reflect the modifier now.
+      decorations: {
+        pointerCursor: terminalLinkModifierHeld,
+        underline: terminalLinkModifierHeld
+      },
+      activate: (event, text) => activateTerminalLink(event, text, match.kind),
+      hover: (event) => {
+        hoveredTerminalLink = link;
+        // This runs before xterm installs its accessors, so writing decorations
+        // now would land on the object it is about to discard; the microtask
+        // re-applies once they exist.
+        //
+        // The flag is only ever *raised* here, never lowered. This event can be
+        // stale: xterm re-asks for links when the hovered rows repaint, reusing
+        // its last mousemove event, so a session producing output would otherwise
+        // report `ctrlKey: false` and strip the decoration while the modifier is
+        // physically held. Lowering belongs to keyup and blur, which are live.
+        // Raising still covers a modifier held before the window regained focus,
+        // where no keydown was ever seen.
+        if (terminalLinkModifierActive(event)) {
+          terminalLinkModifierHeld = true;
+        }
+        queueMicrotask(applyTerminalLinkDecorations);
+      },
+      leave: () => {
+        if (hoveredTerminalLink === link) {
+          hoveredTerminalLink = null;
+        }
+      }
+    };
+    links.push(link);
+  }
+  callback(links.length > 0 ? links : undefined);
+}
+
+// Touch link affordance.
+//
+// The desktop gesture is Ctrl/Cmd+click, and touch has no modifier. Long-press was
+// the obvious alternative but it already means text selection on this terminal, and
+// adding a third meaning to it would be worse than the gap. So a tap that lands on a
+// link offers a chip instead: the plain tap still positions the cursor and raises
+// the keyboard exactly as before, and the chip is a real button, which is also how a
+// one-cell-wide link becomes reachable at a proper touch size.
+let terminalLinkChipTarget = null;
+let terminalLinkChipTimer = null;
+let terminalLinkChipSettleUntil = 0;
+
+function hideTerminalLinkChip() {
+  if (terminalLinkChipTimer !== null) {
+    window.clearTimeout(terminalLinkChipTimer);
+    terminalLinkChipTimer = null;
+  }
+  terminalLinkChipTarget = null;
+  if (terminalLinkChip) {
+    terminalLinkChip.hidden = true;
+  }
+}
+
+function terminalLinkAtClientPoint(clientX, clientY) {
+  const buffer = terminal?.buffer?.active;
+  if (!buffer || !terminalElement) {
+    return null;
+  }
+  const bounds = terminalElement.getBoundingClientRect();
+  if (bounds.width <= 0 || bounds.height <= 0) {
+    return null;
+  }
+  const column = Math.min(
+    terminal.cols,
+    Math.max(
+      1,
+      Math.floor(((clientX - bounds.left) / bounds.width) * terminal.cols) + 1
+    )
+  );
+  const row = Math.min(
+    terminal.rows,
+    Math.max(1, Math.floor(((clientY - bounds.top) / bounds.height) * terminal.rows) + 1)
+  );
+  // Rows are viewport-relative; the link helpers work in absolute buffer lines.
+  const bufferLineNumber = buffer.viewportY + row;
+  const reusableCell = buffer.getNullCell?.();
+  return findTerminalLinkAtCell(bufferLineNumber, column, (index) => {
+    const line = buffer.getLine(index);
+    if (!line) {
+      return undefined;
+    }
+    let columnMap;
+    return {
+      isWrapped: line.isWrapped,
+      translateToString: (trimRight) => line.translateToString(trimRight),
+      get columnMap() {
+        columnMap ??= terminalLineColumnMap(line, reusableCell);
+        return columnMap;
+      }
+    };
+  });
+}
+
+function showTerminalLinkChip(match, clientX, clientY) {
+  if (!terminalLinkChip) {
+    return;
+  }
+  terminalLinkChipTarget = match;
+  const label = match.kind === 'url' ? 'Open link' : 'Open file';
+  terminalLinkChip.textContent = label;
+  // The chip carries the whole accessible name; the target text is deliberately
+  // left out of it, since a path or URL read aloud in full is noise.
+  terminalLinkChip.setAttribute('aria-label', label);
+  const margin = 12;
+  const x = Math.min(
+    Math.max(margin, clientX),
+    Math.max(margin, window.innerWidth - margin)
+  );
+  const y = Math.min(
+    Math.max(margin, clientY),
+    Math.max(margin, window.innerHeight - margin)
+  );
+  // Keep it above the soft keyboard. The tap that offers the chip is usually the
+  // tap that raises the keyboard, and the chip is positioned in client
+  // coordinates, so without this it can be anchored underneath it.
+  const visibleBottom = window.visualViewport
+    ? window.visualViewport.offsetTop + window.visualViewport.height
+    : window.innerHeight;
+  const clampedY = Math.min(y, Math.max(margin, visibleBottom - margin));
+  terminalLinkChip.style.left = `${Math.round(x)}px`;
+  terminalLinkChip.style.top = `${Math.round(clampedY)}px`;
+  terminalLinkChip.hidden = false;
+  // The keyboard's reflow can move viewportY and so fire onScroll, which would
+  // retire the chip that the same tap just offered. Ignore scroll-driven hiding
+  // briefly; a deliberate scroll after that still dismisses it.
+  terminalLinkChipSettleUntil = window.performance.now() + 700;
+  if (terminalLinkChipTimer !== null) {
+    window.clearTimeout(terminalLinkChipTimer);
+  }
+  // Expendable chrome, so it retires on its own rather than lingering over the
+  // terminal. Any tap elsewhere hides it sooner.
+  terminalLinkChipTimer = window.setTimeout(hideTerminalLinkChip, 4000);
+}
+
+/**
+ * Offer the chip when a coarse-pointer tap lands on a link. Returns nothing and
+ * changes no other behaviour: the caller's normal tap handling continues either way.
+ */
+function offerTerminalLinkOnTap(clientX, clientY) {
+  if (!terminalLinkChip) {
+    return;
+  }
+  // Capability, not user-agent. A device with a fine pointer already has the
+  // modifier gesture and does not need this.
+  if (window.matchMedia?.('(pointer: fine)').matches) {
+    return;
+  }
+  const match = terminalLinkAtClientPoint(clientX, clientY);
+  if (!match) {
+    hideTerminalLinkChip();
+    return;
+  }
+  showTerminalLinkChip(match, clientX, clientY);
+}
+
+function activateTerminalLinkChip() {
+  const match = terminalLinkChipTarget;
+  hideTerminalLinkChip();
+  if (!match) {
+    return;
+  }
+  if (match.kind === 'path') {
+    void openTerminalPathLink(match.text);
+    return;
+  }
+  openTerminalUrlLink(match.text);
+}
+
+function installTerminalLinkModifierTracking() {
+  // The modifier can be pressed or released while the pointer already rests on a
+  // link, which produces no mouse event of its own, so track the keys directly.
+  window.addEventListener('keydown', syncTerminalLinkModifier);
+  window.addEventListener('keyup', syncTerminalLinkModifier);
+  // A held modifier is lost when the window loses focus; leaving the decoration
+  // on would promise a click that no longer opens anything.
+  window.addEventListener('blur', () => setTerminalLinkModifierHeld(false));
+}
+
+// Largest OSC 52 payload we will decode. tmux sends the whole yanked region, so
+// this has to allow a screenful of scrollback while still refusing a runaway
+// sequence from a process writing to the pty.
+const maximumClipboardOscBase64Length = 2 * 1024 * 1024;
+
+function decodeClipboardOscPayload(payload) {
+  // OSC 52 is `<targets>;<base64>`; targets are advisory (c, p, s, …) and empty
+  // means the default selection, so only the data half matters here.
+  const separator = payload.indexOf(';');
+  if (separator < 0) {
+    return null;
+  }
+  const encoded = payload.slice(separator + 1).trim();
+  // `?` is a clipboard *read* request. Answering it would hand the host
+  // clipboard to whatever is running in the pty, so it is swallowed, not served.
+  if (!encoded || encoded === '?') {
+    return null;
+  }
+  if (encoded.length > maximumClipboardOscBase64Length) {
+    return null;
+  }
+  if (!/^[A-Za-z0-9+/=]+$/.test(encoded)) {
+    return null;
+  }
+  try {
+    const binary = window.atob(encoded);
+    const bytes = Uint8Array.from(binary, (character) =>
+      character.charCodeAt(0)
+    );
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+// tmux is already configured to report copies this way (`set-clipboard
+// external` plus the `xterm*:clipboard` terminal feature), and xterm.js has no
+// OSC 52 handler of its own, so those copies used to reach tmux's paste buffer
+// and stop there. This is also the only copy path that survives a repainting
+// TUI, which drops xterm's own selection on redraw.
+function handleClipboardOsc(payload) {
+  const text = decodeClipboardOscPayload(payload);
+  if (!text) {
+    // Returning true still consumes the sequence: an unhandled OSC would
+    // otherwise be echoed into the terminal as text.
+    return true;
+  }
+  // Mirror first, so the in-app Paste fallback holds it even if the browser
+  // refuses the clipboard write below.
+  appClipboardText = text;
+  if (!navigator.clipboard?.writeText) {
+    setStatus('Copied in app — browser clipboard unavailable');
+    clientDebug('copy-osc52', { copied: false, length: text.length });
+    return true;
+  }
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      setStatus('Copied');
+      clientDebug('copy-osc52', {
+        copied: true,
+        clipboardOk: true,
+        length: text.length
+      });
+    })
+    .catch((error) => {
+      // No user gesture drives this path, so a refusal is expected on some
+      // browsers; the mirror above keeps Paste working.
+      setStatus('Copied in app — browser blocked the clipboard');
+      clientDebug('copy-osc52', {
+        copied: false,
+        clipboardOk: false,
+        errorName: error?.name || 'Error',
+        length: text.length
+      });
+    });
+  return true;
 }
 
 function writeTextToClipboardLegacy(text) {
@@ -8987,12 +11194,75 @@ async function pasteImageBlob(blob) {
   }
 }
 
+// Set when Ctrl/Cmd+V let the browser's own paste proceed, so a browser that
+// does not deliver a paste event still gets the direct clipboard read.
+let nativePasteFallbackTimer = null;
+
+function expectNativePasteEvent() {
+  cancelNativePasteFallback();
+  nativePasteFallbackTimer = window.setTimeout(() => {
+    nativePasteFallbackTimer = null;
+    void pasteClipboard();
+  }, 200);
+}
+
+function cancelNativePasteFallback() {
+  if (nativePasteFallbackTimer) {
+    window.clearTimeout(nativePasteFallbackTimer);
+    nativePasteFallbackTimer = null;
+  }
+}
+
+// The browser's own paste carries text *and* images in clipboardData, with no
+// permission prompt and no async read the browser can refuse — the async
+// Clipboard API's `read()` is what fails for a desktop screenshot, leaving the
+// text-only fallback to report an empty clipboard.
+//
+// Registered on the terminal container in the capture phase so it runs before
+// xterm's own textarea paste listener, which would otherwise insert the text a
+// second time.
+function handleTerminalPasteEvent(event) {
+  const data = event.clipboardData;
+  if (!data || !terminal || socket?.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  cancelNativePasteFallback();
+  const text = data.getData('text/plain') || '';
+  let imageBlob = null;
+  for (const item of data.items || []) {
+    if (item.kind === 'file' && item.type?.startsWith('image/')) {
+      imageBlob = item.getAsFile();
+      if (imageBlob) {
+        break;
+      }
+    }
+  }
+  if (!text && !imageBlob) {
+    return;
+  }
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  // Text wins when both are present, matching the button path; a screenshot
+  // arrives image-only.
+  if (text) {
+    insertPastedText(text);
+    return;
+  }
+  void pasteImageBlob(imageBlob);
+}
+
 function insertPastedText(text) {
   const pasted = text.slice(0, maximumPasteLength);
   clearTerminalSelection();
   setCtrlArmed(false);
-  if (!sendInput(pasted)) {
-    terminal.paste?.(pasted);
+  // Prefer xterm's paste: it wraps the text in bracketed-paste markers when the
+  // running application asked for them, which is what keeps a multi-line paste
+  // one block instead of a line-by-line submission. Its output reaches the
+  // socket through onData, so raw sending is only the fallback.
+  if (terminal?.paste) {
+    terminal.paste(pasted);
+  } else {
+    sendInput(pasted);
   }
   if (pasted.length !== text.length) {
     setStatus(`Paste limited to ${maximumPasteLength} characters`);
@@ -9029,8 +11299,13 @@ async function pasteClipboard() {
     }
   }
 
-  // Last resort: text we copied earlier in this app (OS clipboard blocked).
-  if (appClipboardText) {
+  // Last resort: text we copied earlier in this app — but only when the OS
+  // clipboard could not be read at all. A successful read that returned nothing
+  // means the clipboard holds something this browser will not hand over (a
+  // desktop screenshot, when `read()` is unavailable or refused), and inserting
+  // unrelated older text into a live shell prompt is worse than pasting
+  // nothing.
+  if (appClipboardText && error) {
     insertPastedText(appClipboardText);
     clientDebug('paste-text', {
       source: 'app-mirror',
@@ -9079,6 +11354,7 @@ findCloseButton?.addEventListener('click', () => {
   closeFindBar();
 });
 findInputElement?.addEventListener('focus', () => {
+  recordKeyboardTransition('find-focus');
   keyboardDismissing = false;
   clearTimeout(keyboardDismissPollTimer);
   keyboardDismissPollTimer = null;
@@ -9103,7 +11379,10 @@ findInputElement?.addEventListener('blur', () => {
     !holdKeyboardLayoutForSelection &&
     !terminal?.hasSelection()
   ) {
+    recordKeyboardTransition('find-blur');
     releaseKeyboardLayoutLock();
+  } else {
+    recordKeyboardTransition('find-blur-held');
   }
 });
 findInputElement?.addEventListener('keydown', (event) => {
@@ -9117,28 +11396,17 @@ findInputElement?.addEventListener('keydown', (event) => {
     runFind(event.shiftKey ? 'prev' : 'next');
   }
 });
-// Capture Ctrl/Cmd+F when focus is outside xterm (e.g. footer buttons).
+// Chrome-focused chords. xterm's own handler owns keys while the terminal has
+// focus, so this returns early there rather than resolving the same binding twice.
+// Registered before the hardware bridge so a binding that fires marks the event
+// handled and the bridge's defaultPrevented check skips it.
 document.addEventListener(
   'keydown',
   (event) => {
-    if (
-      event.isComposing ||
-      (event.key !== 'f' && event.key !== 'F') ||
-      !(event.ctrlKey || event.metaKey) ||
-      event.altKey
-    ) {
+    if (event.defaultPrevented || terminalInputIsFocused()) {
       return;
     }
-    // Let the terminal handler own it when xterm is focused.
-    if (terminalInputIsFocused()) {
-      return;
-    }
-    // Don't fight browser find in settings/dialogs/form fields.
-    if (isHardwareKeyboardUiCaptureTarget(event.target)) {
-      return;
-    }
-    event.preventDefault();
-    openFindBar();
+    runMatchingKeybinding(event);
   },
   true
 );
@@ -9389,6 +11657,7 @@ pasteButton.addEventListener('click', (event) => {
   event.preventDefault();
   void pasteOrCopyClipboard();
 });
+terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
 selectionCopyChip?.addEventListener(
@@ -9432,6 +11701,73 @@ quickMenuProfileList?.addEventListener('keydown', (event) => {
   }
 });
 quickMenuCloseButton?.addEventListener('click', closeQuickMenu);
+commandPaletteClose?.addEventListener('click', () => closeCommandPalette());
+commandPaletteInput?.addEventListener('input', () => {
+  // A new query invalidates the old selection, so start from the top.
+  commandPaletteIndex = 0;
+  renderCommandPalette();
+});
+commandPaletteInput?.addEventListener('keydown', (event) => {
+  if (event.isComposing) {
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    moveCommandPaletteSelection(1);
+    return;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    moveCommandPaletteSelection(-1);
+    return;
+  }
+  if (event.key === 'Home') {
+    event.preventDefault();
+    commandPaletteIndex = commandPaletteVisible.length > 0 ? 0 : -1;
+    syncCommandPaletteSelection();
+    return;
+  }
+  if (event.key === 'End') {
+    event.preventDefault();
+    commandPaletteIndex = commandPaletteVisible.length - 1;
+    syncCommandPaletteSelection();
+    return;
+  }
+  if (event.key === 'Enter') {
+    event.preventDefault();
+    runCommandPaletteSelection();
+  }
+});
+// Escape and the backdrop both reach this: a modal dialog's own cancel handles
+// Escape, and a click that lands on the dialog element itself is a click on the
+// backdrop rather than on any option.
+commandPaletteDialog?.addEventListener('click', (event) => {
+  if (event.target !== commandPaletteDialog) {
+    return;
+  }
+  // A click on the dialog's own padding also targets the dialog, so identity alone
+  // would treat part of the visible card as "outside". Compare against its box.
+  const bounds = commandPaletteDialog.getBoundingClientRect();
+  const outside =
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom;
+  if (outside) {
+    closeCommandPalette();
+  }
+});
+commandPaletteDialog?.addEventListener('close', () => {
+  commandPaletteVisible = [];
+  commandPaletteIndex = -1;
+  const target = commandPaletteReturnFocus;
+  commandPaletteReturnFocus = null;
+  try {
+    target?.focus({ preventScroll: true });
+  } catch {
+    // A control that vanished while the palette was open is not worth failing on.
+  }
+});
 quickMenuFindButton?.addEventListener('click', () => {
   closeQuickMenu();
   openFindBar();
@@ -9470,6 +11806,39 @@ settingsTabsElement?.addEventListener('click', (event) => {
   }
   setSettingsTab(tab.dataset.settingsTab);
 });
+document
+  .querySelector('#keyboard-debug-refresh')
+  ?.addEventListener('click', () => {
+    renderKeyboardTransitionDump();
+  });
+document.querySelector('#keyboard-debug-copy')?.addEventListener('click', () => {
+  // Copies the text built at render time. Re-rendering first would fold this
+  // gesture's own focus changes into what gets copied.
+  const text = lastKeyboardTransitionDumpText;
+  if (!text) {
+    setStatus('Nothing to copy');
+    return;
+  }
+  if (writeTextToClipboardLegacy(text)) {
+    setStatus('Dump copied');
+    return;
+  }
+  if (navigator.clipboard?.writeText) {
+    navigator.clipboard.writeText(text).then(
+      () => setStatus('Dump copied'),
+      () => setStatus('Copy failed — select the dump and copy manually')
+    );
+    return;
+  }
+  setStatus('Copy failed — select the dump and copy manually');
+});
+document
+  .querySelector('#keyboard-debug-clear')
+  ?.addEventListener('click', () => {
+    keyboardTransitionLog.clear();
+    renderKeyboardTransitionDump();
+    setStatus('Transitions cleared');
+  });
 document.querySelector('#settings').addEventListener('click', openQuickMenu);
 headerSettingsButton?.addEventListener('click', openQuickMenu);
 document.querySelector('#settings-close').addEventListener('click', () => {
@@ -9666,6 +12035,9 @@ if (footerElement) {
   publishFooterHeight();
 }
 const handleViewportGeometryChange = () => {
+  // Rotation and keyboard open/close both land here. Recorded before any of the
+  // geometry runs, so a rotate-while-open is visible as its own transition.
+  recordKeyboardTransition('viewport-geometry-change');
   applyRestingAppHeight();
   publishFooterHeight();
   scheduleVisualViewportUpdate();
@@ -9716,6 +12088,11 @@ function updateVisualViewport() {
   visualViewportUpdateFrame = null;
   // Never reflow under an active terminal finger — that cancels iOS gestures
   // and was also sliding the whole UI when the keyboard was open.
+  // Deliberately not instrumented. recordKeyboardTransition() reads clientHeight
+  // through keyboardViewportIsReduced(), and this branch runs every frame while a
+  // finger is down — the one place the comment above forbids extra layout work.
+  // The gesture's own transitions (selection-viewport-lock, selection-change)
+  // already show that a touch is in progress.
   if (nativeTouchStartX !== null) {
     if (selectionViewportLock) {
       applySelectionViewportLockStyles();
@@ -9737,6 +12114,7 @@ function updateVisualViewport() {
     // Follow the expanding viewport during keyboard close. Keeping the old
     // keyboard-height lock here leaves the terminal bottom halfway up the
     // screen after an iOS swipe-to-dismiss.
+    recordKeyboardTransition('viewport-dismiss-follow');
     applyRestingAppHeight({ force: true });
     updateEffectiveSafeAreaInsets();
     pinPageToOrigin();
@@ -9755,9 +12133,14 @@ function updateVisualViewport() {
     !terminalInputIsFocused() &&
     !keyboardViewportIsReduced()
   ) {
+    recordKeyboardTransition('viewport-release-stale-lock');
     releaseKeyboardLayoutLock();
     return;
   }
+  // The whole conjunction, evaluated on every viewport frame. When the UI stops
+  // reacting this folds into one entry whose blockedBy names the flag that is
+  // stuck, which is the reading the ticket is after.
+  recordKeyboardTransition('viewport-evaluate');
   const keyboardOpen = Boolean(
     selectionViewportLock ||
     keyboardLayoutLock ||
@@ -9777,6 +12160,7 @@ function updateVisualViewport() {
   if (!selectionViewportLock && !keyboardOpen && !pageZoomed) {
     keyboardLayoutLock = null;
     keyboardDismissing = false;
+    recordKeyboardTransition('viewport-resting');
     applyRestingAppHeight();
     scheduleFit();
     return;

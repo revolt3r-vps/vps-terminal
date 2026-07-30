@@ -30,6 +30,7 @@ Missing `VPS_TERMINAL_ORIGIN` outside `LOCAL_DEV` causes startup failure.
 | `VPS_TERMINAL_PORT` | `3001` (prod TCP) / `3099` (LOCAL_DEV) | TCP port when not using a socket |
 | `VPS_TERMINAL_PROJECT_ROOT` | `$HOME/projects` | New tmux session cwd + projects FS root |
 | `VPS_TERMINAL_PASTE_ROOT` | `$HOME/paste` | Paste-image store |
+| `VPS_TERMINAL_STATE_DIR` | app directory | Preferences, snippets, client debug log |
 | `VPS_TERMINAL_FS_HOME` | enabled | Set `0` to disable home FS root |
 | `VPS_TERMINAL_FS_EXTRA` | unset | `id:label:path[:ro][,…]` extra FS roots |
 | `VPS_TERMINAL_DEV_EMAIL` | `dev@localhost.test` | Identity in LOCAL_DEV only |
@@ -42,6 +43,9 @@ The Files UI does not hardcode `Home`, `Projects`, or `Paste`. It renders the
 root catalog returned by the server for that installation:
 
 - `VPS_TERMINAL_FS_HOME=0` removes the home root.
+- `VPS_TERMINAL_STATE_DIR` keeps runtime state out of the installed application,
+  so reinstalling or clearing the app directory cannot delete preferences,
+  snippets, or pasted images. Leave it unset to keep everything in one directory.
 - `VPS_TERMINAL_PROJECT_ROOT` and `VPS_TERMINAL_PASTE_ROOT` change the built-in
   project and paste locations.
 - `VPS_TERMINAL_FS_EXTRA=id:label:path[:ro]` adds an installation-specific
