@@ -4012,6 +4012,37 @@ function keyboardReleaseBlockers(flags) {
   return keyboardReleaseBlockerNames.filter((name) => Boolean(flags?.[name]));
 }
 
+/**
+ * Two answers for one viewport frame: is the soft keyboard open, and is this the
+ * frame that should freeze the layout at the current height? Both require the
+ * visual viewport to actually be reduced.
+ *
+ * Focus alone is not enough. iOS fires focus 80-300 ms before it raises the
+ * keyboard, so gating on focus set `keyboard-open` and froze the *full* height
+ * about 9 ms after focus. `html.keyboard-open` sets `--layout-safe-bottom` to 0,
+ * so the home-indicator spacer disappeared for that window on every keyboard
+ * open — T18, confirmed from an iPhone 18.7 dump.
+ */
+function keyboardOpenDecision(flags) {
+  const selectionLock = Boolean(flags?.selectionLock);
+  const layoutLock = Boolean(flags?.layoutLock);
+  const dismissing = Boolean(flags?.dismissing);
+  const keyboardReduced = Boolean(flags?.keyboardReduced);
+  // An existing lock keeps the class on while the viewport rubber-bands or the
+  // keyboard animates away; only the reduction can turn it on in the first place.
+  const open = Boolean(
+    selectionLock || layoutLock || (!dismissing && keyboardReduced)
+  );
+  return {
+    open,
+    // Nothing frozen yet and the viewport really is short. A selection lock or an
+    // existing layout lock already owns the height, so neither may re-capture.
+    capture: Boolean(
+      open && !selectionLock && !layoutLock && !dismissing && keyboardReduced
+    )
+  };
+}
+
 function keyboardFlagState(flags) {
   return keyboardTransitionFlagNames
     .map((name) => (flags?.[name] ? '1' : '0'))
@@ -8995,12 +9026,14 @@ async function ensureTerminal() {
         // visualViewport pans cannot slide the whole page.
         scheduleVisualViewportUpdate();
         window.setTimeout(() => {
-          if (terminalInputIsFocused() || keyboardViewportIsReduced()) {
+          if (keyboardViewportIsReduced()) {
             captureKeyboardLayoutLock();
             scheduleFit();
           } else {
-            // Blur landed inside the 320 ms animation window, so nothing is
-            // frozen and the lock the rest of the code expects never exists.
+            // Either the blur landed inside the 320 ms animation window or the
+            // keyboard never came up. Both mean the viewport is full height, and
+            // freezing it there is the T18 bug — updateVisualViewport() captures
+            // once the reduction actually arrives.
             recordKeyboardTransition('focus-settle-skipped');
           }
         }, 320);
@@ -12232,6 +12265,9 @@ function updateVisualViewport() {
     scheduleFit();
     return;
   }
+  // One layout read for the whole frame; keyboardViewportIsReduced() reads
+  // clientHeight and three branches below need the answer.
+  const keyboardReduced = keyboardViewportIsReduced();
   // Soft keyboard dismissed (viewport full again) while a lock remains —
   // e.g. Find field still focused after the OS hid the keyboard. Drop the
   // frozen short height so the UI moves back down.
@@ -12242,7 +12278,7 @@ function updateVisualViewport() {
     !holdKeyboardLayoutForSelection &&
     !terminal?.hasSelection() &&
     !terminalInputIsFocused() &&
-    !keyboardViewportIsReduced()
+    !keyboardReduced
   ) {
     recordKeyboardTransition('viewport-release-stale-lock');
     releaseKeyboardLayoutLock();
@@ -12258,12 +12294,13 @@ function updateVisualViewport() {
   recordKeyboardTransition('viewport-evaluate', null, {
     skipIfFlagsUnchanged: true
   });
-  const keyboardOpen = Boolean(
-    selectionViewportLock ||
-    keyboardLayoutLock ||
-    (!keyboardDismissing &&
-      (keyboardViewportIsReduced() || terminalInputIsFocused()))
-  );
+  const { open: keyboardOpen, capture: shouldFreezeKeyboardLayout } =
+    keyboardOpenDecision({
+      selectionLock: Boolean(selectionViewportLock),
+      layoutLock: Boolean(keyboardLayoutLock),
+      dismissing: keyboardDismissing,
+      keyboardReduced
+    });
   const pageZoomed = Boolean(
     viewport && Math.abs(viewport.scale - 1) > 0.01
   );
@@ -12284,15 +12321,9 @@ function updateVisualViewport() {
   }
   // Prefer a frozen keyboard layout. Tracking visualViewport.offsetTop makes
   // the entire chrome slide when iOS tries to pan under an open keyboard.
-  // Find field is covered by keyboardViewportIsReduced() once the OS keyboard
-  // is up; do not treat find-focus alone as a keyboard-open lock.
-  if (
-    keyboardOpen &&
-    !selectionViewportLock &&
-    !keyboardLayoutLock &&
-    !keyboardDismissing &&
-    (terminalInputIsFocused() || keyboardViewportIsReduced())
-  ) {
+  // Neither terminal focus nor find focus counts on its own — the viewport has
+  // to be reduced first, or this freezes the full height (T18).
+  if (shouldFreezeKeyboardLayout) {
     captureKeyboardLayoutLock();
   }
   const height =
