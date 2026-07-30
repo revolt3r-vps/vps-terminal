@@ -2736,6 +2736,10 @@ function setSettingsTab(tabId) {
   document.querySelectorAll('.settings-panel').forEach((panel) => {
     panel.hidden = panel.dataset.settingsPanel !== active;
   });
+  // The Theme tab's only job is showing what a theme does to the terminal, so on
+  // that tab the sheet drops to a bottom strip and stops blurring what is behind
+  // it. Keyed off the sheet so the ::backdrop can be restyled too.
+  settingsDialogElement?.classList.toggle('theme-preview', active === 'theme');
   if (active === 'profiles') {
     renderKeyProfileControls();
     renderShortcutEditor();
@@ -3973,7 +3977,13 @@ function selectionDebugSnapshot(extra = {}) {
 // global, so test/keyboard-transitions.test.js slices this block out of the
 // shipped bundle the way the keybinding and OSC 52 blocks are.
 
-const maximumKeyboardTransitions = 50;
+// A live session on a phone produced 579 transitions in six minutes, so 50 held
+// only the last ~14 seconds — and the fault being chased happened in the first
+// few. Keep a head segment permanently as well as the tail: the beginning of a
+// session is where boot-time faults live, and it is exactly what a plain ring
+// buffer throws away first.
+const maximumKeyboardTransitions = 150;
+const maximumKeyboardTransitionsHead = 30;
 
 // Recorded on every entry, in the order the dump prints them.
 const keyboardTransitionFlagNames = [
@@ -4002,17 +4012,28 @@ function keyboardReleaseBlockers(flags) {
   return keyboardReleaseBlockerNames.filter((name) => Boolean(flags?.[name]));
 }
 
-function keyboardTransitionSignature(event, flags) {
-  const state = keyboardTransitionFlagNames
+function keyboardFlagState(flags) {
+  return keyboardTransitionFlagNames
     .map((name) => (flags?.[name] ? '1' : '0'))
     .join('');
-  return `${event}|${state}`;
 }
 
-function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
+function keyboardTransitionSignature(event, flags) {
+  return `${event}|${keyboardFlagState(flags)}`;
+}
+
+function createKeyboardTransitionLog(
+  limit = maximumKeyboardTransitions,
+  headLimit = 0
+) {
+  // Entries split in two: `head` is never evicted, `tail` is the ring. A dump
+  // prints head, then how many were dropped between, then tail.
+  const head = [];
   const entries = [];
   let sequence = 0;
   let dropped = 0;
+  const lastEntry = () =>
+    entries.length > 0 ? entries[entries.length - 1] : head[head.length - 1];
   return {
     /**
      * Push a transition, or fold it into the previous entry when the event name
@@ -4022,9 +4043,9 @@ function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
      * in a row becomes one line with a count, instead of 200 lines that push
      * every transition leading up to the stuck state out of the buffer.
      */
-    record(event, flags, at = 0, extra = null) {
+    record(event, flags, at = 0, extra = null, options = {}) {
       const signature = keyboardTransitionSignature(event, flags);
-      const previous = entries[entries.length - 1];
+      const previous = lastEntry();
       if (previous && previous.signature === signature) {
         previous.count += 1;
         previous.lastAt = at;
@@ -4032,6 +4053,17 @@ function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
           previous.extra = extra;
         }
         return previous;
+      }
+      // For events that only report that a decision was re-evaluated: if no flag
+      // moved since the previous entry there is nothing to report, and recording
+      // it costs a slot. Folding instead would inflate the previous entry's count
+      // and claim that event happened twice.
+      if (
+        options.skipIfFlagsUnchanged &&
+        previous &&
+        previous.signature.endsWith(`|${keyboardFlagState(flags)}`)
+      ) {
+        return null;
       }
       sequence += 1;
       const entry = {
@@ -4045,6 +4077,10 @@ function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
         blockedBy: keyboardReleaseBlockers(flags),
         extra: extra || null
       };
+      if (head.length < headLimit) {
+        head.push(entry);
+        return entry;
+      }
       entries.push(entry);
       if (entries.length > limit) {
         dropped += entries.length - limit;
@@ -4053,12 +4089,16 @@ function createKeyboardTransitionLog(limit = maximumKeyboardTransitions) {
       return entry;
     },
     entries() {
-      return entries.slice();
+      return [...head, ...entries];
+    },
+    headCount() {
+      return head.length;
     },
     dropped() {
       return dropped;
     },
     clear() {
+      head.length = 0;
       entries.length = 0;
       dropped = 0;
       sequence = 0;
@@ -4085,15 +4125,23 @@ function formatKeyboardTransitionFlags(flags) {
 
 function formatKeyboardTransitions(entries, options = {}) {
   const dropped = options.dropped || 0;
+  // Entries before this index are the retained head; the drop happened after it.
+  const headCount = options.headCount || 0;
   const lines = [];
-  if (dropped > 0) {
-    lines.push(`... ${dropped} earlier transition(s) dropped`);
-  }
   if (entries.length === 0) {
+    if (dropped > 0) {
+      lines.push(`... ${dropped} earlier transition(s) dropped`);
+    }
     lines.push('(no keyboard transitions recorded)');
     return lines.join('\n');
   }
-  entries.forEach((entry) => {
+  if (dropped > 0 && headCount === 0) {
+    lines.push(`... ${dropped} earlier transition(s) dropped`);
+  }
+  entries.forEach((entry, index) => {
+    if (dropped > 0 && headCount > 0 && index === headCount) {
+      lines.push(`... ${dropped} transition(s) dropped here`);
+    }
     const repeat = entry.count > 1 ? ` x${entry.count}` : '';
     const span =
       entry.count > 1 && entry.lastAt !== entry.at
@@ -4115,7 +4163,10 @@ function formatKeyboardTransitions(entries, options = {}) {
 }
 // ---- End of the pure keyboard transition block. ----
 
-const keyboardTransitionLog = createKeyboardTransitionLog();
+const keyboardTransitionLog = createKeyboardTransitionLog(
+  maximumKeyboardTransitions,
+  maximumKeyboardTransitionsHead
+);
 
 /**
  * Read the six flags plus the geometry needed to tell a real keyboard close from
@@ -4141,18 +4192,19 @@ function keyboardTransitionFlags() {
   };
 }
 
-function recordKeyboardTransition(event, extra = null) {
+function recordKeyboardTransition(event, extra = null, options = {}) {
   try {
     const at = Math.round(window.performance?.now?.() || 0);
     const entry = keyboardTransitionLog.record(
       event,
       keyboardTransitionFlags(),
       at,
-      extra
+      extra,
+      options
     );
     // Only the first of a folded run reaches clientDebug. The repeats are what
     // the ring buffer exists to bound, and shipping each one defeats that.
-    if (entry.count === 1) {
+    if (entry && entry.count === 1) {
       clientDebug('keyboard-transition', {
         event: entry.event,
         blockedBy: entry.blockedBy.join(',') || '-',
@@ -8626,10 +8678,14 @@ function renderKeyboardTransitionDump() {
   const countElement = document.querySelector('#keyboard-debug-count');
   const entries = keyboardTransitionLog.entries();
   const dropped = keyboardTransitionLog.dropped();
-  const body = formatKeyboardTransitions(entries, { dropped });
+  const headCount = keyboardTransitionLog.headCount();
+  const body = formatKeyboardTransitions(entries, { dropped, headCount });
   dumpElement.textContent = body;
   if (countElement) {
-    countElement.textContent = `${entries.length}/${maximumKeyboardTransitions}`;
+    const total = maximumKeyboardTransitions + maximumKeyboardTransitionsHead;
+    countElement.textContent = `${entries.length}/${total}${
+      dropped > 0 ? ` (+${dropped} dropped)` : ''
+    }`;
   }
   // Reading the panel must not record a transition, so this snapshots the flags
   // without going through recordKeyboardTransition().
@@ -8659,6 +8715,58 @@ function renderKeyboardTransitionDump() {
     '',
     body
   ].join('\n');
+}
+
+/**
+ * Close a modal `<dialog>` on a tap that both starts and ends outside its box.
+ *
+ * A native modal dialog closes on Escape but not on a backdrop tap, and the
+ * backdrop is a pseudo-element, so the dialog itself is the only thing there is
+ * to bind to. A click on the backdrop targets the dialog element.
+ *
+ * Three guards, each for a case that would otherwise dismiss wrongly:
+ *
+ * - A click's target is the common ancestor of pointerdown and pointerup, so a
+ *   press that starts on a control in the sheet and releases past its edge
+ *   arrives here indistinguishable from a backdrop tap. Requiring the gesture to
+ *   have started outside too is what keeps a drag off a control from closing.
+ * - The dialog's own padding also targets the dialog, so identity alone would
+ *   treat part of the visible card as outside. Compare against its box.
+ * - iOS draws the `<select>` picker over the backdrop, so the tap that closes a
+ *   picker would land here and close the sheet underneath it. An open picker
+ *   keeps its select focused, which is the only signal available from script.
+ */
+function installDialogBackdropDismiss(dialog, dismiss) {
+  if (!dialog) {
+    return;
+  }
+  const outsideBox = (event) => {
+    const bounds = dialog.getBoundingClientRect();
+    return (
+      event.clientX < bounds.left ||
+      event.clientX > bounds.right ||
+      event.clientY < bounds.top ||
+      event.clientY > bounds.bottom
+    );
+  };
+  let armed = false;
+  dialog.addEventListener('pointerdown', (event) => {
+    armed =
+      event.target === dialog &&
+      outsideBox(event) &&
+      // Tested here rather than on click: pointerdown's default action moves
+      // focus off the select, so by the time the click fires activeElement is
+      // no longer the picker's and the guard would never hold.
+      document.activeElement?.tagName !== 'SELECT';
+  });
+  dialog.addEventListener('click', (event) => {
+    const wasArmed = armed;
+    armed = false;
+    if (!wasArmed || event.target !== dialog || !outsideBox(event)) {
+      return;
+    }
+    dismiss();
+  });
 }
 
 function openSettingsDialog() {
@@ -11844,6 +11952,9 @@ headerSettingsButton?.addEventListener('click', openQuickMenu);
 document.querySelector('#settings-close').addEventListener('click', () => {
   settingsDialogElement.close();
 });
+installDialogBackdropDismiss(settingsDialogElement, () => {
+  settingsDialogElement.close();
+});
 shortcutEditorList?.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-action]');
   const item = event.target.closest('.shortcut-editor-item');
@@ -12140,7 +12251,13 @@ function updateVisualViewport() {
   // The whole conjunction, evaluated on every viewport frame. When the UI stops
   // reacting this folds into one entry whose blockedBy names the flag that is
   // stuck, which is the reading the ticket is after.
-  recordKeyboardTransition('viewport-evaluate');
+  //
+  // Skipped when no flag moved since the previous entry: a live session showed
+  // this duplicating the terminal-focus and viewport-geometry-change entries it
+  // follows, twice per keyboard open, for no added information.
+  recordKeyboardTransition('viewport-evaluate', null, {
+    skipIfFlagsUnchanged: true
+  });
   const keyboardOpen = Boolean(
     selectionViewportLock ||
     keyboardLayoutLock ||

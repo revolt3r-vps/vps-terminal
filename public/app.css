@@ -2055,6 +2055,22 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   backdrop-filter: blur(3px);
 }
 
+/* Theme tab: the terminal behind the sheet is the preview, and a 0.72 scrim over
+   a 3px blur hides it. The sheet is ~362px wide and up to 88dvh on a phone, so
+   lightening the scrim alone would only uncover the margins — it has to drop to a
+   bottom strip as well. The Theme panel is one <select> and a hint, so it fits.
+   Removes blur here; adds no blur system. */
+#settings-dialog.theme-preview {
+  /* Bottom strip, clear of the home indicator. */
+  margin-block: auto max(8px, var(--safe-bottom));
+  max-height: min(50dvh, 360px);
+}
+
+#settings-dialog.theme-preview::backdrop {
+  background: rgba(8, 10, 18, 0.24);
+  backdrop-filter: none;
+}
+
 .settings-heading {
   display: flex;
   align-items: center;
