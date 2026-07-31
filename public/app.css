@@ -1761,6 +1761,29 @@ main {
   background: var(--terminal-bg);
 }
 
+/*
+ * View swipe. `main` is translated directly; `body` already clips, so a view
+ * dragged past the edge does not create document overflow. The transform and
+ * transition are set inline by finishViewSwipe() because both are per-gesture
+ * values; this class only carries what is constant.
+ */
+body.view-swiping main {
+  will-change: transform;
+}
+
+/* A drag must not leave text selected behind the moving view. */
+body.view-swiping {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* The switch still happens; it just arrives without the slide. */
+  body main {
+    transition: none !important;
+  }
+}
+
 #terminal,
 #terminal .terminal {
   width: 100%;

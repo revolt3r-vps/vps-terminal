@@ -252,6 +252,20 @@ const defaultTerminalFontSize = 13;
 const minimumTerminalFontSize = 9;
 const maximumTerminalFontSize = 22;
 const nativeScrollActivationDistance = 5;
+// Horizontal travel that claims a gesture as a view swipe. Deliberately larger
+// than nativeScrollActivationDistance (5px): a scroll must be able to start
+// before a swipe can, or a slightly-off-vertical flick would page the view.
+const viewSwipeActivationDistance = 22;
+// |dx| must exceed this multiple of |dy|. Without it a diagonal drag pages the
+// view, which is the failure mode that makes swipe navigation feel broken.
+const viewSwipeDominanceRatio = 1.8;
+// Fraction of viewport width that commits the switch on release.
+const viewSwipeCommitFraction = 0.22;
+const viewSwipeMinimumCommitDistance = 56;
+// iOS Safari claims edge drags for back/forward when not installed as a web app,
+// so a swipe starting in this band would fight the browser and lose.
+const viewSwipeEdgeGuard = 24;
+const viewSwipeSettleMilliseconds = 180;
 const nativeScrollDeltaThreshold = 1;
 const nativeInputSentinel = '\u200b';
 const nativeDeleteDeduplicationMilliseconds = 250;
@@ -889,6 +903,9 @@ let headerCollapseTimer = null;
 let connectionState = 'idle';
 let nativeTouchScrolling = false;
 let nativeTouchStartX = null;
+// Gesture origin for the non-Apple terminal path, which tracked only Y.
+let genericTouchStartX = null;
+let genericTouchStartY = null;
 let nativeTouchStartY = null;
 let nativeTouchMaxDistance = 0;
 let nativeTouchStartedAt = Number.NEGATIVE_INFINITY;
@@ -9590,6 +9607,256 @@ function startNativeTouchGesture(touch) {
   armTerminalSelectionLongPress();
 }
 
+// ---- Start of the pure view swipe block. ----
+// Written free of DOM and browser globals so it can be sliced out of the shipped
+// source for tests, like the keyboard transition and footer rail blocks.
+
+/** Left to right. A swipe left advances, a swipe right retreats. */
+const viewSwipeOrder = ['term', 'files'];
+
+/**
+ * Which view a horizontal swipe of `dx` from `mode` would land on, or null when
+ * there is nothing that way. Null is what produces the rubber-band: the drag is
+ * still tracked, it just cannot commit.
+ */
+function viewSwipeTarget(mode, dx) {
+  const index = viewSwipeOrder.indexOf(mode);
+  if (index < 0 || dx === 0) {
+    return null;
+  }
+  return viewSwipeOrder[index + (dx < 0 ? 1 : -1)] ?? null;
+}
+
+/**
+ * Should this movement be treated as a view swipe rather than a scroll?
+ *
+ * Order matters. An active selection drag always wins, and a gesture already
+ * locked to scrolling stays locked — that is the hysteresis which stops a long
+ * scroll from turning into a page flip halfway through.
+ */
+function viewSwipeShouldClaim(state) {
+  if (state.selecting || state.scrolling) {
+    return false;
+  }
+  const absX = Math.abs(state.dx);
+  if (absX < viewSwipeActivationDistance) {
+    return false;
+  }
+  if (absX < Math.abs(state.dy) * viewSwipeDominanceRatio) {
+    return false;
+  }
+  return !state.nearEdge;
+}
+
+/** Travel needed to commit, given a viewport width. */
+function viewSwipeCommitDistance(viewportWidth) {
+  return Math.max(
+    viewSwipeMinimumCommitDistance,
+    Math.round((viewportWidth || 0) * viewSwipeCommitFraction)
+  );
+}
+
+/**
+ * How far the view is dragged, in pixels. Movement toward a view that does not
+ * exist is damped to a third so the edge of the deck is felt rather than moving
+ * like a real page.
+ */
+function viewSwipeOffset(dx, hasTarget) {
+  return hasTarget ? dx : Math.round(dx / 3);
+}
+
+function viewSwipeShouldCommit(dx, viewportWidth, hasTarget) {
+  return hasTarget && Math.abs(dx) >= viewSwipeCommitDistance(viewportWidth);
+}
+// ---- End of the pure view swipe block. ----
+
+// Non-null only while a horizontal swipe owns the gesture.
+let viewSwipe = null;
+let viewSwipeSettleTimer = null;
+
+function mainViewElement() {
+  return document.querySelector('main');
+}
+
+function beginViewSwipe(fromMode) {
+  const main = mainViewElement();
+  if (!main) {
+    return;
+  }
+  window.clearTimeout(viewSwipeSettleTimer);
+  viewSwipeSettleTimer = null;
+  viewSwipe = { from: fromMode, dx: 0, committed: false };
+  main.style.transition = 'none';
+  document.body.classList.add('view-swiping');
+}
+
+function updateViewSwipe(dx) {
+  const main = mainViewElement();
+  if (!viewSwipe || !main) {
+    return;
+  }
+  viewSwipe.dx = dx;
+  const target = viewSwipeTarget(viewSwipe.from, dx);
+  main.style.transform = `translateX(${viewSwipeOffset(dx, Boolean(target))}px)`;
+}
+
+function finishViewSwipe() {
+  const main = mainViewElement();
+  if (!viewSwipe || !main) {
+    viewSwipe = null;
+    return false;
+  }
+  const { dx, from } = viewSwipe;
+  const target = viewSwipeTarget(from, dx);
+  const commit = viewSwipeShouldCommit(dx, window.innerWidth, Boolean(target));
+  viewSwipe = null;
+  document.body.classList.remove('view-swiping');
+  if (!commit) {
+    // Snap back from wherever the finger left it.
+    main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
+    main.style.transform = 'translateX(0)';
+    viewSwipeSettleTimer = window.setTimeout(() => {
+      main.style.transition = '';
+      main.style.transform = '';
+    }, viewSwipeSettleMilliseconds);
+    return false;
+  }
+  // Switch first, then slide the new view in from the side the finger came from.
+  // Sliding the old one out first would double the time before anything is
+  // readable, and paging should feel immediate.
+  setViewMode(target);
+  main.style.transition = 'none';
+  main.style.transform = `translateX(${dx < 0 ? '100%' : '-100%'})`;
+  // Force the start offset to be applied before the transition to 0.
+  void main.offsetWidth;
+  main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
+  main.style.transform = 'translateX(0)';
+  viewSwipeSettleTimer = window.setTimeout(() => {
+    main.style.transition = '';
+    main.style.transform = '';
+  }, viewSwipeSettleMilliseconds);
+  return true;
+}
+
+function cancelViewSwipe() {
+  if (!viewSwipe) {
+    return;
+  }
+  viewSwipe.dx = 0;
+  finishViewSwipe();
+}
+
+/**
+ * One swipe listener on `main`, covering both views.
+ *
+ * It has to exist alongside the hook in handleTerminalTouchMove because the app
+ * has two touch architectures, not one. #scroll-catcher and the whole
+ * startNativeTouchGesture pipeline only run when shouldUseNativeTouchSelection()
+ * is true, which requires an Apple user agent — so on iOS the terminal swipe
+ * belongs to that pipeline, and everywhere else there is no pipeline at all.
+ * This listener takes every case the pipeline does not:
+ *
+ * - iOS, Files view — the pipeline is terminal-only.
+ * - Android and desktop touch, both views — the pipeline never runs.
+ *
+ * Without it the swipe would work on an iPhone terminal and silently nowhere else.
+ */
+function installViewSwipeGestures() {
+  const main = mainViewElement();
+  if (!main) {
+    return;
+  }
+  let start = null;
+
+  // A drag beginning on something that scrolls sideways belongs to it — the
+  // Files toolbar and the footer drawer both do.
+  const scrollsHorizontally = (node) => {
+    for (let el = node; el && el !== main; el = el.parentElement) {
+      if (el.scrollWidth > el.clientWidth + 1) {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // True when the iOS terminal pipeline owns this gesture already.
+  const pipelineOwnsIt = () =>
+    nativeTouchSelection && viewMode === 'term';
+
+  main.addEventListener(
+    'touchstart',
+    (event) => {
+      start = null;
+      if (event.touches.length !== 1 || pipelineOwnsIt()) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (scrollsHorizontally(event.target)) {
+        return;
+      }
+      start = {
+        x: touch.clientX,
+        y: touch.clientY,
+        // Set once the finger commits to the surface's own vertical axis.
+        abandoned: false
+      };
+    },
+    { passive: true }
+  );
+
+  main.addEventListener(
+    'touchmove',
+    (event) => {
+      if (!start || event.touches.length !== 1) {
+        return;
+      }
+      const touch = event.touches[0];
+      const dx = touch.clientX - start.x;
+      const dy = touch.clientY - start.y;
+      if (viewSwipe) {
+        event.preventDefault();
+        updateViewSwipe(dx);
+        return;
+      }
+      if (start.abandoned) {
+        return;
+      }
+      // Vertical intent first. Once the surface is being scrolled the gesture is
+      // its own for the rest of its life, which is the same hysteresis the
+      // terminal path gets from nativeTouchScrolling.
+      if (Math.abs(dy) > 10 && Math.abs(dy) > Math.abs(dx)) {
+        start.abandoned = true;
+        return;
+      }
+      if (
+        viewSwipeShouldClaim({
+          dx,
+          dy,
+          selecting: Boolean(terminal?.hasSelection?.()),
+          scrolling: false,
+          nearEdge:
+            start.x <= viewSwipeEdgeGuard ||
+            start.x >= window.innerWidth - viewSwipeEdgeGuard
+        })
+      ) {
+        event.preventDefault();
+        beginViewSwipe(viewMode);
+        updateViewSwipe(dx);
+      }
+    },
+    { passive: false }
+  );
+
+  const end = () => {
+    start = null;
+    if (viewSwipe) {
+      finishViewSwipe();
+    }
+  };
+  main.addEventListener('touchend', end);
+  main.addEventListener('touchcancel', end);
+}
+
 function applyTerminalTouchScroll(touch) {
   if (!terminal || touchLastY === null) {
     return;
@@ -9676,6 +9943,34 @@ function handleTerminalTouchMove(event) {
     updateClipboardButton();
     return true;
   }
+  // A horizontal drag on the terminal had no meaning before this: any direction
+  // past 5px locked the gesture to vertical scrolling. It is now a view swipe,
+  // claimed only when clearly horizontal and only before the scroll lock takes.
+  const dx = touch.clientX - nativeTouchStartX;
+  const dy = touch.clientY - nativeTouchStartY;
+  if (viewSwipe) {
+    touchMoved = true;
+    updateViewSwipe(dx);
+    return true;
+  }
+  if (
+    !selectionViewportLock &&
+    viewSwipeShouldClaim({
+      dx,
+      dy,
+      selecting: xtermTouchSelecting,
+      scrolling: nativeTouchScrolling,
+      nearEdge:
+        nativeTouchStartX <= viewSwipeEdgeGuard ||
+        nativeTouchStartX >= window.innerWidth - viewSwipeEdgeGuard
+    })
+  ) {
+    touchMoved = true;
+    clearNativeSelectionLongPressTimer();
+    beginViewSwipe(viewMode);
+    updateViewSwipe(dx);
+    return true;
+  }
   if (distanceFromStart >= nativeScrollActivationDistance) {
     touchMoved = true;
     lockNativeTouchToScrolling();
@@ -9710,6 +10005,7 @@ function handleDocumentTouchCancel() {
   if (nativeTouchStartX === null) {
     return;
   }
+  cancelViewSwipe();
   finishTouchGesture();
   updateClipboardButton();
 }
@@ -9720,6 +10016,13 @@ function completeTerminalTouchEnd(event) {
   }
   event.__vpsTerminalTouchEndHandled = true;
   suppressCompatibilityMouseUntil = window.performance.now() + 10000;
+  // A swipe owned this gesture, so it is not a tap, a selection, or a scroll.
+  // Settle it and stop before any of that runs.
+  if (viewSwipe) {
+    finishViewSwipe();
+    finishTouchGesture();
+    return;
+  }
   // Capture before finishTouchGesture clears gesture flags.
   const madeSelectionThisGesture = xtermTouchSelecting;
   const hadSelectionAtStart = selectionPresentAtGestureStart;
@@ -9966,6 +10269,9 @@ function installTouchScrolling() {
       event.preventDefault();
       event.stopPropagation();
       touchLastY = event.touches[0].clientY;
+      // The swipe needs an origin, and this path only tracked Y.
+      genericTouchStartX = event.touches[0].clientX;
+      genericTouchStartY = event.touches[0].clientY;
       touchMoved = false;
     },
     { capture: true, passive: false }
@@ -9986,6 +10292,35 @@ function installTouchScrolling() {
       const delta = currentY - touchLastY;
       event.preventDefault();
       event.stopPropagation();
+      // View swipe, on the non-Apple path. This handler stops propagation, so
+      // the listener on <main> never sees terminal touches here and the swipe
+      // has to be claimed inside it.
+      if (genericTouchStartX !== null) {
+        const swipeDx = event.touches[0].clientX - genericTouchStartX;
+        const swipeDy = currentY - genericTouchStartY;
+        if (viewSwipe) {
+          touchMoved = true;
+          updateViewSwipe(swipeDx);
+          return;
+        }
+        if (
+          !touchMoved &&
+          viewSwipeShouldClaim({
+            dx: swipeDx,
+            dy: swipeDy,
+            selecting: Boolean(terminal?.hasSelection?.()),
+            scrolling: false,
+            nearEdge:
+              genericTouchStartX <= viewSwipeEdgeGuard ||
+              genericTouchStartX >= window.innerWidth - viewSwipeEdgeGuard
+          })
+        ) {
+          touchMoved = true;
+          beginViewSwipe(viewMode);
+          updateViewSwipe(swipeDx);
+          return;
+        }
+      }
       if (Math.abs(delta) < 12) {
         return;
       }
@@ -10012,6 +10347,10 @@ function installTouchScrolling() {
         touchLastY = null;
         return;
       }
+      genericTouchStartX = null;
+      if (viewSwipe) {
+        finishViewSwipe();
+      }
       finishTouchGesture();
     },
     { capture: true, passive: true }
@@ -10019,6 +10358,8 @@ function installTouchScrolling() {
   terminalElement.addEventListener(
     'touchcancel',
     () => {
+      genericTouchStartX = null;
+      cancelViewSwipe();
       finishTouchGesture();
     },
     { capture: true, passive: true }
@@ -12164,6 +12505,7 @@ window.visualViewport?.addEventListener('resize', () => {
   }
 });
 restorePasteHistoryIfOptedIn();
+installViewSwipeGestures();
 terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
