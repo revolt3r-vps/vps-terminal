@@ -11842,6 +11842,18 @@ let appClipboardText = '';
 const pasteHistory = createPasteHistory();
 // Prefetch started on pointerdown; may fail — always allow a click retry.
 let pasteGesturePayload = null;
+let pasteGestureStartedAt = 0;
+// A prefetch left pending by a gesture that never became a click must not block
+// the next one. On iOS the read stays pending until the native bubble is tapped,
+// so this has to outlast a slow human, not a fast one.
+const pasteGestureReadStaleMilliseconds = 20000;
+
+function pasteGestureReadIsStale() {
+  return (
+    window.performance.now() - pasteGestureStartedAt >
+    pasteGestureReadStaleMilliseconds
+  );
+}
 
 async function parseClipboardItems(items) {
   let text = '';
@@ -11870,7 +11882,20 @@ async function parseClipboardItems(items) {
   return { text: text || '', imageBlob, error: null, apiOk: true };
 }
 
+/**
+ * Start at most one clipboard read per gesture.
+ *
+ * Every clipboard access raises its own native Paste confirmation on iOS
+ * Safari, so two accesses mean two bubbles. Two things caused that: this ran
+ * from both pointerdown and touchstart, which both fire for one tap on iOS,
+ * and readClipboardPayloadBestEffort() used to cascade read() into readText()
+ * after a failure. Both are now single-shot.
+ */
 function beginPasteGestureClipboardRead() {
+  if (pasteGesturePayload && !pasteGestureReadIsStale()) {
+    return;
+  }
+  pasteGestureStartedAt = window.performance.now();
   // Prefer clipboard.read() once so screenshots and text share one activation.
   if (navigator.clipboard?.read) {
     pasteGesturePayload = navigator.clipboard
@@ -11905,59 +11930,72 @@ function beginPasteGestureClipboardRead() {
 }
 
 async function readClipboardPayloadBestEffort() {
-  let text = '';
-  let imageBlob = null;
-  let error = null;
-  let apiOk = false;
-
-  // 1) Gesture prefetch from pointerdown (text + image when possible).
+  // Exactly one clipboard access per call. Each one costs the user a native
+  // Paste confirmation on iOS, so a fallback chain is a bubble chain.
   if (pasteGesturePayload) {
     try {
       const result = await pasteGesturePayload;
-      text = result.text || '';
-      imageBlob = result.imageBlob || null;
-      error = result.error || null;
-      apiOk = Boolean(result.apiOk);
-      // If prefetch already has useful content, keep it.
-      if (text || imageBlob) {
-        pasteGesturePayload = null;
-        return { text, imageBlob, error, apiOk };
-      }
+      // Returned even when empty. An empty clipboard is an answer, and asking
+      // again to hear it twice is what produced the second bubble.
+      return {
+        text: result.text || '',
+        imageBlob: result.imageBlob || null,
+        error: result.error || null,
+        apiOk: Boolean(result.apiOk)
+      };
     } catch (err) {
-      error = String(err?.message || err).slice(0, 80);
-      apiOk = false;
+      return {
+        text: '',
+        imageBlob: null,
+        error: String(err?.message || err).slice(0, 80),
+        apiOk: false
+      };
     } finally {
       pasteGesturePayload = null;
     }
   }
 
-  // 2) Fresh full read on click (one activation for both text and image).
+  // No prefetch — this call is the gesture. read() covers text and images in one
+  // access; readText() is only used where read() does not exist at all, never as
+  // a retry after it fails.
   if (navigator.clipboard?.read) {
     try {
-      const items = await navigator.clipboard.read();
-      const parsed = await parseClipboardItems(items);
-      return parsed;
+      return await parseClipboardItems(await navigator.clipboard.read());
     } catch (err) {
-      error = String(err?.message || err).slice(0, 80);
-      clientDebug('paste-clipboard-read', {
-        reason: 'read-failed'
-      });
+      clientDebug('paste-clipboard-read', { reason: 'read-failed' });
+      return {
+        text: '',
+        imageBlob: null,
+        error: String(err?.message || err).slice(0, 80),
+        apiOk: false
+      };
     }
   }
 
-  // 3) Text-only fallback.
   if (navigator.clipboard?.readText) {
     try {
-      text = (await navigator.clipboard.readText()) || '';
-      return { text, imageBlob: null, error: null, apiOk: true };
+      return {
+        text: (await navigator.clipboard.readText()) || '',
+        imageBlob: null,
+        error: null,
+        apiOk: true
+      };
     } catch (err) {
-      error = String(err?.message || err).slice(0, 80);
+      return {
+        text: '',
+        imageBlob: null,
+        error: String(err?.message || err).slice(0, 80),
+        apiOk: false
+      };
     }
-  } else if (!error) {
-    error = 'clipboard-api-missing';
   }
 
-  return { text: '', imageBlob: null, error, apiOk: false };
+  return {
+    text: '',
+    imageBlob: null,
+    error: 'clipboard-api-missing',
+    apiOk: false
+  };
 }
 
 async function pasteImageBlob(blob) {
@@ -12709,6 +12747,13 @@ selectionCopyChip?.addEventListener(
     // Keep the keyboard from collapsing when a layout lock is active.
     if (terminalInputIsFocused() || holdKeyboardLayoutForSelection) {
       event.preventDefault();
+    }
+    // Paste variant: start the one clipboard read here rather than on click, so
+    // iOS raises its native confirmation as part of this tap instead of after it.
+    // Single-shot, so the click that follows reuses this read rather than adding
+    // a second bubble.
+    if (selectionCopyChip.dataset.action === 'paste') {
+      beginPasteGestureClipboardRead();
     }
   },
   { passive: false }
