@@ -47,6 +47,7 @@ const filesOptionsDialog = document.querySelector('#files-options-dialog');
 const filesOptionsClose = document.querySelector('#files-options-close');
 const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
 const filesOptionHidden = document.querySelector('#files-option-hidden');
+const filesOptionTerminal = document.querySelector('#files-option-terminal');
 const filesOptionSettings = document.querySelector('#files-option-settings');
 const filesNameDialog = document.querySelector('#files-name-dialog');
 const filesNameForm = document.querySelector('#files-name-form');
@@ -79,7 +80,6 @@ const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
 const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
 const quickMenuViewButton = document.querySelector('#quick-menu-view');
 const quickMenuFindButton = document.querySelector('#quick-menu-find');
-const quickMenuRenameButton = document.querySelector('#quick-menu-rename');
 const quickMenuReconnectButton = document.querySelector(
   '#quick-menu-reconnect'
 );
@@ -1317,11 +1317,6 @@ function updateTermControlsEnabled() {
     quickMenuFindButton,
     live,
     live ? '' : 'connect a session first'
-  );
-  describeMenuAction(
-    quickMenuRenameButton,
-    Boolean(activeSession),
-    activeSession || 'select a session first'
   );
   describeMenuAction(
     quickMenuReconnectButton,
@@ -8972,6 +8967,23 @@ function renderSessions() {
     installSessionRenameLongPress(button, session.name);
     item.append(button);
     if (isActive) {
+      // Rename sits on the session it renames, next to Delete, rather than in the
+      // Menu — the session is the thing being acted on and it is already here.
+      // The long-press on the name still works, for every session rather than
+      // only the active one.
+      const renameButton = document.createElement('button');
+      renameButton.type = 'button';
+      renameButton.className = 'session-rename';
+      renameButton.innerHTML =
+        '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+        '<path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" /></svg>';
+      renameButton.title = `Rename ${session.name}`;
+      renameButton.setAttribute('aria-label', `Rename session ${session.name}`);
+      renameButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void renameSession(session.name);
+      });
+      item.append(renameButton);
       const closeButton = document.createElement('button');
       closeButton.type = 'button';
       closeButton.className = 'session-close';
@@ -12388,6 +12400,10 @@ filesPreviewPaneClose?.addEventListener('click', () => {
 filesOptionsClose?.addEventListener('click', () => {
   closeFilesOptions();
 });
+filesOptionTerminal?.addEventListener('click', () => {
+  closeFilesOptions();
+  setViewMode('term');
+});
 filesOptionNewFolder?.addEventListener('click', () => {
   openFilesNameDialog('create');
 });
@@ -12674,11 +12690,6 @@ quickMenuViewButton?.addEventListener('click', () => {
 quickMenuFindButton?.addEventListener('click', () => {
   closeQuickMenu();
   openFindBar();
-});
-quickMenuRenameButton?.addEventListener('click', () => {
-  const session = activeSession;
-  closeQuickMenu();
-  void renameSession(session);
 });
 quickMenuReconnectButton?.addEventListener('click', () => {
   closeQuickMenu();

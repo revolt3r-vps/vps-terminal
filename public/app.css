@@ -1713,6 +1713,48 @@ button.active {
   font-size: 15px;
 }
 
+.session-rename {
+  flex: 0 0 var(--header-control);
+  width: var(--header-control);
+  min-width: var(--header-control);
+  min-height: var(--header-control);
+  padding: 0;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 0;
+  background: transparent;
+  color: color-mix(in srgb, var(--accent-text) 68%, var(--muted));
+}
+
+.session-rename svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* Not destructive, so it brightens rather than turning red like Delete. */
+.session-rename:hover,
+.session-rename:focus-visible {
+  background: color-mix(in srgb, var(--accent-surface) 70%, var(--accent));
+  color: var(--text-strong);
+}
+
+.session-rename:active {
+  background: color-mix(in srgb, var(--accent-surface) 55%, var(--accent));
+}
+
+#header-expanded .session-rename {
+  flex: 0 0 var(--header-control);
+  width: var(--header-control);
+  min-width: var(--header-control);
+  min-height: var(--header-control);
+  border-radius: 0;
+}
+
 .session-close:hover,
 .session-close:focus-visible {
   background: var(--danger-surface);
