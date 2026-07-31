@@ -3875,19 +3875,100 @@ function hideSelectionCopyChip() {
   selectionCopyChip.hidden = true;
 }
 
-function showSelectionCopyChip(clientX, clientY) {
+// ---- Start of the pure chip placement block. ----
+// Written free of DOM and browser globals so it can be sliced out for tests.
+
+/** Gap between the touch point and the chip. */
+const terminalChipAnchorGap = 14;
+const terminalChipMargin = 8;
+
+/**
+ * Where to put a chip of `size` anchored at `anchor`, kept inside `bounds`.
+ *
+ * The chip is centred on the anchor and sits above it, so clamping the anchor is
+ * not enough: half the chip's width and all of its height live outside the
+ * anchor point. This clamps the rendered box instead, and flips the chip below
+ * the anchor when there is no room above — clamping upward would drop it on top
+ * of the very text it is pointing at.
+ */
+function placeTerminalChip(anchor, size, bounds) {
+  const margin = terminalChipMargin;
+  const gap = terminalChipAnchorGap;
+  const above = anchor.y - gap - size.height;
+  const flip = above < bounds.top + margin;
+  let top = flip ? anchor.y + gap : above;
+  // A viewport too short for either placement: sit as high as it can.
+  const maxTop = bounds.bottom - margin - size.height;
+  top = Math.min(Math.max(top, bounds.top + margin), Math.max(bounds.top + margin, maxTop));
+  let left = anchor.x - size.width / 2;
+  const maxLeft = bounds.right - margin - size.width;
+  left = Math.min(
+    Math.max(left, bounds.left + margin),
+    Math.max(bounds.left + margin, maxLeft)
+  );
+  return { left: Math.round(left), top: Math.round(top), flipped: flip };
+}
+// ---- End of the pure chip placement block. ----
+
+/** The area a chip may occupy: the terminal surface, never the header or footer. */
+function terminalChipBounds() {
+  const main = mainViewElement();
+  const rect = main?.getBoundingClientRect();
+  if (!rect || rect.height <= 0) {
+    return {
+      top: 0,
+      left: 0,
+      right: window.innerWidth,
+      bottom: window.innerHeight
+    };
+  }
+  return {
+    top: Math.max(0, rect.top),
+    left: Math.max(0, rect.left),
+    right: Math.min(window.innerWidth, rect.right),
+    bottom: Math.min(window.innerHeight, rect.bottom)
+  };
+}
+
+/**
+ * The floating chip after a long press: Copy when there is a selection, Paste
+ * when there is not. Same control either way, because the gesture is the same
+ * and the answer to "what can I do here" is what changes.
+ */
+function showTerminalActionChip(action, clientX, clientY) {
   if (!selectionCopyChip) {
     return;
   }
-  const margin = 12;
-  const maxX = Math.max(margin, window.innerWidth - margin);
-  const maxY = Math.max(margin, window.innerHeight - margin);
-  const x = Math.min(maxX, Math.max(margin, clientX || lastTouchClientX || window.innerWidth / 2));
-  const y = Math.min(maxY, Math.max(margin, clientY || lastTouchClientY || window.innerHeight / 2));
-  selectionCopyChip.style.left = `${Math.round(x)}px`;
-  selectionCopyChip.style.top = `${Math.round(y)}px`;
+  const paste = action === 'paste';
+  selectionCopyChip.dataset.action = paste ? 'paste' : 'copy';
+  selectionCopyChip.textContent = paste ? 'Paste' : 'Copy';
+  selectionCopyChip.setAttribute(
+    'aria-label',
+    paste ? 'Paste into the terminal' : 'Copy selection'
+  );
+  // Measure with the transform neutralised, then position from the real box.
+  selectionCopyChip.classList.remove('chip-below');
+  selectionCopyChip.style.left = '0px';
+  selectionCopyChip.style.top = '0px';
   selectionCopyChip.hidden = false;
-  pasteButton.classList.add('copy-needs-attention');
+  const size = {
+    width: selectionCopyChip.offsetWidth,
+    height: selectionCopyChip.offsetHeight
+  };
+  const anchor = {
+    x: clientX || lastTouchClientX || window.innerWidth / 2,
+    y: clientY || lastTouchClientY || window.innerHeight / 2
+  };
+  const placed = placeTerminalChip(anchor, size, terminalChipBounds());
+  selectionCopyChip.classList.toggle('chip-below', placed.flipped);
+  selectionCopyChip.style.left = `${placed.left}px`;
+  selectionCopyChip.style.top = `${placed.top}px`;
+  // Only the Copy chip points at the paste button, which doubles as Copy.
+  pasteButton.classList.toggle('copy-needs-attention', !paste);
+}
+
+function showSelectionCopyChip(clientX, clientY) {
+  showTerminalActionChip('copy', clientX, clientY);
 }
 
 function markCopyNeedsAttention(clientX, clientY) {
@@ -4372,6 +4453,24 @@ function readTerminalSelectionText() {
     return '';
   }
   return readBufferRangeText(position.start, position.end);
+}
+
+/**
+ * Is there a selection with something worth copying in it?
+ *
+ * terminal.hasSelection() is true for a whitespace-only range, so a long press
+ * on blank rows below the prompt reports a selection that Copy would turn into
+ * an empty string. This asks the question the gesture actually needs, using the
+ * same extraction the copy path uses so the answer matches what Copy would do.
+ *
+ * Deliberately not folded into terminalHasCopyableSelection(): that one runs on
+ * every updateClipboardButton() call, and this walks the buffer.
+ */
+function terminalSelectionHasText() {
+  if (!terminal?.hasSelection()) {
+    return false;
+  }
+  return readTerminalSelectionText().trim().length > 0;
 }
 
 function updateClipboardButton() {
@@ -10097,7 +10196,7 @@ function completeTerminalTouchEnd(event) {
   // Always offer the floating Copy chip after a selection gesture. Silent
   // auto-copy is unreliable on iOS after preventDefault-owned drags; a one-tap
   // chip is the consistent path and matches what users expect.
-  if (madeSelectionThisGesture && terminal?.hasSelection()) {
+  if (madeSelectionThisGesture && terminalSelectionHasText()) {
     const releaseX = touch?.clientX ?? lastTouchClientX;
     const releaseY = touch?.clientY ?? lastTouchClientY;
     showSelectionCopyChip(releaseX, releaseY);
@@ -10107,6 +10206,23 @@ function completeTerminalTouchEnd(event) {
         madeSelectionThisGesture,
         hadSelectionAtStart,
         showCopyChip: true
+      })
+    );
+  } else if (madeSelectionThisGesture) {
+    // The long press landed somewhere with nothing to select — blank space, or a
+    // row of whitespace. Offer Paste instead of leaving the gesture with no
+    // result at all, which is what iOS does in an empty field.
+    showTerminalActionChip(
+      'paste',
+      touch?.clientX ?? lastTouchClientX,
+      touch?.clientY ?? lastTouchClientY
+    );
+    clientDebug(
+      'selection-release-empty',
+      selectionDebugSnapshot({
+        madeSelectionThisGesture,
+        hadSelectionAtStart,
+        showPasteChip: true
       })
     );
   }
@@ -12217,6 +12333,12 @@ async function pasteOrCopyClipboard() {
 async function handleSelectionCopyChipClick(event) {
   event.preventDefault();
   event.stopPropagation();
+  // The chip carries whichever action the long press could offer.
+  if (selectionCopyChip?.dataset.action === 'paste') {
+    hideSelectionCopyChip();
+    await pasteClipboard();
+    return;
+  }
   if (!terminalHasCopyableSelection()) {
     hideSelectionCopyChip();
     return;
