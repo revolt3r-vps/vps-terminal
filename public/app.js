@@ -100,9 +100,6 @@ const scrollThumbElement = document.querySelector('#scroll-thumb');
 const footerDrawerElement = document.querySelector('#footer-drawer');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
-const footerPinOverflowButton = document.querySelector(
-  '#footer-pin-overflow'
-);
 const drawerKeysButton = document.querySelector('#drawer-keys');
 const drawerSnipsButton = document.querySelector('#drawer-snips');
 const settingsDialogElement = document.querySelector('#settings-dialog');
@@ -2526,7 +2523,7 @@ function toggleFooterPin(kind, id) {
 
 function setFooterDrawer(mode) {
   const next =
-    mode === 'keys' || mode === 'snips' || mode === 'pins' ? mode : null;
+    mode === 'keys' || mode === 'snips' ? mode : null;
   footerDrawer = footerDrawer === next ? null : next;
   if (drawerKeysButton) {
     drawerKeysButton.classList.toggle('active', footerDrawer === 'keys');
@@ -2542,21 +2539,10 @@ function setFooterDrawer(mode) {
       String(footerDrawer === 'snips')
     );
   }
-  if (footerPinOverflowButton) {
-    footerPinOverflowButton.classList.toggle(
-      'active',
-      footerDrawer === 'pins'
-    );
-    footerPinOverflowButton.setAttribute(
-      'aria-pressed',
-      String(footerDrawer === 'pins')
-    );
-  }
   if (footerDrawer === 'snips' && snippetsList.length === 0) {
     void loadSnippetsFromServer();
   }
   renderFooterDrawer();
-  scheduleFooterPinLayout();
   scheduleLayoutDebug('drawer');
 }
 
@@ -2569,13 +2555,10 @@ function closeFooterDrawer() {
   drawerKeysButton?.setAttribute('aria-pressed', 'false');
   drawerSnipsButton?.classList.remove('active');
   drawerSnipsButton?.setAttribute('aria-pressed', 'false');
-  footerPinOverflowButton?.classList.remove('active');
-  footerPinOverflowButton?.setAttribute('aria-pressed', 'false');
   if (footerDrawerElement) {
     footerDrawerElement.hidden = true;
     footerDrawerElement.replaceChildren();
   }
-  scheduleFooterPinLayout();
   scheduleLayoutDebug('drawer');
 }
 
@@ -2668,33 +2651,6 @@ function renderFooterDrawer() {
     appendDrawerEmptyHint('No keys in this profile');
     return;
   }
-  if (footerDrawer === 'pins') {
-    for (const pin of loadFooterPins()) {
-      const button =
-        pin.kind === 'key'
-          ? createKeyChipButton(pin.id, { pinned: true })
-          : createSnipChipButton(
-              snippetsForProfile().find((entry) => entry.id === pin.id),
-              { pinned: true }
-            );
-      if (button) {
-        footerDrawerElement.append(button);
-      }
-    }
-    if (footerSnipsInOverflow) {
-      const snippetsButton = document.createElement('button');
-      snippetsButton.type = 'button';
-      snippetsButton.className = 'drawer-action';
-      snippetsButton.textContent = 'Snips';
-      snippetsButton.title = 'Open profile snippets';
-      snippetsButton.addEventListener('click', () => {
-        setFooterDrawer('snips');
-      });
-      footerDrawerElement.append(snippetsButton);
-    }
-    appendDrawerEmptyHint('No pins in this profile');
-    return;
-  }
   for (const snippet of snippetsForProfile()) {
     const button = createSnipChipButton(snippet, {
       pinned: isPinned('snip', snippet.id)
@@ -2707,116 +2663,6 @@ function renderFooterDrawer() {
     }
   }
   appendDrawerEmptyHint('No snippets in this profile');
-}
-
-let footerPinLayoutFrame = 0;
-let footerSnipsInOverflow = false;
-let footerHiddenPinCount = 0;
-
-function updateFooterPinOverflow() {
-  if (
-    !footerPinsElement ||
-    !footerScrollElement ||
-    !footerPinOverflowButton
-  ) {
-    return;
-  }
-  const buttons = [...footerPinsElement.querySelectorAll('button')];
-  const landscapeRail = window.matchMedia?.(
-    '(orientation: landscape) and (pointer: coarse)'
-  ).matches;
-  const overflows = () =>
-    landscapeRail
-      ? footerScrollElement.scrollHeight >
-        footerScrollElement.clientHeight + 1
-      : footerScrollElement.scrollWidth >
-        footerScrollElement.clientWidth + 1;
-  if (
-    (footerDrawer === 'pins' || footerDrawer === 'snips') &&
-    footerSnipsInOverflow
-  ) {
-    const preservedHiddenCount = Math.min(
-      footerHiddenPinCount,
-      Math.max(0, buttons.length - 1)
-    );
-    footerHiddenPinCount = preservedHiddenCount;
-    buttons.forEach((button, index) => {
-      button.hidden =
-        index >= buttons.length - preservedHiddenCount;
-    });
-    let nextHiddenIndex = buttons.length - preservedHiddenCount - 1;
-    while (nextHiddenIndex >= 1 && overflows()) {
-      buttons[nextHiddenIndex].hidden = true;
-      footerHiddenPinCount += 1;
-      nextHiddenIndex -= 1;
-    }
-    drawerSnipsButton.hidden = true;
-    footerPinOverflowButton.hidden = false;
-    footerPinOverflowButton.classList.add('active');
-    footerPinOverflowButton.setAttribute('aria-pressed', 'true');
-    footerPinOverflowButton.textContent = '−';
-    footerPinOverflowButton.title =
-      footerDrawer === 'pins'
-        ? 'Close pinned shortcuts'
-        : 'Close profile snippets';
-    footerPinOverflowButton.setAttribute(
-      'aria-label',
-      footerPinOverflowButton.title
-    );
-    return;
-  }
-  for (const button of buttons) {
-    button.hidden = false;
-  }
-  footerSnipsInOverflow = false;
-  footerHiddenPinCount = 0;
-  drawerSnipsButton.hidden = false;
-  footerPinOverflowButton.classList.remove('active');
-  footerPinOverflowButton.setAttribute('aria-pressed', 'false');
-  footerPinOverflowButton.hidden = true;
-  footerPinOverflowButton.textContent = '+0';
-  if (
-    buttons.length === 0 ||
-    footerScrollElement.clientWidth === 0 ||
-    footerScrollElement.clientHeight === 0
-  ) {
-    return;
-  }
-  if (!overflows()) {
-    return;
-  }
-  footerPinOverflowButton.hidden = false;
-  drawerSnipsButton.hidden = true;
-  footerSnipsInOverflow = true;
-  let hiddenCount = 0;
-  for (let index = buttons.length - 1; index >= 0 && overflows(); index -= 1) {
-    buttons[index].hidden = true;
-    hiddenCount += 1;
-  }
-  footerHiddenPinCount = hiddenCount;
-  if (hiddenCount === 0) {
-    footerPinOverflowButton.textContent = '•••';
-    footerPinOverflowButton.title = 'More terminal tools';
-    footerPinOverflowButton.setAttribute(
-      'aria-label',
-      'Show more terminal tools'
-    );
-    return;
-  }
-  footerPinOverflowButton.textContent = `+${hiddenCount}`;
-  footerPinOverflowButton.title = `${hiddenCount} more pinned shortcuts`;
-  footerPinOverflowButton.setAttribute(
-    'aria-label',
-    `Show ${hiddenCount} more pinned shortcuts`
-  );
-}
-
-function scheduleFooterPinLayout() {
-  cancelAnimationFrame(footerPinLayoutFrame);
-  footerPinLayoutFrame = requestAnimationFrame(() => {
-    footerPinLayoutFrame = 0;
-    updateFooterPinOverflow();
-  });
 }
 
 // What the rail was last built for, so a poll that changed nothing does not
@@ -2858,7 +2704,6 @@ function renderFooterPins() {
       footerPinsElement.append(button);
     }
   }
-  scheduleFooterPinLayout();
 }
 
 /** Rebuild the rail only when the foreground command actually moved. */
@@ -3296,11 +3141,7 @@ async function resetSnippetsToPresets() {
 }
 
 function refreshKeysUi() {
-  if (
-    footerDrawer === 'keys' ||
-    footerDrawer === 'snips' ||
-    footerDrawer === 'pins'
-  ) {
+  if (footerDrawer === 'keys' || footerDrawer === 'snips') {
     renderFooterDrawer();
   }
   renderFooterPins();
@@ -12213,7 +12054,6 @@ document.addEventListener('keydown', (event) => {
   }
 });
 window.addEventListener('resize', () => {
-  scheduleFooterPinLayout();
   if (filesActionsDialog?.open && !filesActionsDialog.matches(':modal')) {
     closeFilesActions({ restoreFocus: false });
   }
@@ -12342,13 +12182,6 @@ drawerKeysButton?.addEventListener('click', () => {
 });
 drawerSnipsButton?.addEventListener('click', () => {
   setFooterDrawer('snips');
-});
-footerPinOverflowButton?.addEventListener('click', () => {
-  if (footerDrawer === 'snips' && footerSnipsInOverflow) {
-    closeFooterDrawer();
-  } else {
-    setFooterDrawer('pins');
-  }
 });
 quickMenuProfileList?.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-profile-id]');
@@ -12674,8 +12507,6 @@ document.addEventListener('pointerdown', preserveKeyboardState, {
 });
 const resizeObserver = new ResizeObserver(scheduleFit);
 resizeObserver.observe(terminalElement);
-const footerPinResizeObserver = new ResizeObserver(scheduleFooterPinLayout);
-footerPinResizeObserver.observe(footerScrollElement);
 // The portrait session menu sizes itself against the real footer, which grows
 // when a Keys/Snips drawer is open.
 const footerElement = document.querySelector('footer');

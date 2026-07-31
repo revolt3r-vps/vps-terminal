@@ -747,16 +747,9 @@
             </button>
             <button id="drawer-keys" class="footer-fixed" type="button" aria-pressed="false" title="Keys">Keys</button>
             <button id="drawer-snips" class="footer-fixed" type="button" aria-pressed="false" title="Snips">Snips</button>
-            <div id="footer-pins" aria-label="Pinned shortcuts"></div>
-            <button
-              id="footer-pin-overflow"
-              class="footer-fixed"
-              type="button"
-              aria-pressed="false"
-              title="More pinned shortcuts"
-              aria-label="More pinned shortcuts"
-              hidden
-            >+0</button>
+            <!-- The one scrolling thing in the footer. Paste/Keys/Snips stay put
+                 either side of it; only the chips move. -->
+            <div id="footer-pins" aria-label="Shortcut chips"></div>
           </div>
           <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Menu" aria-label="Open menu">
             <svg viewBox="0 0 24 24" aria-hidden="true">

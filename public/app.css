@@ -2760,12 +2760,9 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /*
- * One overflow mechanism, not two. updateFooterPinOverflow() hides every chip
- * that does not fit and puts the count on the overflow button, so there is never
- * anything left to scroll to — `overflow-x: auto` and `touch-action: pan-x` only
- * advertised a gesture that could not do anything. `hidden` rather than
- * `visible`, because the collapse measures scrollWidth against clientWidth and
- * `visible` makes those equal.
+ * The bar itself does not scroll and does not collapse — #footer-pins inside it
+ * is the one scrolling sublist. The fixed controls keep their positions, so
+ * Paste, Keys and Snips are always where they were last time.
  */
 #footer-scroll {
   grid-column: 2;
@@ -2852,7 +2849,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--panel);
+  background: var(--surface-raised);
   box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
 }
 
@@ -2878,7 +2875,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--fg);
+  color: var(--text);
   font: inherit;
   font-size: var(--control-font);
   text-align: left;
@@ -2887,7 +2884,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 .paste-popover-item:hover,
 .paste-popover-item:focus-visible {
-  background: var(--chip-active-bg, rgb(255 255 255 / 8%));
+  background: var(--surface-hover);
 }
 
 .paste-popover-label {
@@ -2927,8 +2924,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 .paste-popover-footer button:hover,
 .paste-popover-footer button:focus-visible {
-  color: var(--fg);
-  background: var(--chip-active-bg, rgb(255 255 255 / 8%));
+  color: var(--text);
+  background: var(--surface-hover);
 }
 
 #files-hidden-toggle {
@@ -3010,11 +3007,26 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: #1f2e28;
 }
 
+/*
+ * The scrolling sublist. Paste/Keys/Snips and Settings keep their places on the
+ * bar; only the chips move, and every chip stays reachable by scrolling rather
+ * than being hidden behind a count.
+ */
 #footer-pins {
   display: flex;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   gap: var(--control-gap);
   min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: none;
+  scrollbar-width: none;
+  touch-action: pan-x;
+}
+
+#footer-pins::-webkit-scrollbar {
+  display: none;
 }
 
 #footer-pins button {
@@ -3026,17 +3038,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 #footer-pins:empty {
   display: none;
-}
-
-#footer-scroll > button[hidden],
-#footer-pins button[hidden] {
-  display: none !important;
-}
-
-#footer-pin-overflow {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 750;
 }
 
 .settings-check {
@@ -3404,8 +3405,6 @@ footer button {
     flex: 1 1 auto;
     min-height: 0;
     gap: 4px;
-    /* Same single mechanism as portrait: the collapse hides what does not fit,
-     * measuring scrollHeight against clientHeight. */
     overflow: hidden;
   }
 
@@ -3471,8 +3470,14 @@ footer button {
 
   #footer-pins {
     flex-direction: column;
-    flex: 0 0 auto;
+    flex: 1 1 auto;
     gap: 4px;
+    /* Landscape side rail: the sublist scrolls down the strip, not across it. */
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior-x: none;
+    overscroll-behavior-y: contain;
+    touch-action: pan-y;
   }
 
   #footer-main .footer-fixed,
