@@ -1950,19 +1950,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: #1d5c47;
 }
 
-/* The Paste variant of the same chip. Neutral rather than accent-green: Copy acts
- * on something already selected, Paste puts new text into a live shell, and the
- * two should not look interchangeable. */
-#selection-copy-chip[data-action="paste"] {
-  border-color: var(--control-border);
-  background: var(--surface-raised);
-  color: var(--text);
-}
-
-#selection-copy-chip[data-action="paste"]:active {
-  background: var(--surface-pressed);
-}
-
 /* Scrollback find — one row over the terminal, not permanent chrome. */
 #find-bar {
   position: absolute;

@@ -3930,45 +3930,32 @@ function terminalChipBounds() {
   };
 }
 
-/**
- * The floating chip after a long press: Copy when there is a selection, Paste
- * when there is not. Same control either way, because the gesture is the same
- * and the answer to "what can I do here" is what changes.
- */
-function showTerminalActionChip(action, clientX, clientY) {
+/** The Copy chip after a long press that selected something. */
+function showSelectionCopyChip(clientX, clientY) {
   if (!selectionCopyChip) {
     return;
   }
-  const paste = action === 'paste';
-  selectionCopyChip.dataset.action = paste ? 'paste' : 'copy';
-  selectionCopyChip.textContent = paste ? 'Paste' : 'Copy';
-  selectionCopyChip.setAttribute(
-    'aria-label',
-    paste ? 'Paste into the terminal' : 'Copy selection'
-  );
-  // Measure with the transform neutralised, then position from the real box.
-  selectionCopyChip.classList.remove('chip-below');
+  selectionCopyChip.textContent = 'Copy';
+  selectionCopyChip.setAttribute('aria-label', 'Copy selection');
+  // Measured, then positioned from the real box: see placeTerminalChip().
   selectionCopyChip.style.left = '0px';
   selectionCopyChip.style.top = '0px';
   selectionCopyChip.hidden = false;
-  const size = {
-    width: selectionCopyChip.offsetWidth,
-    height: selectionCopyChip.offsetHeight
-  };
-  const anchor = {
-    x: clientX || lastTouchClientX || window.innerWidth / 2,
-    y: clientY || lastTouchClientY || window.innerHeight / 2
-  };
-  const placed = placeTerminalChip(anchor, size, terminalChipBounds());
+  const placed = placeTerminalChip(
+    {
+      x: clientX || lastTouchClientX || window.innerWidth / 2,
+      y: clientY || lastTouchClientY || window.innerHeight / 2
+    },
+    {
+      width: selectionCopyChip.offsetWidth,
+      height: selectionCopyChip.offsetHeight
+    },
+    terminalChipBounds()
+  );
   selectionCopyChip.classList.toggle('chip-below', placed.flipped);
   selectionCopyChip.style.left = `${placed.left}px`;
   selectionCopyChip.style.top = `${placed.top}px`;
-  // Only the Copy chip points at the paste button, which doubles as Copy.
-  pasteButton.classList.toggle('copy-needs-attention', !paste);
-}
-
-function showSelectionCopyChip(clientX, clientY) {
-  showTerminalActionChip('copy', clientX, clientY);
+  pasteButton.classList.add('copy-needs-attention');
 }
 
 function markCopyNeedsAttention(clientX, clientY) {
@@ -10209,22 +10196,25 @@ function completeTerminalTouchEnd(event) {
       })
     );
   } else if (madeSelectionThisGesture) {
-    // The long press landed somewhere with nothing to select — blank space, or a
-    // row of whitespace. Offer Paste instead of leaving the gesture with no
-    // result at all, which is what iOS does in an empty field.
-    showTerminalActionChip(
-      'paste',
-      touch?.clientX ?? lastTouchClientX,
-      touch?.clientY ?? lastTouchClientY
-    );
+    // The long press landed somewhere with nothing to select, so the gesture means
+    // paste. Read the clipboard straight from this touchend instead of offering
+    // our own chip first: iOS raises its own permission bubble for the read, and a
+    // chip in front of it is two bubbles for one intent.
+    //
+    // The read is started here, synchronously, while this touch is still the live
+    // user activation. pasteClipboard() then consumes that one read rather than
+    // starting a second.
     clientDebug(
       'selection-release-empty',
       selectionDebugSnapshot({
         madeSelectionThisGesture,
         hadSelectionAtStart,
-        showPasteChip: true
+        directPaste: true
       })
     );
+    hideSelectionCopyChip();
+    beginPasteGestureClipboardRead();
+    void pasteClipboard();
   }
   const { wasScrolling } = finishTouchGesture();
 
@@ -12401,12 +12391,6 @@ async function pasteOrCopyClipboard() {
 async function handleSelectionCopyChipClick(event) {
   event.preventDefault();
   event.stopPropagation();
-  // The chip carries whichever action the long press could offer.
-  if (selectionCopyChip?.dataset.action === 'paste') {
-    hideSelectionCopyChip();
-    await pasteClipboard();
-    return;
-  }
   if (!terminalHasCopyableSelection()) {
     hideSelectionCopyChip();
     return;
@@ -12777,13 +12761,6 @@ selectionCopyChip?.addEventListener(
     // Keep the keyboard from collapsing when a layout lock is active.
     if (terminalInputIsFocused() || holdKeyboardLayoutForSelection) {
       event.preventDefault();
-    }
-    // Paste variant: start the one clipboard read here rather than on click, so
-    // iOS raises its native confirmation as part of this tap instead of after it.
-    // Single-shot, so the click that follows reuses this read rather than adding
-    // a second bubble.
-    if (selectionCopyChip.dataset.action === 'paste') {
-      beginPasteGestureClipboardRead();
     }
   },
   { passive: false }
