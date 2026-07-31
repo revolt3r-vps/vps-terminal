@@ -77,6 +77,7 @@ const quickMenuProfileValue = document.querySelector(
 );
 const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
 const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
+const quickMenuViewButton = document.querySelector('#quick-menu-view');
 const quickMenuFindButton = document.querySelector('#quick-menu-find');
 const quickMenuRenameButton = document.querySelector('#quick-menu-rename');
 const quickMenuReconnectButton = document.querySelector(
@@ -1305,6 +1306,13 @@ function updateTermControlsEnabled() {
     button.title = name;
     button.setAttribute('aria-label', name);
   };
+  if (quickMenuViewButton) {
+    // Names the destination, not the current view: 'Browse files' while the
+    // terminal is up, and back again from Files.
+    quickMenuViewButton.textContent =
+      viewMode === 'files' ? 'Show terminal' : 'Browse files';
+  }
+  describeMenuAction(quickMenuViewButton, true);
   describeMenuAction(
     quickMenuFindButton,
     live,
@@ -12657,6 +12665,11 @@ commandPaletteDialog?.addEventListener('close', () => {
   } catch {
     // A control that vanished while the palette was open is not worth failing on.
   }
+});
+quickMenuViewButton?.addEventListener('click', () => {
+  const next = viewMode === 'files' ? 'term' : 'files';
+  closeQuickMenu();
+  setViewMode(next);
 });
 quickMenuFindButton?.addEventListener('click', () => {
   closeQuickMenu();

@@ -331,7 +331,9 @@ header.collapsed #view-mode {
 @media (orientation: portrait) and (pointer: coarse) {
   body {
     --header-control: 44px;
-    --header-height: 52px;
+    /* The floor: one 44px touch target plus the 1px bottom border. It used to be
+     * 52px to fit the 46px Term|Files switch, which the view swipe replaced. */
+    --header-height: calc(var(--header-control) + 1px);
   }
 
   #view-mode {
@@ -4070,5 +4072,22 @@ footer button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/*
+ * Term|Files switch: gone on touch, where the horizontal view swipe replaces it.
+ * Kept for hover + fine pointers, which have no swipe at all — the command
+ * palette carries "Show Files" there, but a palette entry is a path, not a
+ * discoverable control.
+ *
+ * Last in the file on purpose: the orientation-specific #view-mode rules above
+ * are equally specific, so this has to win on source order.
+ */
+@media (pointer: coarse) {
+  header #view-mode,
+  header.collapsed #view-mode,
+  header:not(.collapsed) #view-mode {
+    display: none;
   }
 }

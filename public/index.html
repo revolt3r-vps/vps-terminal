@@ -662,6 +662,10 @@
         ></div>
       </section>
       <div class="quick-menu-actions">
+        <!-- The Term|Files switch left the header once the view swipe replaced it.
+             On touch the swipe is the primary path; this is the one that does not
+             depend on a gesture landing, and the only one a screen reader has. -->
+        <button id="quick-menu-view" type="button">Browse files</button>
         <button id="quick-menu-find" type="button">Find in scrollback</button>
         <button id="quick-menu-rename" type="button">Rename session</button>
         <button id="quick-menu-reconnect" type="button">Reconnect session</button>
