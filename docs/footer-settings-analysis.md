@@ -33,12 +33,22 @@ The problem is inside the 62px. The bar holds fifteen controls:
 └──────────── fixed, 176px ────────┘ └──────── scrolling sublist, 511px of content ────────┘ └─ fixed 44 ─┘
 ```
 
-At 390px wide, after 5 fixed controls and gaps, the scrolling sublist gets about
-**175px — roughly three chips of the ten**. Seven are off-screen behind a
-horizontal scroll, on the one row the user reaches for most.
+Measured, not estimated: the scrolling sublist gets **131px of 390** for **544px
+of chip content**. That is **2.4 chips visible of ten**. The five fixed 44px
+controls plus their gaps take **254px — 65% of the bar** — for things used
+occasionally, and the chips get 34%.
 
-**Two numbers make the case on their own.** The fixed controls take 220px of 390
-(56%) for things used occasionally. The chips, used constantly, get 45%.
+**A padding audit found 9px of the 62px height was waste** and was removed on
+2026-07-31: `#footer-main` declared `grid-template-rows: auto auto` with a shared
+`gap`, and a row gap applies between an empty row and the next one, so the hidden
+drawer cost 5px of footer height permanently. Vertical padding went 6px to 4px, and
+chip padding 10px to 6px. Footer is now **53px** and portrait terminal **86.6%**.
+Chip padding fell from 40% of the strip to 28%.
+
+**What that audit also established: padding is no longer the lever.** Ten chips at
+`min-width: 44px` cannot total less than 485px including gaps, and they are at
+499px. Further horizontal gain has to come from fewer fixed controls or fewer
+chips, not from spacing.
 
 ---
 

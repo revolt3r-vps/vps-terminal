@@ -66,8 +66,8 @@
   --header-gap: 4px;
   --header-radius: 8px;
   --header-font: 11px;
-  --footer-bottom-padding: max(6px, var(--layout-safe-bottom));
-  --footer-top-padding: 6px;
+  --footer-bottom-padding: max(4px, var(--layout-safe-bottom));
+  --footer-top-padding: 4px;
   /* Measured footer height (JS keeps it live); the fallback assumes one row. */
   --footer-height: calc(
     var(--control-size) + var(--footer-top-padding) +
@@ -2747,7 +2747,12 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: grid;
   grid-template-columns: var(--control-size) minmax(0, 1fr) var(--control-size);
   grid-template-rows: auto auto;
-  gap: var(--control-gap);
+  /* row-gap deliberately 0. Row 1 holds the drawer, which is display:none while
+   * closed — but a row gap applies between an empty row and the next one anyway,
+   * so `gap` here cost 5px of footer height permanently. The drawer carries its
+   * own bottom margin instead, which costs nothing while it is hidden. */
+  row-gap: 0;
+  column-gap: var(--control-gap);
   align-items: center;
   min-width: 0;
   width: 100%;
@@ -2787,6 +2792,9 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: flex;
   flex-wrap: nowrap;
   gap: var(--control-gap);
+  /* Stands in for #footer-main's row-gap, which is 0 so the closed drawer costs
+   * nothing. Hidden means display:none, so this margin does not apply either. */
+  margin-bottom: var(--control-gap);
   min-height: var(--control-size);
   max-width: 100%;
   overflow-x: auto;
@@ -2989,7 +2997,9 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   flex: 0 0 auto;
   min-width: var(--control-size);
   min-height: var(--control-size);
-  padding: 0 10px;
+  /* 6px, not 10px. min-width keeps the 44px touch target, so this narrows only
+   * the chips whose label is already wider than the target. */
+  padding: 0 6px;
   border-color: var(--control-border);
   font-size: var(--control-font);
   font-weight: 700;
