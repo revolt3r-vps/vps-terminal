@@ -9648,6 +9648,31 @@ function viewSwipeShouldClaim(state) {
   return !state.nearEdge;
 }
 
+/**
+ * Should the terminal's scroll lock be held off for one more frame?
+ *
+ * The terminal locks to vertical scrolling at 5px of travel in any direction,
+ * and a swipe needs 22px of horizontal travel. Left alone, the lock wins that
+ * race on the first touchmove of anything but a fast flick, latches
+ * `nativeTouchScrolling`, and then refuses the swipe for the rest of the
+ * gesture — which is exactly why swiping out of the terminal felt hard while
+ * swiping out of Files did not.
+ *
+ * So while the movement leans horizontal but has not yet earned the swipe, the
+ * lock waits. Vertical scrolling keeps its 5px responsiveness, because vertical
+ * intent means |dy| >= |dx| and that falls straight through.
+ */
+function viewSwipeShouldDeferScroll(state) {
+  if (state.scrolling || state.selecting) {
+    return false;
+  }
+  const absX = Math.abs(state.dx);
+  if (absX <= Math.abs(state.dy)) {
+    return false;
+  }
+  return absX < viewSwipeActivationDistance;
+}
+
 /** Travel needed to commit, given a viewport width. */
 function viewSwipeCommitDistance(viewportWidth) {
   return Math.max(
@@ -9969,6 +9994,19 @@ function handleTerminalTouchMove(event) {
     clearNativeSelectionLongPressTimer();
     beginViewSwipe(viewMode);
     updateViewSwipe(dx);
+    return true;
+  }
+  // Hold the scroll lock while the gesture still leans horizontal but has not
+  // travelled far enough to be a swipe. Without this the 5px lock wins the race
+  // on the first touchmove and the swipe needs a flick to land.
+  if (
+    viewSwipeShouldDeferScroll({
+      dx,
+      dy,
+      scrolling: nativeTouchScrolling,
+      selecting: xtermTouchSelecting
+    })
+  ) {
     return true;
   }
   if (distanceFromStart >= nativeScrollActivationDistance) {
@@ -10318,6 +10356,16 @@ function installTouchScrolling() {
           touchMoved = true;
           beginViewSwipe(viewMode);
           updateViewSwipe(swipeDx);
+          return;
+        }
+        if (
+          viewSwipeShouldDeferScroll({
+            dx: swipeDx,
+            dy: swipeDy,
+            scrolling: touchMoved,
+            selecting: Boolean(terminal?.hasSelection?.())
+          })
+        ) {
           return;
         }
       }
