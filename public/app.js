@@ -11858,12 +11858,19 @@ function pasteGestureReadIsStale() {
 async function parseClipboardItems(items) {
   let text = '';
   let imageBlob = null;
+  let itemCount = 0;
+  // getType() rejects when the activation that authorised read() has expired,
+  // which is exactly what happens to a prefetch started on pointerdown. Swallowing
+  // that silently made a screenshot look like an empty clipboard, so it is now
+  // reported and the caller can retry the one case that deserves it.
+  let extractionFailed = false;
   for (const item of items) {
+    itemCount += 1;
     if (!text && item.types.includes('text/plain')) {
       try {
         text = await (await item.getType('text/plain')).text();
       } catch {
-        // Ignore per-type failures.
+        extractionFailed = true;
       }
     }
     if (!imageBlob) {
@@ -11873,13 +11880,20 @@ async function parseClipboardItems(items) {
             imageBlob = await item.getType(type);
             break;
           } catch {
-            // Ignore per-type failures.
+            extractionFailed = true;
           }
         }
       }
     }
   }
-  return { text: text || '', imageBlob, error: null, apiOk: true };
+  return {
+    text: text || '',
+    imageBlob,
+    error: null,
+    apiOk: true,
+    itemCount,
+    extractionFailed
+  };
 }
 
 /**
@@ -11930,26 +11944,42 @@ function beginPasteGestureClipboardRead() {
 }
 
 async function readClipboardPayloadBestEffort() {
-  // Exactly one clipboard access per call. Each one costs the user a native
-  // Paste confirmation on iOS, so a fallback chain is a bubble chain.
+  // One clipboard access per call, plus a single retry in the one case that
+  // needs it: something was on the clipboard and this attempt could not extract
+  // it. Each access costs a native Paste confirmation on iOS, so an unconditional
+  // fallback chain is a bubble chain — but a screenshot the prefetch could not
+  // reach has to be reachable, and that retry is the only way to it.
+  let prefetchFailed = false;
   if (pasteGesturePayload) {
     try {
       const result = await pasteGesturePayload;
-      // Returned even when empty. An empty clipboard is an answer, and asking
-      // again to hear it twice is what produced the second bubble.
-      return {
-        text: result.text || '',
-        imageBlob: result.imageBlob || null,
-        error: result.error || null,
-        apiOk: Boolean(result.apiOk)
-      };
+      if (result.text || result.imageBlob) {
+        return {
+          text: result.text || '',
+          imageBlob: result.imageBlob || null,
+          error: result.error || null,
+          apiOk: Boolean(result.apiOk)
+        };
+      }
+      // Nothing usable came back. Retry only when the clipboard held something
+      // this attempt could not extract — a rejected read, or items whose
+      // getType() failed because the pointerdown activation had expired. That is
+      // the screenshot case. A read that succeeded and found nothing is an empty
+      // clipboard, and asking again just to hear it twice is what doubled the
+      // native bubble.
+      prefetchFailed =
+        !result.apiOk || result.extractionFailed || result.itemCount > 0;
+      if (!prefetchFailed) {
+        return {
+          text: '',
+          imageBlob: null,
+          error: result.error || null,
+          apiOk: Boolean(result.apiOk)
+        };
+      }
     } catch (err) {
-      return {
-        text: '',
-        imageBlob: null,
-        error: String(err?.message || err).slice(0, 80),
-        apiOk: false
-      };
+      prefetchFailed = true;
+      clientDebug('paste-clipboard-read', { reason: 'prefetch-threw' });
     } finally {
       pasteGesturePayload = null;
     }
