@@ -3866,7 +3866,14 @@ function clearTerminalSelection() {
   if (holdKeyboardLayoutForSelection) {
     holdKeyboardLayoutForSelection = false;
     recordKeyboardTransition('selection-cleared');
-    if (!terminalInputIsFocused()) {
+    // terminalFocusedBeforeSelection means the keyboard was up before the long
+    // press took it away and is about to be put back. Releasing here would run
+    // clearLockedAppGeometry({force:true}), grow the layout to full height, and
+    // then the returning keyboard would freeze it short again — the whole UI
+    // drops and rises within a frame or two. Holding the frozen height across
+    // the restore means nothing moves, because the keyboard returns to the same
+    // height it left.
+    if (!terminalInputIsFocused() && !terminalFocusedBeforeSelection) {
       releaseKeyboardLayoutLock();
     }
   }
@@ -9707,6 +9714,9 @@ function scheduleSelectionViewportRelease() {
 
 function startNativeTouchGesture(touch) {
   clearNativeSelectionLongPressTimer();
+  // A gesture that ended without restoring focus must not leave the frozen
+  // layout held for the rest of the page's life — that is the T19 failure mode.
+  terminalFocusedBeforeSelection = false;
   nativeTouchScrolling = false;
   xtermTouchSelecting = false;
   xtermSelectionAnchor = null;
