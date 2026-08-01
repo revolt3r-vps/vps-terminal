@@ -905,6 +905,10 @@ let connectionState = 'idle';
 let nativeTouchScrolling = false;
 let nativeTouchStartX = null;
 // Gesture origin for the non-Apple terminal path, which tracked only Y.
+// The long press blurs the terminal so the keyboard is out of the way while a
+// selection is dragged. Nothing used to put it back, so copying or pasting from
+// a long press closed the keyboard and left it closed.
+let terminalFocusedBeforeSelection = false;
 let genericTouchStartX = null;
 let genericTouchStartY = null;
 let nativeTouchStartY = null;
@@ -4654,6 +4658,10 @@ function beginLongPressTerminalSelection(clientX, clientY) {
     recordKeyboardTransition('selection-long-press-hold');
   }
   if (terminalInputIsFocused()) {
+    // Recorded before the blur, and consumed once the gesture resolves into a
+    // copy or a paste. Only a keyboard that was up gets put back — this must not
+    // open one the user never had.
+    terminalFocusedBeforeSelection = true;
     terminal.blur();
   }
   beginXtermTouchSelection(clientX, clientY);
@@ -10213,6 +10221,7 @@ function completeTerminalTouchEnd(event) {
       })
     );
     hideSelectionCopyChip();
+    restoreTerminalFocusAfterSelection();
     beginPasteGestureClipboardRead();
     void pasteClipboard();
   }
@@ -12388,6 +12397,21 @@ async function pasteOrCopyClipboard() {
   openPasteHistoryPopover();
 }
 
+/**
+ * Put the keyboard back after a long press that took it away.
+ *
+ * Must be called from inside a touchend or click handler: iOS only reopens the
+ * soft keyboard for a focus() that happens during a user gesture, and ignores
+ * one that does not.
+ */
+function restoreTerminalFocusAfterSelection() {
+  if (!terminalFocusedBeforeSelection) {
+    return;
+  }
+  terminalFocusedBeforeSelection = false;
+  terminal?.focus();
+}
+
 async function handleSelectionCopyChipClick(event) {
   event.preventDefault();
   event.stopPropagation();
@@ -12396,6 +12420,7 @@ async function handleSelectionCopyChipClick(event) {
     return;
   }
   await copyTerminalSelection({ clearAfter: true, source: 'chip' });
+  restoreTerminalFocusAfterSelection();
 }
 
 findPrevButton?.addEventListener('click', () => {
