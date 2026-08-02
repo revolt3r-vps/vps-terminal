@@ -285,7 +285,12 @@ const nativeDeleteWordEscalationMilliseconds = 1200;
 const nativeDeleteWordIntervalMilliseconds = 145;
 // A pause longer than this starts a new run. Above any soft-keyboard auto-repeat
 // interval, below the cadence of deliberate tapping.
-const nativeDeleteRunGapMilliseconds = 400;
+const nativeDeleteRunGapMilliseconds = 500;
+// A clipboard read that took at least this long was gated by the OS Paste bubble:
+// it cannot resolve until a finger has tapped it. An ungated read resolves in
+// single-digit milliseconds, so the two are far apart and the exact value is not
+// delicate.
+const nativePastePromptMilliseconds = 250;
 // Repeats in one run before it counts as held. Reached in well under a second at
 // any repeat rate, and not reachable by tapping, since a tap gap breaks the run.
 const nativeDeleteRunEscalateAfter = 5;
@@ -947,6 +952,9 @@ let scrollPixelAccumulator = 0;
 let nativeDeleteKeyDownAt = Number.NEGATIVE_INFINITY;
 // The current run of soft-keyboard deletes, used to tell a held key from taps.
 let nativeDeleteRunAt = null;
+// Never reset. Only for the recorded gap, so a dump shows the true cadence even
+// when the run itself has just restarted.
+let nativeDeleteSeenAt = null;
 let nativeDeleteRunLength = 0;
 let nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
 let nativeDeleteBeforeInputAt = Number.NEGATIVE_INFINITY;
@@ -3906,6 +3914,9 @@ function hideSelectionCopyChip() {
   if (!selectionCopyChip) {
     return;
   }
+  // Dismissing the chip discards what was read. Holding clipboard contents past
+  // the gesture that read them is not something to do quietly.
+  pendingLongPressPaste = null;
   selectionCopyChip.hidden = true;
 }
 
@@ -3962,6 +3973,43 @@ function terminalChipBounds() {
     right: Math.min(window.innerWidth, rect.right),
     bottom: Math.min(window.innerHeight, rect.bottom)
   };
+}
+
+/**
+ * The floating chip after a long press: Copy when there was a selection, Paste
+ * when the clipboard was read without the OS asking. Exactly one of the two ever
+ * appears, and never alongside the OS bubble.
+ */
+function showTerminalActionChip(action, clientX, clientY) {
+  if (!selectionCopyChip) {
+    return;
+  }
+  const paste = action === 'paste';
+  selectionCopyChip.dataset.action = paste ? 'paste' : 'copy';
+  selectionCopyChip.textContent = paste ? 'Paste' : 'Copy';
+  selectionCopyChip.setAttribute(
+    'aria-label',
+    paste ? 'Paste from the clipboard' : 'Copy selection'
+  );
+  selectionCopyChip.style.left = '0px';
+  selectionCopyChip.style.top = '0px';
+  selectionCopyChip.hidden = false;
+  const placed = placeTerminalChip(
+    {
+      x: clientX || lastTouchClientX || window.innerWidth / 2,
+      y: clientY || lastTouchClientY || window.innerHeight / 2
+    },
+    {
+      width: selectionCopyChip.offsetWidth,
+      height: selectionCopyChip.offsetHeight
+    },
+    terminalChipBounds()
+  );
+  selectionCopyChip.classList.toggle('chip-below', placed.flipped);
+  selectionCopyChip.style.left = `${placed.left}px`;
+  selectionCopyChip.style.top = `${placed.top}px`;
+  // Only the Copy chip points at the footer button, which doubles as Copy.
+  pasteButton.classList.toggle('copy-needs-attention', !paste);
 }
 
 /** The Copy chip after a long press that selected something. */
@@ -4809,12 +4857,16 @@ function scheduleNativeTerminalInputPrime() {
   }, 0);
 }
 
-function stopNativeDeleteRepeat() {
-  // The key is up, so the next delete starts a fresh run rather than inheriting
-  // this one and escalating immediately.
-  nativeDeleteRunAt = null;
-  nativeDeleteRunLength = 0;
-  nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
+function stopNativeDeleteRepeat(options = {}) {
+  // iPhone Safari sends a keydown and a keyup for every repeat of a held key, so
+  // clearing the run on keyup reset it before every single delete: a dump showed
+  // 54 deletes in a row, all run=1, never reaching the escalation. Callers that
+  // are a real end of interaction — blur, disconnect, composition — still reset.
+  if (!options.keepRun) {
+    nativeDeleteRunAt = null;
+    nativeDeleteRunLength = 0;
+    nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
+  }
   clearTimeout(nativeDeleteRepeatDelayTimer);
   // A timeout now, not an interval: the repeat reschedules itself so the cadence
   // can change when it escalates to words.
@@ -4840,9 +4892,19 @@ function stopNativeDeleteRepeat() {
  * a row is a hold at any speed, and hand-tapping does not reach five before a gap
  * breaks the run.
  */
-function nativeDeleteRunStep(previousAt, runLength, now) {
+function nativeDeleteRunStep(previousAt, runLength, now, isAutoRepeat) {
+  // isAutoRepeat is KeyboardEvent.repeat, which browsers set on the second and
+  // later keydowns of a held key. When it is available it settles the question
+  // outright, and no timing heuristic can beat it.
+  //
+  // The gap is the fallback, for the paths that carry no such flag (beforeinput,
+  // and our own repeat timer). It is deliberately not generous: a device dump
+  // measured deletes arriving about 350ms apart, so the window has to clear that,
+  // but every millisecond above it is a millisecond of fast tapping that starts
+  // to look like a hold.
   const continues =
-    previousAt !== null && now - previousAt <= nativeDeleteRunGapMilliseconds;
+    Boolean(isAutoRepeat) ||
+    (previousAt !== null && now - previousAt <= nativeDeleteRunGapMilliseconds);
   const run = continues ? runLength + 1 : 1;
   return { run, wordMode: run > nativeDeleteRunEscalateAfter };
 }
@@ -4850,13 +4912,13 @@ function nativeDeleteRunStep(previousAt, runLength, now) {
 // ---- End of the pure delete repeat block. ----
 
 function startNativeDeleteRepeat(deleteSequence) {
-  stopNativeDeleteRepeat();
+  stopNativeDeleteRepeat({ keepRun: true });
   // A rescheduling timeout rather than setInterval, because the cadence changes
   // when the repeat escalates from characters to words.
   const tick = () => {
     const now = window.performance.now();
     nativeDeleteKeyDownAt = now;
-    const word = sendNativeDelete(now, 'repeat', deleteSequence);
+    const word = sendNativeDelete(now, 'repeat', deleteSequence, true);
     scheduleNativeTerminalInputPrime();
     nativeDeleteRepeatIntervalTimer = window.setTimeout(
       tick,
@@ -5879,7 +5941,10 @@ function handleNativeTerminalKeyEvent(event) {
   }
   event.preventDefault();
   if (event.type === 'keyup') {
-    stopNativeDeleteRepeat();
+    // Not a release on this keyboard: Safari sends a keydown and a keyup for every
+    // repeat of a held key. The run ends when the deletes stop arriving, which the
+    // gap check decides.
+    stopNativeDeleteRepeat({ keepRun: true });
     return false;
   }
   if (event.type !== 'keydown') {
@@ -5894,7 +5959,12 @@ function handleNativeTerminalKeyEvent(event) {
   }`;
   // Safari repeats the keydown itself, so each one has to feed the run counter or
   // the escalation never sees them.
-  sendNativeDelete(nativeDeleteKeyDownAt, 'keydown', deleteSequence);
+  sendNativeDelete(
+    nativeDeleteKeyDownAt,
+    'keydown',
+    deleteSequence,
+    event.repeat
+  );
   scheduleNativeTerminalInputPrime();
   if (nativeDeleteRepeatDelayTimer === null) {
     startNativeDeleteRepeat(deleteSequence);
@@ -5965,16 +6035,22 @@ function handleHardwareKeyboardBridge(event) {
  *
  * `via` is recorded so a dump names the path instead of leaving it to be guessed.
  */
-function sendNativeDelete(now, via, baseSequence) {
+function sendNativeDelete(now, via, baseSequence, isAutoRepeat) {
   const base = baseSequence || '\u007f';
-  const step = nativeDeleteRunStep(nativeDeleteRunAt, nativeDeleteRunLength, now);
-  const gap = nativeDeleteRunAt === null ? null : Math.round(now - nativeDeleteRunAt);
+  const step = nativeDeleteRunStep(
+    nativeDeleteRunAt,
+    nativeDeleteRunLength,
+    now,
+    isAutoRepeat
+  );
+  const gap = nativeDeleteSeenAt === null ? null : Math.round(now - nativeDeleteSeenAt);
+  nativeDeleteSeenAt = now;
   nativeDeleteRunAt = now;
   nativeDeleteRunLength = step.run;
   // Only a plain Backspace escalates. Alt or Ctrl means a mode was already chosen.
   const word = step.wordMode && base === '\u007f';
   if (!word) {
-    recordKeyboardTransition('delete-char', { via, gap, run: step.run });
+    recordKeyboardTransition('delete-char', { via, gap, run: step.run, rep: isAutoRepeat ? 1 : 0 });
     sendInput(base);
     return false;
   }
@@ -5985,7 +6061,7 @@ function sendNativeDelete(now, via, baseSequence) {
     return true;
   }
   nativeDeleteWordSentAt = now;
-  recordKeyboardTransition('delete-word', { via, gap, run: step.run });
+  recordKeyboardTransition('delete-word', { via, gap, run: step.run, rep: isAutoRepeat ? 1 : 0 });
   sendInput(nativeDeleteWordSequence);
   return true;
 }
@@ -10440,7 +10516,10 @@ function completeTerminalTouchEnd(event) {
     hideSelectionCopyChip();
     restoreTerminalFocusAfterSelection();
     beginPasteGestureClipboardRead();
-    void pasteClipboard();
+    void pasteFromLongPress(
+      touch?.clientX ?? lastTouchClientX,
+      touch?.clientY ?? lastTouchClientY
+    );
   }
   const { wasScrolling } = finishTouchGesture();
 
@@ -12058,6 +12137,9 @@ let appClipboardText = '';
 const pasteHistory = createPasteHistory();
 // Prefetch started on pointerdown; may fail — always allow a click retry.
 let pasteGesturePayload = null;
+// A clipboard payload already read during a long press, waiting for the chip tap
+// that confirms it. Held so the tap needs no second read, and so no second bubble.
+let pendingLongPressPaste = null;
 let pasteGestureStartedAt = 0;
 // A prefetch left pending by a gesture that never became a click must not block
 // the next one. On iOS the read stays pending until the native bubble is tapped,
@@ -12354,11 +12436,8 @@ function insertPastedText(text) {
   }
 }
 
-async function pasteClipboard() {
-  if (!terminal || socket?.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  const { text, imageBlob, error, apiOk } = await readClipboardPayloadBestEffort();
+async function applyClipboardPayload(payload) {
+  const { text, imageBlob, error, apiOk } = payload;
   const hasText = typeof text === 'string' && text.length > 0;
 
   // Screenshots are often image-only. Prefer image when there is no text so we
@@ -12366,30 +12445,27 @@ async function pasteClipboard() {
   if (imageBlob && !hasText) {
     const ok = await pasteImageBlob(imageBlob);
     if (ok) {
-      return;
+      return true;
     }
   }
 
   if (hasText) {
     insertPastedText(text);
-    return;
+    return true;
   }
 
-  // Both present (rare): still prefer image for screenshot+empty-metadata cases
-  // already handled; if we had text we returned above.
   if (imageBlob) {
     const ok = await pasteImageBlob(imageBlob);
     if (ok) {
-      return;
+      return true;
     }
   }
 
   // Last resort: text we copied earlier in this app — but only when the OS
   // clipboard could not be read at all. A successful read that returned nothing
-  // means the clipboard holds something this browser will not hand over (a
-  // desktop screenshot, when `read()` is unavailable or refused), and inserting
-  // unrelated older text into a live shell prompt is worse than pasting
-  // nothing.
+  // means the clipboard holds something this browser will not hand over, and
+  // inserting unrelated older text into a live shell prompt is worse than
+  // pasting nothing.
   if (appClipboardText && error) {
     insertPastedText(appClipboardText);
     clientDebug('paste-text', {
@@ -12397,17 +12473,59 @@ async function pasteClipboard() {
       length: appClipboardText.length,
       apiOk: Boolean(apiOk)
     });
-    return;
+    return true;
   }
 
   if (error) {
     setStatus('Clipboard unavailable');
-    clientDebug('paste-text-error', {
-      reason: 'clipboard-read-failed'
-    });
-    return;
+    clientDebug('paste-text-error', { reason: 'clipboard-read-failed' });
+    return false;
   }
   setStatus('Clipboard empty');
+  return false;
+}
+
+async function pasteClipboard() {
+  if (!terminal || socket?.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  await applyClipboardPayload(await readClipboardPayloadBestEffort());
+}
+
+/**
+ * Paste from a long press, with exactly one confirmation — never two, never none.
+ *
+ * Reading the clipboard raises iOS's own Paste bubble, but not always: Safari
+ * skips it when it has recently granted, which is why a long press sometimes
+ * pasted with nothing asked at all. Whether it prompted is not reported anywhere,
+ * so it is inferred from how long the read took. A prompt cannot resolve until a
+ * finger has tapped it, which is hundreds of milliseconds; an ungated read
+ * resolves in single digits.
+ *
+ * Prompted, the OS bubble was the confirmation and the text goes straight in.
+ * Not prompted, nothing has asked yet, so our own chip does — over the already
+ * read payload, so tapping it needs no second read and cannot raise a second
+ * bubble.
+ */
+async function pasteFromLongPress(clientX, clientY) {
+  if (!terminal || socket?.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  const startedAt = window.performance.now();
+  const payload = await readClipboardPayloadBestEffort();
+  const elapsed = Math.round(window.performance.now() - startedAt);
+  const prompted = elapsed >= nativePastePromptMilliseconds;
+  const empty =
+    !payload.imageBlob && !(typeof payload.text === 'string' && payload.text.length > 0);
+  clientDebug('paste-long-press', { elapsed, prompted, empty });
+  if (prompted || empty || payload.error) {
+    // Either the OS already asked, or there is nothing to offer and the status
+    // line says so. Offering a chip that pastes nothing would be worse.
+    await applyClipboardPayload(payload);
+    return;
+  }
+  pendingLongPressPaste = payload;
+  showTerminalActionChip('paste', clientX, clientY);
 }
 
 // ---- Paste history popover ----
@@ -12632,6 +12750,18 @@ function restoreTerminalFocusAfterSelection() {
 async function handleSelectionCopyChipClick(event) {
   event.preventDefault();
   event.stopPropagation();
+  if (selectionCopyChip?.dataset.action === 'paste') {
+    const payload = pendingLongPressPaste;
+    pendingLongPressPaste = null;
+    hideSelectionCopyChip();
+    restoreTerminalFocusAfterSelection();
+    if (payload) {
+      // Already read during the long press. Reading again here would raise a
+      // second bubble, which is the thing this is built to prevent.
+      await applyClipboardPayload(payload);
+    }
+    return;
+  }
   if (!terminalHasCopyableSelection()) {
     hideSelectionCopyChip();
     return;
