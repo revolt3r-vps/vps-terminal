@@ -283,10 +283,12 @@ const nativeDeleteWordEscalationMilliseconds = 1200;
 // Slower than the character cadence: a word is a bigger step, and each one is a
 // round trip to tmux and back.
 const nativeDeleteWordIntervalMilliseconds = 145;
-// The soft keyboard repeats without a keydown to hold, so a held key is detected
-// by rate: iOS auto-repeat is ~100ms, hand-tapping is far slower.
-const nativeDeleteBurstWindowMilliseconds = 900;
-const nativeDeleteBurstThreshold = 7;
+// A pause longer than this starts a new run. Above any soft-keyboard auto-repeat
+// interval, below the cadence of deliberate tapping.
+const nativeDeleteRunGapMilliseconds = 400;
+// Repeats in one run before it counts as held. Reached in well under a second at
+// any repeat rate, and not reachable by tapping, since a tap gap breaks the run.
+const nativeDeleteRunEscalateAfter = 5;
 const nativeSelectionSettleMilliseconds = 1000;
 const nativeSelectionViewportSettleMilliseconds = 1200;
 const nativeTapMaximumMilliseconds = 350;
@@ -943,8 +945,9 @@ let keyboardDismissPollTimer = null;
 let holdKeyboardLayoutForSelection = false;
 let scrollPixelAccumulator = 0;
 let nativeDeleteKeyDownAt = Number.NEGATIVE_INFINITY;
-// Recent soft-keyboard deletes, used to tell a held key from repeated taps.
-let nativeDeleteTimestamps = [];
+// The current run of soft-keyboard deletes, used to tell a held key from taps.
+let nativeDeleteRunAt = null;
+let nativeDeleteRunLength = 0;
 let nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
 let nativeDeleteBeforeInputAt = Number.NEGATIVE_INFINITY;
 let nativeDeleteRepeatDelayTimer = null;
@@ -4808,8 +4811,9 @@ function scheduleNativeTerminalInputPrime() {
 
 function stopNativeDeleteRepeat() {
   // The key is up, so the next delete starts a fresh run rather than inheriting
-  // this one's rate and escalating immediately.
-  nativeDeleteTimestamps = [];
+  // this one and escalating immediately.
+  nativeDeleteRunAt = null;
+  nativeDeleteRunLength = 0;
   nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
   clearTimeout(nativeDeleteRepeatDelayTimer);
   // A timeout now, not an interval: the repeat reschedules itself so the cadence
@@ -4846,32 +4850,25 @@ function nativeDeleteRepeatStep(baseSequence, heldForMilliseconds) {
   };
 }
 /**
- * Is this run of deletes a held key rather than repeated tapping?
+ * How far into a run of deletes are we, and is it long enough to be a held key?
  *
- * The soft keyboard does not tell us. iOS sends a stream of
- * deleteContentBackward input events with no keydown to hold onto, so elapsed
- * time alone cannot separate a held key from someone jabbing Backspace — and
- * escalating a jab to word deletion would eat far more than was asked for.
+ * The soft keyboard gives nothing to hold onto — no keydown, no keyup we can
+ * rely on — so a run is inferred from the gaps. Anything arriving within
+ * nativeDeleteRunGapMilliseconds of the previous delete continues the run;
+ * a longer pause starts a new one.
  *
- * Rate separates them cleanly. iOS auto-repeat runs at roughly 100ms, so a held
- * key produces about nine deletes in a 900ms window; tapping by hand produces
- * three or four.
+ * This counts deletes rather than measuring their rate. The rate version assumed
+ * iOS repeats at about 100ms and never escalated on Safari, where the observed
+ * repeat is slower — a threshold tuned to a guessed interval fails silently the
+ * moment the interval differs. A count works whatever the rate: five repeats in
+ * a row is a hold at any speed, and hand-tapping does not reach five before a gap
+ * breaks the run.
  */
-function nativeDeleteBurstIsHeld(timestamps, now) {
-  let recent = 0;
-  for (const at of timestamps) {
-    if (now - at <= nativeDeleteBurstWindowMilliseconds) {
-      recent += 1;
-    }
-  }
-  return recent >= nativeDeleteBurstThreshold;
-}
-
-/** Drop timestamps that have aged out of the window. */
-function nativeDeletePruneTimestamps(timestamps, now) {
-  return timestamps.filter(
-    (at) => now - at <= nativeDeleteBurstWindowMilliseconds
-  );
+function nativeDeleteRunStep(previousAt, runLength, now) {
+  const continues =
+    previousAt !== null && now - previousAt <= nativeDeleteRunGapMilliseconds;
+  const run = continues ? runLength + 1 : 1;
+  return { run, wordMode: run > nativeDeleteRunEscalateAfter };
 }
 
 // ---- End of the pure delete repeat block. ----
@@ -5978,9 +5975,15 @@ function handleHardwareKeyboardBridge(event) {
  * escalating there alone changed nothing on the phone.
  */
 function sendNativeDeleteForInput(now) {
-  nativeDeleteTimestamps = nativeDeletePruneTimestamps(nativeDeleteTimestamps, now);
-  nativeDeleteTimestamps.push(now);
-  if (!nativeDeleteBurstIsHeld(nativeDeleteTimestamps, now)) {
+  const step = nativeDeleteRunStep(nativeDeleteRunAt, nativeDeleteRunLength, now);
+  const gap = nativeDeleteRunAt === null ? null : Math.round(now - nativeDeleteRunAt);
+  nativeDeleteRunAt = now;
+  nativeDeleteRunLength = step.run;
+  if (!step.wordMode) {
+    // Recorded so a Settings > Debug dump shows what the device actually sends:
+    // the gap between repeats is the number this behaviour depends on, and it is
+    // not observable from here.
+    recordKeyboardTransition('delete-char', { gap, run: step.run });
     sendInput('\u007f');
     return;
   }
@@ -5991,6 +5994,7 @@ function sendNativeDeleteForInput(now) {
     return;
   }
   nativeDeleteWordSentAt = now;
+  recordKeyboardTransition('delete-word', { gap, run: step.run });
   sendInput(nativeDeleteWordSequence);
 }
 
