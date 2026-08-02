@@ -909,6 +909,8 @@ let nativeTouchStartX = null;
 // selection is dragged. Nothing used to put it back, so copying or pasting from
 // a long press closed the keyboard and left it closed.
 let terminalFocusedBeforeSelection = false;
+// Tracks the keyboard-open animation so the layout is frozen once, at the end.
+let keyboardSettleState = null;
 let genericTouchStartX = null;
 let genericTouchStartY = null;
 let nativeTouchStartY = null;
@@ -4131,6 +4133,10 @@ function selectionDebugSnapshot(extra = {}) {
 // few. Keep a head segment permanently as well as the tail: the beginning of a
 // session is where boot-time faults live, and it is exactly what a plain ring
 // buffer throws away first.
+// How long the reduced viewport must hold one height before the layout is frozen
+// at it, and the deadline after which it is frozen regardless.
+const keyboardSettleMilliseconds = 120;
+const maximumKeyboardSettleWaitMilliseconds = 420;
 const maximumKeyboardTransitions = 150;
 const maximumKeyboardTransitionsHead = 30;
 
@@ -4172,6 +4178,45 @@ function keyboardReleaseBlockers(flags) {
  * so the home-indicator spacer disappeared for that window on every keyboard
  * open — T18, confirmed from an iPhone 18.7 dump.
  */
+/**
+ * Has the reduced viewport stopped moving?
+ *
+ * The keyboard animates in over roughly 300 ms, and keyboardViewportIsReduced()
+ * turns true the moment it has covered 120 px — while it is still rising. Freezing
+ * there captures a half-open height, fit() sets rows for it, and the 320 ms settle
+ * timer then re-captures at the final height and fits again. Two resizes, and the
+ * row-count difference between them is the jump: about three lines on a 390x844
+ * phone.
+ *
+ * The wait is measured in milliseconds, not frames. A frame count cannot tell a
+ * settled keyboard from the gap between two of its own animation steps — rAF runs
+ * every ~16 ms and the resize events are tens of milliseconds apart, so a rising
+ * keyboard holds the same height across consecutive frames and looks settled.
+ *
+ * While waiting, the layout simply stays where it was. That is what a native app
+ * does: content does not reflow until the keyboard has arrived.
+ */
+function keyboardSettleStep(state, height, now) {
+  const waitingSince = state ? state.waitingSince : now;
+  // The deadline is checked on both paths on purpose. A viewport that changes
+  // height on every single sample never takes the unchanged path, so checking the
+  // deadline only there would leave it unfrozen forever — the stuck-layout state
+  // this whole wait is supposed to avoid.
+  const overdue = now - waitingSince >= maximumKeyboardSettleWaitMilliseconds;
+  if (!state || state.height !== height) {
+    if (overdue) {
+      return { settled: true, state: null };
+    }
+    // Moved, or first sample of an open: restart the stability clock, keep the
+    // deadline.
+    return { settled: false, state: { height, stableSince: now, waitingSince } };
+  }
+  if (now - state.stableSince >= keyboardSettleMilliseconds || overdue) {
+    return { settled: true, state: null };
+  }
+  return { settled: false, state };
+}
+
 function keyboardOpenDecision(flags) {
   const selectionLock = Boolean(flags?.selectionLock);
   const layoutLock = Boolean(flags?.layoutLock);
@@ -9216,7 +9261,12 @@ async function ensureTerminal() {
         // visualViewport pans cannot slide the whole page.
         scheduleVisualViewportUpdate();
         window.setTimeout(() => {
-          if (keyboardViewportIsReduced()) {
+          if (keyboardLayoutLock) {
+            // The settle gate in updateVisualViewport() already froze a height
+            // that had stopped moving. Re-capturing here would overwrite it with
+            // whatever this instant happens to be and refit the terminal again.
+            recordKeyboardTransition('focus-settle-already-locked');
+          } else if (keyboardViewportIsReduced()) {
             captureKeyboardLayoutLock();
             scheduleFit();
           } else {
@@ -13304,7 +13354,32 @@ function updateVisualViewport() {
   // Neither terminal focus nor find focus counts on its own — the viewport has
   // to be reduced first, or this freezes the full height (T18).
   if (shouldFreezeKeyboardLayout) {
-    captureKeyboardLayoutLock();
+    const step = keyboardSettleStep(
+      keyboardSettleState,
+      // The same source captureKeyboardLayoutLock() freezes, so the height that
+      // settles is the height that gets frozen.
+      currentVisualViewportGeometry().height,
+      window.performance.now()
+    );
+    keyboardSettleState = step.state;
+    if (step.settled) {
+      captureKeyboardLayoutLock();
+    } else {
+      // Still rising. Look again next frame rather than freezing a height the
+      // keyboard is about to move past, and leave --app-height exactly as it is
+      // meanwhile. Falling through would apply the live viewport height on every
+      // frame of the animation, which refits the terminal repeatedly and is the
+      // jump this is meant to remove. The page still gets pinned, because iOS
+      // will otherwise pan it under the rising keyboard.
+      recordKeyboardTransition('capture-waiting', null, {
+        skipIfFlagsUnchanged: true
+      });
+      scheduleVisualViewportUpdate();
+      window.scrollTo(0, 0);
+      return;
+    }
+  } else if (keyboardLayoutLock || !keyboardOpen) {
+    keyboardSettleState = null;
   }
   const height =
     selectionViewportLock?.height ??
