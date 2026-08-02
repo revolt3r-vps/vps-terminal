@@ -275,6 +275,14 @@ const nativeInputSentinel = '\u200b';
 const nativeDeleteDeduplicationMilliseconds = 250;
 const nativeDeleteRepeatDelayMilliseconds = 400;
 const nativeDeleteRepeatIntervalMilliseconds = 75;
+// Held Backspace escalates from characters to words, the way iOS does. The
+// sequence is the one Alt+Backspace already sends here: ESC DEL, readline's
+// backward-kill-word, which the tty also honours as WERASE.
+const nativeDeleteWordSequence = '\u001b\u007f';
+const nativeDeleteWordEscalationMilliseconds = 1200;
+// Slower than the character cadence: a word is a bigger step, and each one is a
+// round trip to tmux and back.
+const nativeDeleteWordIntervalMilliseconds = 145;
 const nativeSelectionSettleMilliseconds = 1000;
 const nativeSelectionViewportSettleMilliseconds = 1200;
 const nativeTapMaximumMilliseconds = 350;
@@ -4793,20 +4801,59 @@ function scheduleNativeTerminalInputPrime() {
 
 function stopNativeDeleteRepeat() {
   clearTimeout(nativeDeleteRepeatDelayTimer);
-  clearInterval(nativeDeleteRepeatIntervalTimer);
+  // A timeout now, not an interval: the repeat reschedules itself so the cadence
+  // can change when it escalates to words.
+  clearTimeout(nativeDeleteRepeatIntervalTimer);
   nativeDeleteRepeatDelayTimer = null;
   nativeDeleteRepeatIntervalTimer = null;
 }
 
+// ---- Start of the pure delete repeat block. ----
+
+/**
+ * What a held Backspace should send next, and how long to wait after it.
+ *
+ * A terminal deletes one character per keystroke and each one is a round trip to
+ * tmux, so holding the key to clear a long path is slow in a way the native
+ * keyboard is not — iOS escalates to whole words after about a second. This does
+ * the same, switching to ESC DEL, which is readline's backward-kill-word and what
+ * Alt+Backspace already sends here.
+ *
+ * Only a plain Backspace escalates. Alt or Ctrl held means the user already chose
+ * a deletion mode, and changing it under them would be wrong.
+ */
+function nativeDeleteRepeatStep(baseSequence, heldForMilliseconds) {
+  const escalates =
+    baseSequence === '\u007f' &&
+    heldForMilliseconds >= nativeDeleteWordEscalationMilliseconds;
+  return {
+    sequence: escalates ? nativeDeleteWordSequence : baseSequence,
+    delay: escalates
+      ? nativeDeleteWordIntervalMilliseconds
+      : nativeDeleteRepeatIntervalMilliseconds,
+    wordMode: escalates
+  };
+}
+// ---- End of the pure delete repeat block. ----
+
 function startNativeDeleteRepeat(deleteSequence) {
   stopNativeDeleteRepeat();
+  const heldSince = window.performance.now();
+  // A rescheduling timeout rather than setInterval, because the cadence changes
+  // when the repeat escalates from characters to words.
+  const tick = () => {
+    const step = nativeDeleteRepeatStep(
+      deleteSequence,
+      window.performance.now() - heldSince
+    );
+    nativeDeleteKeyDownAt = window.performance.now();
+    sendInput(step.sequence);
+    scheduleNativeTerminalInputPrime();
+    nativeDeleteRepeatIntervalTimer = window.setTimeout(tick, step.delay);
+  };
   nativeDeleteRepeatDelayTimer = setTimeout(() => {
     nativeDeleteRepeatDelayTimer = null;
-    nativeDeleteRepeatIntervalTimer = setInterval(() => {
-      nativeDeleteKeyDownAt = window.performance.now();
-      sendInput(deleteSequence);
-      scheduleNativeTerminalInputPrime();
-    }, nativeDeleteRepeatIntervalMilliseconds);
+    tick();
   }, nativeDeleteRepeatDelayMilliseconds);
 }
 
