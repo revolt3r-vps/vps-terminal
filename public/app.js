@@ -279,7 +279,6 @@ const nativeDeleteRepeatIntervalMilliseconds = 75;
 // sequence is the one Alt+Backspace already sends here: ESC DEL, readline's
 // backward-kill-word, which the tty also honours as WERASE.
 const nativeDeleteWordSequence = '\u001b\u007f';
-const nativeDeleteWordEscalationMilliseconds = 1200;
 // Slower than the character cadence: a word is a bigger step, and each one is a
 // round trip to tmux and back.
 const nativeDeleteWordIntervalMilliseconds = 145;
@@ -291,9 +290,11 @@ const nativeDeleteRunGapMilliseconds = 500;
 // single-digit milliseconds, so the two are far apart and the exact value is not
 // delicate.
 const nativePastePromptMilliseconds = 250;
-// Repeats in one run before it counts as held. Reached in well under a second at
-// any repeat rate, and not reachable by tapping, since a tap gap breaks the run.
-const nativeDeleteRunEscalateAfter = 5;
+// How long a hold deletes characters before accelerating to words. There is no
+// published constant for this; iOS and macOS both sit around two seconds, and
+// matching that is the point — a repeat count instead of a duration escalates
+// sooner on a faster keyboard, which is what made it fire early.
+const nativeDeleteWordEscalationMilliseconds = 2000;
 const nativeSelectionSettleMilliseconds = 1000;
 const nativeSelectionViewportSettleMilliseconds = 1200;
 const nativeTapMaximumMilliseconds = 350;
@@ -952,6 +953,7 @@ let scrollPixelAccumulator = 0;
 let nativeDeleteKeyDownAt = Number.NEGATIVE_INFINITY;
 // The current run of soft-keyboard deletes, used to tell a held key from taps.
 let nativeDeleteRunAt = null;
+let nativeDeleteRunStartedAt = null;
 // Never reset. Only for the recorded gap, so a dump shows the true cadence even
 // when the run itself has just restarted.
 let nativeDeleteSeenAt = null;
@@ -4864,6 +4866,7 @@ function stopNativeDeleteRepeat(options = {}) {
   // are a real end of interaction — blur, disconnect, composition — still reset.
   if (!options.keepRun) {
     nativeDeleteRunAt = null;
+    nativeDeleteRunStartedAt = null;
     nativeDeleteRunLength = 0;
     nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
   }
@@ -4892,21 +4895,28 @@ function stopNativeDeleteRepeat(options = {}) {
  * a row is a hold at any speed, and hand-tapping does not reach five before a gap
  * breaks the run.
  */
-function nativeDeleteRunStep(previousAt, runLength, now, isAutoRepeat) {
-  // isAutoRepeat is KeyboardEvent.repeat, which browsers set on the second and
-  // later keydowns of a held key. When it is available it settles the question
-  // outright, and no timing heuristic can beat it.
-  //
-  // The gap is the fallback, for the paths that carry no such flag (beforeinput,
-  // and our own repeat timer). It is deliberately not generous: a device dump
-  // measured deletes arriving about 350ms apart, so the window has to clear that,
-  // but every millisecond above it is a millisecond of fast tapping that starts
-  // to look like a hold.
+function nativeDeleteRunStep(previousAt, runLength, runStartedAt, now, isAutoRepeat) {
+  // isAutoRepeat is KeyboardEvent.repeat, set on the second and later keydowns of
+  // a held key. Where a browser provides it, it settles whether this is a hold and
+  // no timing heuristic can do better. The gap is the fallback for paths that
+  // carry no flag; a device dump measured deletes about 350ms apart, so the window
+  // has to clear that.
   const continues =
     Boolean(isAutoRepeat) ||
     (previousAt !== null && now - previousAt <= nativeDeleteRunGapMilliseconds);
   const run = continues ? runLength + 1 : 1;
-  return { run, wordMode: run > nativeDeleteRunEscalateAfter };
+  const startedAt = continues && runStartedAt !== null ? runStartedAt : now;
+  // Time, not repeat count. A count escalates sooner the faster the keyboard
+  // repeats, which is why this fired early; iOS and macOS both delete characters
+  // for about two seconds before accelerating to words, whatever the rate.
+  const heldFor = now - startedAt;
+  return {
+    run,
+    startedAt,
+    heldFor,
+    wordMode:
+      run > 1 && heldFor >= nativeDeleteWordEscalationMilliseconds
+  };
 }
 
 // ---- End of the pure delete repeat block. ----
@@ -6040,17 +6050,19 @@ function sendNativeDelete(now, via, baseSequence, isAutoRepeat) {
   const step = nativeDeleteRunStep(
     nativeDeleteRunAt,
     nativeDeleteRunLength,
+    nativeDeleteRunStartedAt,
     now,
     isAutoRepeat
   );
   const gap = nativeDeleteSeenAt === null ? null : Math.round(now - nativeDeleteSeenAt);
   nativeDeleteSeenAt = now;
   nativeDeleteRunAt = now;
+  nativeDeleteRunStartedAt = step.startedAt;
   nativeDeleteRunLength = step.run;
   // Only a plain Backspace escalates. Alt or Ctrl means a mode was already chosen.
   const word = step.wordMode && base === '\u007f';
   if (!word) {
-    recordKeyboardTransition('delete-char', { via, gap, run: step.run, rep: isAutoRepeat ? 1 : 0 });
+    recordKeyboardTransition('delete-char', { via, gap, run: step.run, held: Math.round(step.heldFor), rep: isAutoRepeat ? 1 : 0 });
     sendInput(base);
     return false;
   }
@@ -6061,7 +6073,7 @@ function sendNativeDelete(now, via, baseSequence, isAutoRepeat) {
     return true;
   }
   nativeDeleteWordSentAt = now;
-  recordKeyboardTransition('delete-word', { via, gap, run: step.run, rep: isAutoRepeat ? 1 : 0 });
+  recordKeyboardTransition('delete-word', { via, gap, run: step.run, held: Math.round(step.heldFor), rep: isAutoRepeat ? 1 : 0 });
   sendInput(nativeDeleteWordSequence);
   return true;
 }
@@ -12511,7 +12523,13 @@ async function pasteFromLongPress(clientX, clientY) {
   if (!terminal || socket?.readyState !== WebSocket.OPEN) {
     return;
   }
-  const startedAt = window.performance.now();
+  // pasteGestureStartedAt is when the read was issued, which may be earlier than
+  // this call: beginPasteGestureClipboardRead() reuses a read still in flight.
+  // Measuring from the await instead made a prompted read look instant and put our
+  // chip on top of the OS bubble — the one combination that must never happen.
+  const startedAt = pasteGesturePayload
+    ? pasteGestureStartedAt
+    : window.performance.now();
   const payload = await readClipboardPayloadBestEffort();
   const elapsed = Math.round(window.performance.now() - startedAt);
   const prompted = elapsed >= nativePastePromptMilliseconds;
