@@ -295,6 +295,10 @@ const nativePastePromptMilliseconds = 250;
 // iOS raises its selection handles just after touchend, so output waits a moment
 // past the release rather than resuming the instant the finger lifts.
 const nativeSelectionFlushDelayMilliseconds = 400;
+// Shorter than iOS's own long-press threshold, so focus is gone before it decides
+// what the gesture is and the same press can become a selection.
+const nativeSelectionFocusReleaseMilliseconds = 300;
+const nativeSelectionPressMoveTolerance = 10;
 // How long a hold deletes characters before accelerating to words. There is no
 // published constant for this; iOS and macOS both sit around two seconds, and
 // matching that is the point — a repeat count instead of a duration escalates
@@ -10313,9 +10317,78 @@ function installNativeSelectionOutputPause() {
       flushNativeSelectionOutput();
     }, nativeSelectionFlushDelayMilliseconds);
   };
-  terminalElement.addEventListener('touchstart', hold, { passive: true });
-  terminalElement.addEventListener('touchend', release, { passive: true });
-  terminalElement.addEventListener('touchcancel', release, { passive: true });
+  // iOS scopes selection to the focused editable element, and while the keyboard
+  // is up that is xterm's hidden helper textarea — so a long press on the rows
+  // does nothing at all. Letting go of that focus hands selection back to the
+  // page. It costs the keyboard, which is what the custom implementation did too:
+  // beginLongPressTerminalSelection() blurred on purpose, so the keyboard was out
+  // of the way of the text being selected.
+  //
+  // Released before iOS decides the gesture is a long press, so the same press
+  // can become a selection rather than needing a second one.
+  let pressTimer = null;
+  let pressX = 0;
+  let pressY = 0;
+  const cancelPress = () => {
+    window.clearTimeout(pressTimer);
+    pressTimer = null;
+  };
+  terminalElement.addEventListener(
+    'touchstart',
+    (event) => {
+      hold();
+      const touch = event.touches[0];
+      if (!touch || event.touches.length !== 1) {
+        cancelPress();
+        return;
+      }
+      pressX = touch.clientX;
+      pressY = touch.clientY;
+      cancelPress();
+      pressTimer = window.setTimeout(() => {
+        pressTimer = null;
+        if (!terminalInputIsFocused()) {
+          return;
+        }
+        recordKeyboardTransition('native-selection-focus-release');
+        terminal?.blur();
+      }, nativeSelectionFocusReleaseMilliseconds);
+    },
+    { passive: true }
+  );
+  terminalElement.addEventListener(
+    'touchmove',
+    (event) => {
+      const touch = event.touches[0];
+      if (!touch || !pressTimer) {
+        return;
+      }
+      // A moving finger is a scroll, not a press. Keep the keyboard.
+      if (
+        Math.hypot(touch.clientX - pressX, touch.clientY - pressY) >
+        nativeSelectionPressMoveTolerance
+      ) {
+        cancelPress();
+      }
+    },
+    { passive: true }
+  );
+  terminalElement.addEventListener(
+    'touchend',
+    () => {
+      cancelPress();
+      release();
+    },
+    { passive: true }
+  );
+  terminalElement.addEventListener(
+    'touchcancel',
+    () => {
+      cancelPress();
+      release();
+    },
+    { passive: true }
+  );
   // A selection that is still up keeps the terminal still; losing it releases.
   document.addEventListener(
     'selectionchange',
