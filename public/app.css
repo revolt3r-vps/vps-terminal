@@ -4218,3 +4218,18 @@ html.native-selection-experiment #terminal .xterm-rows,
 html.native-selection-experiment #terminal .xterm-rows * {
   pointer-events: auto !important;
 }
+
+/* The scrollable element in the DOM renderer is .xterm-viewport, not
+ * .xterm-scrollable-element, and touch-action is not inherited — so handing the
+ * page back is not enough on its own, the viewport has to be told too. */
+html.native-selection-experiment #terminal .xterm-viewport {
+  touch-action: pan-y !important;
+  -webkit-overflow-scrolling: touch;
+  overflow-y: scroll !important;
+}
+
+html.native-selection-experiment #terminal .xterm,
+html.native-selection-experiment #terminal .xterm-screen,
+html.native-selection-experiment #terminal .xterm-rows {
+  touch-action: auto !important;
+}

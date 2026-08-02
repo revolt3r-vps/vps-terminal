@@ -10300,6 +10300,23 @@ function probeNativeSelectionTarget(x, y) {
       ? document.caretRangeFromPoint(x, y)
       : null;
     const rowsStyle = rows ? window.getComputedStyle(rows) : null;
+    // touch-action is not inherited, so every element in the chain has to be
+    // checked separately — one 'none' anywhere under the finger both blocks
+    // native scrolling and can stop Safari offering its selection UI.
+    const chain = ['body', 'main', '#terminal', '.xterm', '.xterm-viewport', '.xterm-screen']
+      .map((selector) => {
+        const node =
+          selector === 'body' ? document.body : document.querySelector(
+            selector.startsWith('.') ? '#terminal ' + selector : selector
+          );
+        if (!node) {
+          return selector + ':-';
+        }
+        return selector.replace('#terminal', 'term').replace('.xterm-', '') +
+          ':' + window.getComputedStyle(node).touchAction;
+      })
+      .join(' ');
+    const viewport = document.querySelector('#terminal .xterm-viewport');
     return {
       hit: element ? element.tagName.toLowerCase() : 'none',
       inRows: rows && element ? (rows.contains(element) ? 1 : 0) : 0,
@@ -10307,7 +10324,14 @@ function probeNativeSelectionTarget(x, y) {
       rowsChars: rows ? (rows.textContent || '').trim().length : 0,
       caret: range ? (range.startContainer.nodeType === 3 ? 'text' : 'element') : 'none',
       pe: rowsStyle ? rowsStyle.pointerEvents : '?',
-      us: rowsStyle ? rowsStyle.webkitUserSelect || rowsStyle.userSelect : '?'
+      us: rowsStyle ? rowsStyle.webkitUserSelect || rowsStyle.userSelect : '?',
+      ta: chain,
+      // Can the viewport scroll at all? scrollable is scrollHeight - clientHeight.
+      vp: viewport
+        ? window.getComputedStyle(viewport).overflowY +
+          '/' +
+          Math.max(0, viewport.scrollHeight - viewport.clientHeight)
+        : 'none'
     };
   } catch (error) {
     return { probeError: String(error && error.message).slice(0, 40) };
