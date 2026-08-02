@@ -283,6 +283,10 @@ const nativeDeleteWordEscalationMilliseconds = 1200;
 // Slower than the character cadence: a word is a bigger step, and each one is a
 // round trip to tmux and back.
 const nativeDeleteWordIntervalMilliseconds = 145;
+// The soft keyboard repeats without a keydown to hold, so a held key is detected
+// by rate: iOS auto-repeat is ~100ms, hand-tapping is far slower.
+const nativeDeleteBurstWindowMilliseconds = 900;
+const nativeDeleteBurstThreshold = 7;
 const nativeSelectionSettleMilliseconds = 1000;
 const nativeSelectionViewportSettleMilliseconds = 1200;
 const nativeTapMaximumMilliseconds = 350;
@@ -939,6 +943,9 @@ let keyboardDismissPollTimer = null;
 let holdKeyboardLayoutForSelection = false;
 let scrollPixelAccumulator = 0;
 let nativeDeleteKeyDownAt = Number.NEGATIVE_INFINITY;
+// Recent soft-keyboard deletes, used to tell a held key from repeated taps.
+let nativeDeleteTimestamps = [];
+let nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
 let nativeDeleteBeforeInputAt = Number.NEGATIVE_INFINITY;
 let nativeDeleteRepeatDelayTimer = null;
 let nativeDeleteRepeatIntervalTimer = null;
@@ -4800,6 +4807,10 @@ function scheduleNativeTerminalInputPrime() {
 }
 
 function stopNativeDeleteRepeat() {
+  // The key is up, so the next delete starts a fresh run rather than inheriting
+  // this one's rate and escalating immediately.
+  nativeDeleteTimestamps = [];
+  nativeDeleteWordSentAt = Number.NEGATIVE_INFINITY;
   clearTimeout(nativeDeleteRepeatDelayTimer);
   // A timeout now, not an interval: the repeat reschedules itself so the cadence
   // can change when it escalates to words.
@@ -4834,6 +4845,35 @@ function nativeDeleteRepeatStep(baseSequence, heldForMilliseconds) {
     wordMode: escalates
   };
 }
+/**
+ * Is this run of deletes a held key rather than repeated tapping?
+ *
+ * The soft keyboard does not tell us. iOS sends a stream of
+ * deleteContentBackward input events with no keydown to hold onto, so elapsed
+ * time alone cannot separate a held key from someone jabbing Backspace — and
+ * escalating a jab to word deletion would eat far more than was asked for.
+ *
+ * Rate separates them cleanly. iOS auto-repeat runs at roughly 100ms, so a held
+ * key produces about nine deletes in a 900ms window; tapping by hand produces
+ * three or four.
+ */
+function nativeDeleteBurstIsHeld(timestamps, now) {
+  let recent = 0;
+  for (const at of timestamps) {
+    if (now - at <= nativeDeleteBurstWindowMilliseconds) {
+      recent += 1;
+    }
+  }
+  return recent >= nativeDeleteBurstThreshold;
+}
+
+/** Drop timestamps that have aged out of the window. */
+function nativeDeletePruneTimestamps(timestamps, now) {
+  return timestamps.filter(
+    (at) => now - at <= nativeDeleteBurstWindowMilliseconds
+  );
+}
+
 // ---- End of the pure delete repeat block. ----
 
 function startNativeDeleteRepeat(deleteSequence) {
@@ -5931,6 +5971,29 @@ function handleHardwareKeyboardBridge(event) {
   scheduleNativeTerminalInputPrime();
 }
 
+/**
+ * Send one soft-keyboard delete, as a character or as a word once the key has
+ * clearly been held. This is the path an iPhone actually uses: the keydown
+ * repeat in startNativeDeleteRepeat() is for hardware keyboards, which is why
+ * escalating there alone changed nothing on the phone.
+ */
+function sendNativeDeleteForInput(now) {
+  nativeDeleteTimestamps = nativeDeletePruneTimestamps(nativeDeleteTimestamps, now);
+  nativeDeleteTimestamps.push(now);
+  if (!nativeDeleteBurstIsHeld(nativeDeleteTimestamps, now)) {
+    sendInput('\u007f');
+    return;
+  }
+  // Held. Words are a bigger step than the repeat rate assumes, so they go out no
+  // faster than the word cadence; the deletes in between are dropped rather than
+  // sent as characters, which would undo the escalation.
+  if (now - nativeDeleteWordSentAt < nativeDeleteWordIntervalMilliseconds) {
+    return;
+  }
+  nativeDeleteWordSentAt = now;
+  sendInput(nativeDeleteWordSequence);
+}
+
 function handleNativeTerminalDeleteInput(event) {
   if (
     !nativeTouchSelection ||
@@ -5949,7 +6012,7 @@ function handleNativeTerminalDeleteInput(event) {
       now - nativeDeleteKeyDownAt >
       nativeDeleteDeduplicationMilliseconds
     ) {
-      sendInput('\u007f');
+      sendNativeDeleteForInput(now);
     }
     scheduleNativeTerminalInputPrime();
     return;
@@ -5961,7 +6024,7 @@ function handleNativeTerminalDeleteInput(event) {
     now - nativeDeleteKeyDownAt >
       nativeDeleteDeduplicationMilliseconds
   ) {
-    sendInput('\u007f');
+    sendNativeDeleteForInput(now);
   }
   scheduleNativeTerminalInputPrime();
 }
