@@ -2898,6 +2898,31 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
  * Keys/Snips drawer is open. Drawer sits on its own row above. Landscape
  * middle-replace (hide paste/pins) lives in the landscape media query. */
 
+/*
+ * Files header slot. Empty and hidden in Term; in portrait Files it holds the
+ * Parent-folder button and the location select, which syncFilesNavPlacement()
+ * moves in and out. The header row is otherwise blank in Files while the toolbar
+ * below it carries everything.
+ */
+#files-header-nav {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: var(--header-gap);
+  min-width: 0;
+  padding: 0 calc(6px + var(--safe-right)) 0 calc(6px + var(--safe-left));
+}
+
+#files-header-nav[hidden] {
+  display: none !important;
+}
+
+/* The select takes the room the breadcrumb does not need up here. */
+#files-header-nav #files-location-select-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
 /* The rail no longer scrolls; the drawer is the one strip that still does. */
 #footer-drawer::-webkit-scrollbar {
   display: none;

@@ -4,7 +4,6 @@ const sessionsElement = document.querySelector('#sessions');
 const terminalElement = document.querySelector('#terminal');
 const emptyElement = document.querySelector('#empty');
 const filesPanelElement = document.querySelector('#files-panel');
-const filesToolbarElement = document.querySelector('#files-toolbar');
 const filesUpButton = document.querySelector('#files-up-nav');
 const filesLocationSelect = document.querySelector('#files-location-select');
 const filesNewFolderDesktopButton = document.querySelector(
@@ -43,6 +42,10 @@ const filesPreviewPane = document.querySelector('#files-preview-pane');
 const filesPreviewPaneTitle = document.querySelector('#files-preview-pane-title');
 const filesPreviewPaneBody = document.querySelector('#files-preview-pane-body');
 const filesPreviewPaneClose = document.querySelector('#files-preview-pane-close');
+const filesHeaderNav = document.querySelector('#files-header-nav');
+const filesToolbarElement = document.querySelector('#files-toolbar');
+const filesUpNavButton = document.querySelector('#files-up-nav');
+const filesLocationWrap = document.querySelector('#files-location-select-wrap');
 const filesOptionsDialog = document.querySelector('#files-options-dialog');
 const filesOptionsClose = document.querySelector('#files-options-close');
 const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
@@ -7851,6 +7854,7 @@ function setViewMode(mode, options = {}) {
     saveViewMode(next);
   }
   document.body.classList.toggle('files-view', next === 'files');
+  syncFilesNavPlacement();
   document.querySelectorAll('[data-view-mode]').forEach((button) => {
     button.setAttribute(
       'aria-selected',
@@ -8481,6 +8485,46 @@ function closeFilesPreview(options = {}) {
   ) {
     filesListElement?.focus({ preventScroll: true });
   }
+}
+
+/**
+ * Parent-folder and the location select live in the header while Files is open on
+ * a portrait phone, and in the toolbar everywhere else.
+ *
+ * Moving the nodes rather than duplicating them keeps one set of listeners and one
+ * disabled state — a second copy of Parent-folder would need both kept in sync,
+ * and they would drift.
+ *
+ * Portrait touch only. The landscape header is a 48px side rail with no room for a
+ * select, and a fine pointer keeps the Term/Files switch up there.
+ */
+function filesNavBelongsInHeader() {
+  return (
+    viewMode === 'files' &&
+    Boolean(
+      window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
+    )
+  );
+}
+
+function syncFilesNavPlacement() {
+  if (!filesHeaderNav || !filesToolbarElement || !filesUpNavButton || !filesLocationWrap) {
+    return;
+  }
+  const inHeader = filesNavBelongsInHeader();
+  if (inHeader) {
+    if (filesUpNavButton.parentElement !== filesHeaderNav) {
+      filesHeaderNav.append(filesUpNavButton, filesLocationWrap);
+    }
+    filesHeaderNav.hidden = false;
+    return;
+  }
+  if (filesUpNavButton.parentElement === filesHeaderNav) {
+    // Back to the front of the toolbar, ahead of the breadcrumb, which is where
+    // they started.
+    filesToolbarElement.prepend(filesUpNavButton, filesLocationWrap);
+  }
+  filesHeaderNav.hidden = true;
 }
 
 function openFilesOptions() {
@@ -9296,7 +9340,14 @@ async function ensureTerminal() {
           holdKeyboardLayoutForSelection &&
           !terminal?.hasSelection() &&
           !xtermTouchSelecting &&
-          !terminalInputIsFocused()
+          !terminalInputIsFocused() &&
+          // Copying clears the selection, which fires this synchronously, before
+          // the focus restore runs. Releasing here drops the frozen height and the
+          // returning keyboard freezes it again — the jump, and the reason copy
+          // still jumped after paste stopped. Paste restores focus inside the same
+          // touchend, so terminalInputIsFocused() is already true by the time this
+          // fires; copy restores on a later tap.
+          !terminalFocusedBeforeSelection
         ) {
           holdKeyboardLayoutForSelection = false;
           recordKeyboardTransition('selection-change-release');
@@ -13211,6 +13262,8 @@ if (footerElement) {
 const handleViewportGeometryChange = () => {
   // Rotation and keyboard open/close both land here. Recorded before any of the
   // geometry runs, so a rotate-while-open is visible as its own transition.
+  // Orientation decides where the Files nav lives.
+  syncFilesNavPlacement();
   recordKeyboardTransition('viewport-geometry-change');
   applyRestingAppHeight();
   publishFooterHeight();
@@ -13308,6 +13361,12 @@ function updateVisualViewport() {
     !holdKeyboardLayoutForSelection &&
     !terminal?.hasSelection() &&
     !terminalInputIsFocused() &&
+    // A copy is about to put the keyboard back. Releasing here drops the frozen
+    // height for the frame or two before focus returns, and the keyboard then
+    // freezes it again — the jump. Paste never hit this because it restores focus
+    // inside the same touchend, so terminalInputIsFocused() is already true by
+    // the time this branch is evaluated; copy restores on a later tap.
+    !terminalFocusedBeforeSelection &&
     !keyboardReduced
   ) {
     recordKeyboardTransition('viewport-release-stale-lock');
