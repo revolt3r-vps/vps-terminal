@@ -4826,30 +4826,6 @@ function stopNativeDeleteRepeat() {
 // ---- Start of the pure delete repeat block. ----
 
 /**
- * What a held Backspace should send next, and how long to wait after it.
- *
- * A terminal deletes one character per keystroke and each one is a round trip to
- * tmux, so holding the key to clear a long path is slow in a way the native
- * keyboard is not — iOS escalates to whole words after about a second. This does
- * the same, switching to ESC DEL, which is readline's backward-kill-word and what
- * Alt+Backspace already sends here.
- *
- * Only a plain Backspace escalates. Alt or Ctrl held means the user already chose
- * a deletion mode, and changing it under them would be wrong.
- */
-function nativeDeleteRepeatStep(baseSequence, heldForMilliseconds) {
-  const escalates =
-    baseSequence === '\u007f' &&
-    heldForMilliseconds >= nativeDeleteWordEscalationMilliseconds;
-  return {
-    sequence: escalates ? nativeDeleteWordSequence : baseSequence,
-    delay: escalates
-      ? nativeDeleteWordIntervalMilliseconds
-      : nativeDeleteRepeatIntervalMilliseconds,
-    wordMode: escalates
-  };
-}
-/**
  * How far into a run of deletes are we, and is it long enough to be a held key?
  *
  * The soft keyboard gives nothing to hold onto — no keydown, no keyup we can
@@ -4875,18 +4851,19 @@ function nativeDeleteRunStep(previousAt, runLength, now) {
 
 function startNativeDeleteRepeat(deleteSequence) {
   stopNativeDeleteRepeat();
-  const heldSince = window.performance.now();
   // A rescheduling timeout rather than setInterval, because the cadence changes
   // when the repeat escalates from characters to words.
   const tick = () => {
-    const step = nativeDeleteRepeatStep(
-      deleteSequence,
-      window.performance.now() - heldSince
-    );
-    nativeDeleteKeyDownAt = window.performance.now();
-    sendInput(step.sequence);
+    const now = window.performance.now();
+    nativeDeleteKeyDownAt = now;
+    const word = sendNativeDelete(now, 'repeat', deleteSequence);
     scheduleNativeTerminalInputPrime();
-    nativeDeleteRepeatIntervalTimer = window.setTimeout(tick, step.delay);
+    nativeDeleteRepeatIntervalTimer = window.setTimeout(
+      tick,
+      word
+        ? nativeDeleteWordIntervalMilliseconds
+        : nativeDeleteRepeatIntervalMilliseconds
+    );
   };
   nativeDeleteRepeatDelayTimer = setTimeout(() => {
     nativeDeleteRepeatDelayTimer = null;
@@ -5915,7 +5892,9 @@ function handleNativeTerminalKeyEvent(event) {
   const deleteSequence = `${event.altKey ? '\u001b' : ''}${
     event.ctrlKey ? '\b' : '\u007f'
   }`;
-  sendInput(deleteSequence);
+  // Safari repeats the keydown itself, so each one has to feed the run counter or
+  // the escalation never sees them.
+  sendNativeDelete(nativeDeleteKeyDownAt, 'keydown', deleteSequence);
   scheduleNativeTerminalInputPrime();
   if (nativeDeleteRepeatDelayTimer === null) {
     startNativeDeleteRepeat(deleteSequence);
@@ -5974,28 +5953,41 @@ function handleHardwareKeyboardBridge(event) {
  * repeat in startNativeDeleteRepeat() is for hardware keyboards, which is why
  * escalating there alone changed nothing on the phone.
  */
-function sendNativeDeleteForInput(now) {
+/**
+ * Send one delete, as a character or as a word once the key has clearly been held.
+ *
+ * Every source goes through here — the keydown handler, our own repeat timer, and
+ * the beforeinput path — because which one fires depends on the browser and we
+ * cannot see that from the outside. A dump from iPhone Safari 27 showed no
+ * delete-char entries at all across forty seconds of typing, which meant the
+ * beforeinput path this used to live on never runs there. One counter fed by all
+ * of them escalates whichever way the deletes arrive.
+ *
+ * `via` is recorded so a dump names the path instead of leaving it to be guessed.
+ */
+function sendNativeDelete(now, via, baseSequence) {
+  const base = baseSequence || '\u007f';
   const step = nativeDeleteRunStep(nativeDeleteRunAt, nativeDeleteRunLength, now);
   const gap = nativeDeleteRunAt === null ? null : Math.round(now - nativeDeleteRunAt);
   nativeDeleteRunAt = now;
   nativeDeleteRunLength = step.run;
-  if (!step.wordMode) {
-    // Recorded so a Settings > Debug dump shows what the device actually sends:
-    // the gap between repeats is the number this behaviour depends on, and it is
-    // not observable from here.
-    recordKeyboardTransition('delete-char', { gap, run: step.run });
-    sendInput('\u007f');
-    return;
+  // Only a plain Backspace escalates. Alt or Ctrl means a mode was already chosen.
+  const word = step.wordMode && base === '\u007f';
+  if (!word) {
+    recordKeyboardTransition('delete-char', { via, gap, run: step.run });
+    sendInput(base);
+    return false;
   }
-  // Held. Words are a bigger step than the repeat rate assumes, so they go out no
-  // faster than the word cadence; the deletes in between are dropped rather than
-  // sent as characters, which would undo the escalation.
+  // Words are a bigger step than the repeat rate assumes, so they go out no faster
+  // than the word cadence; the repeats in between are dropped rather than sent as
+  // characters, which would undo the escalation.
   if (now - nativeDeleteWordSentAt < nativeDeleteWordIntervalMilliseconds) {
-    return;
+    return true;
   }
   nativeDeleteWordSentAt = now;
-  recordKeyboardTransition('delete-word', { gap, run: step.run });
+  recordKeyboardTransition('delete-word', { via, gap, run: step.run });
   sendInput(nativeDeleteWordSequence);
+  return true;
 }
 
 function handleNativeTerminalDeleteInput(event) {
@@ -6016,7 +6008,7 @@ function handleNativeTerminalDeleteInput(event) {
       now - nativeDeleteKeyDownAt >
       nativeDeleteDeduplicationMilliseconds
     ) {
-      sendNativeDeleteForInput(now);
+      sendNativeDelete(now, 'beforeinput');
     }
     scheduleNativeTerminalInputPrime();
     return;
@@ -6028,7 +6020,7 @@ function handleNativeTerminalDeleteInput(event) {
     now - nativeDeleteKeyDownAt >
       nativeDeleteDeduplicationMilliseconds
   ) {
-    sendNativeDeleteForInput(now);
+    sendNativeDelete(now, 'input');
   }
   scheduleNativeTerminalInputPrime();
 }
