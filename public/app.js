@@ -9788,7 +9788,33 @@ function captureKeyboardLayoutLock() {
  * On iOS standalone, CSS 100dvh often disagrees with hit-testing until the first
  * terminal gesture — leaving the footer visible but untappable.
  */
+/**
+ * True while the browser is mid-selection under the native selection experiment.
+ *
+ * Pinning the page is what keeps iOS from panning the app under a rising
+ * keyboard, but it also cancels a selection drag. With the keyboard open,
+ * visualViewport emits scroll events throughout the drag, so updateVisualViewport
+ * runs on every one of them and pins the page out from under the gesture — which
+ * is why selection worked with the keyboard closed and not with it open.
+ */
+function nativeSelectionHoldsPage() {
+  if (!nativeSelectionExperiment) {
+    return false;
+  }
+  if (nativeSelectionTouchActive) {
+    return true;
+  }
+  try {
+    return String(window.getSelection?.() || '').length > 0;
+  } catch {
+    return false;
+  }
+}
+
 function pinPageToOrigin() {
+  if (nativeSelectionHoldsPage()) {
+    return;
+  }
   window.scrollTo(0, 0);
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
@@ -10259,6 +10285,8 @@ function flushNativeSelectionOutput() {
   const pending = nativeSelectionPendingOutput.join('');
   nativeSelectionPendingOutput.length = 0;
   terminal.write(pending);
+  // Any fit skipped during the selection happens now.
+  scheduleFit();
 }
 
 /**
@@ -10962,6 +10990,11 @@ function installTouchScrolling() {
 
 function fit() {
   if (!terminal || terminalElement.hidden) {
+    return;
+  }
+  if (nativeSelectionHoldsPage()) {
+    // Refitting re-renders every row, which wipes the selection being made. The
+    // flush after release fits again, so nothing is lost but the timing.
     return;
   }
   const previousBuffer = terminal.buffer.active;
@@ -13714,7 +13747,7 @@ function updateVisualViewport() {
       );
       document.documentElement.style.setProperty('--app-top', '0px');
     }
-    window.scrollTo(0, 0);
+    pinPageToOrigin();
     return;
   }
   const viewport = window.visualViewport;
@@ -13818,7 +13851,7 @@ function updateVisualViewport() {
         skipIfFlagsUnchanged: true
       });
       scheduleVisualViewportUpdate();
-      window.scrollTo(0, 0);
+      pinPageToOrigin();
       return;
     }
   } else if (keyboardLayoutLock || !keyboardOpen) {
@@ -13833,14 +13866,14 @@ function updateVisualViewport() {
     height === lastAppliedViewportHeight &&
     top === lastAppliedViewportTop
   ) {
-    window.scrollTo(0, 0);
+    pinPageToOrigin();
     return;
   }
   lastAppliedViewportHeight = height;
   lastAppliedViewportTop = top;
   document.documentElement.style.setProperty('--app-height', `${height}px`);
   document.documentElement.style.setProperty('--app-top', `${top}px`);
-  window.scrollTo(0, 0);
+  pinPageToOrigin();
   scheduleFit();
 }
 
