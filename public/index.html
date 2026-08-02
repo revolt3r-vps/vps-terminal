@@ -606,7 +606,24 @@
           aria-label="Debug"
           hidden
         >
-          <section class="settings-debug" aria-labelledby="keyboard-debug-title">
+          <section class="settings-debug" aria-labelledby="native-selection-title">
+          <div class="settings-debug-heading">
+            <strong id="native-selection-title">Native text selection</strong>
+          </div>
+          <p class="settings-hint">
+            Experiment. Hands the terminal back to the browser: iOS does its own
+            selection, with real handles, the magnifier and the system Copy and
+            Paste menu. Output pauses while a finger is down, which is what makes
+            it possible — the rows stop re-rendering underneath the touch.
+            Our own scrolling, long-press selection and Copy chip are off while
+            this is on. Reload after changing it.
+          </p>
+          <label class="files-checkbox-control" for="native-selection-toggle">
+            <input id="native-selection-toggle" type="checkbox">
+            <span>Let the browser handle selection and scrolling</span>
+          </label>
+        </section>
+        <section class="settings-debug" aria-labelledby="keyboard-debug-title">
             <div class="settings-debug-heading">
               <strong id="keyboard-debug-title">Keyboard transitions</strong>
               <span id="keyboard-debug-count" class="settings-sync-status"></span>

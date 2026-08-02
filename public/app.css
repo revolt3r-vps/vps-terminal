@@ -4172,3 +4172,32 @@ footer button {
     display: none;
   }
 }
+
+/*
+ * Native selection experiment. Everything here is the removal of a claim: the
+ * custom layer suppresses selection and takes touch-action so its own scroll and
+ * long-press can be reliable, and this hands both back to the browser. Paired
+ * with pausing output while a finger is down — without that the rows re-render
+ * under the touch and iOS drops the selection immediately.
+ */
+html.native-selection-experiment body,
+html.native-selection-experiment main,
+html.native-selection-experiment #terminal,
+html.native-selection-experiment #terminal .xterm-scrollable-element {
+  touch-action: auto;
+}
+
+html.native-selection-experiment #terminal,
+html.native-selection-experiment #terminal .terminal,
+html.native-selection-experiment #terminal .xterm-rows,
+html.native-selection-experiment #terminal .xterm-rows * {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  -webkit-touch-callout: default !important;
+}
+
+/* The catcher exists to keep xterm DOM from being the touch target, which is the
+ * opposite of what this needs. */
+html.native-selection-experiment #scroll-catcher {
+  display: none !important;
+}
