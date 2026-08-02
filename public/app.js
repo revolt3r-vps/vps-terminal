@@ -10281,6 +10281,39 @@ function cancelViewSwipe() {
  *
  * Without it the swipe would work on an iPhone terminal and silently nowhere else.
  */
+/**
+ * What is under the finger, recorded into the transition dump.
+ *
+ * iOS selects whatever is at the touch point, so if a long press does nothing the
+ * question is what is actually there. None of it can be observed from a desktop
+ * browser: this host renders no frames, and xterm's DOM renderer paints inside
+ * requestAnimationFrame, so its rows sit empty there however healthy the buffer
+ * is. Only the device can answer, so the device reports it.
+ *
+ * No terminal content is recorded — only whether text was found, and how much.
+ */
+function probeNativeSelectionTarget(x, y) {
+  try {
+    const rows = document.querySelector('#terminal .xterm-rows');
+    const element = document.elementFromPoint(x, y);
+    const range = document.caretRangeFromPoint
+      ? document.caretRangeFromPoint(x, y)
+      : null;
+    const rowsStyle = rows ? window.getComputedStyle(rows) : null;
+    return {
+      hit: element ? element.tagName.toLowerCase() : 'none',
+      inRows: rows && element ? (rows.contains(element) ? 1 : 0) : 0,
+      hitChars: element ? (element.textContent || '').trim().length : 0,
+      rowsChars: rows ? (rows.textContent || '').trim().length : 0,
+      caret: range ? (range.startContainer.nodeType === 3 ? 'text' : 'element') : 'none',
+      pe: rowsStyle ? rowsStyle.pointerEvents : '?',
+      us: rowsStyle ? rowsStyle.webkitUserSelect || rowsStyle.userSelect : '?'
+    };
+  } catch (error) {
+    return { probeError: String(error && error.message).slice(0, 40) };
+  }
+}
+
 function flushNativeSelectionOutput() {
   nativeSelectionPendingBytes = 0;
   if (nativeSelectionPendingOutput.length === 0 || !terminal) {
@@ -10347,6 +10380,10 @@ function installNativeSelectionOutputPause() {
       cancelPress();
       pressTimer = window.setTimeout(() => {
         pressTimer = null;
+        recordKeyboardTransition(
+          'native-selection-probe',
+          probeNativeSelectionTarget(pressX, pressY)
+        );
         if (!terminalInputIsFocused()) {
           return;
         }
