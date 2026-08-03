@@ -81,7 +81,6 @@ const quickMenuProfileValue = document.querySelector(
 );
 const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
 const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
-const nativeSelectionToggle = document.querySelector('#native-selection-toggle');
 const quickMenuViewButton = document.querySelector('#quick-menu-view');
 const quickMenuFindButton = document.querySelector('#quick-menu-find');
 const quickMenuReconnectButton = document.querySelector(
@@ -207,7 +206,6 @@ const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
 const footerPinsStorageKey = 'vps-terminal-footer-pins';
 const footerRecentChipsStorageKey = 'vps-terminal-footer-recent';
-const nativeSelectionExperimentStorageKey = 'vps-terminal-native-selection';
 const pasteHistoryStorageKey = 'vps-terminal-paste-history';
 const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
@@ -292,13 +290,6 @@ const nativeDeleteRunGapMilliseconds = 500;
 // single-digit milliseconds, so the two are far apart and the exact value is not
 // delicate.
 const nativePastePromptMilliseconds = 250;
-// iOS raises its selection handles just after touchend, so output waits a moment
-// past the release rather than resuming the instant the finger lifts.
-const nativeSelectionFlushDelayMilliseconds = 400;
-// Shorter than iOS's own long-press threshold, so focus is gone before it decides
-// what the gesture is and the same press can become a selection.
-const nativeSelectionFocusReleaseMilliseconds = 300;
-const nativeSelectionPressMoveTolerance = 10;
 // How long a hold deletes characters before accelerating to words. There is no
 // published constant for this; iOS and macOS both sit around two seconds, and
 // matching that is the point — a repeat count instead of a duration escalates
@@ -314,37 +305,7 @@ const sessionLongPressMilliseconds = 500;
 const sessionLongPressMoveTolerance = 10;
 const filesEntryLongPressMilliseconds = 520;
 const filesEntryLongPressMoveTolerance = 10;
-/**
- * Experiment: hand the terminal back to the browser.
- *
- * The custom touch layer exists for one reason — xterm re-renders rows under the
- * finger, which cancels native gestures and wipes a native selection. So it is
- * paired with pausing output while a touch is down: with the DOM still, iOS can do
- * its own selection, with real handles, the magnifier and the system Copy and
- * Paste menu. The system menu matters beyond selection: its Paste fires a real
- * paste event with no permission prompt, which is the whole clipboard problem
- * gone.
- *
- * If this holds up on a device, the scroll catcher, the long-press selection, the
- * synthetic scroll and both chips can be deleted rather than maintained.
- */
-function nativeSelectionExperimentEnabled() {
-  if (qaShellMode) {
-    return false;
-  }
-  try {
-    return (
-      window.localStorage.getItem(nativeSelectionExperimentStorageKey) === '1'
-    );
-  } catch {
-    return false;
-  }
-}
-
-const nativeSelectionExperiment = nativeSelectionExperimentEnabled();
-// The experiment replaces the custom pipeline rather than layering on it.
-const nativeTouchSelection =
-  !nativeSelectionExperiment && shouldUseNativeTouchSelection();
+const nativeTouchSelection = shouldUseNativeTouchSelection();
 const terminalFontFamily =
   '"JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 // Find lives in the Menu sheet and Ctrl/Cmd+F, but is deliberately not a
@@ -973,13 +934,6 @@ let nativeTouchStartX = null;
 let terminalFocusedBeforeSelection = false;
 // Tracks the keyboard-open animation so the layout is frozen once, at the end.
 let keyboardSettleState = null;
-// Output held while a finger is on the terminal, for the native selection
-// experiment. Bounded: past the cap it flushes rather than growing, because a
-// stalled terminal is worse than a selection that gets wiped.
-let nativeSelectionTouchActive = false;
-const nativeSelectionPendingOutput = [];
-let nativeSelectionPendingBytes = 0;
-const maximumNativeSelectionPendingBytes = 256 * 1024;
 let genericTouchStartX = null;
 let genericTouchStartY = null;
 let nativeTouchStartY = null;
@@ -1090,10 +1044,6 @@ let preferencesLocalMutationVersion = 0;
 document.documentElement.classList.toggle(
   'native-touch-terminal',
   nativeTouchSelection
-);
-document.documentElement.classList.toggle(
-  'native-selection-experiment',
-  nativeSelectionExperiment
 );
 
 function shouldUseNativeTouchSelection() {
@@ -9792,33 +9742,7 @@ function captureKeyboardLayoutLock() {
  * On iOS standalone, CSS 100dvh often disagrees with hit-testing until the first
  * terminal gesture — leaving the footer visible but untappable.
  */
-/**
- * True while the browser is mid-selection under the native selection experiment.
- *
- * Pinning the page is what keeps iOS from panning the app under a rising
- * keyboard, but it also cancels a selection drag. With the keyboard open,
- * visualViewport emits scroll events throughout the drag, so updateVisualViewport
- * runs on every one of them and pins the page out from under the gesture — which
- * is why selection worked with the keyboard closed and not with it open.
- */
-function nativeSelectionHoldsPage() {
-  if (!nativeSelectionExperiment) {
-    return false;
-  }
-  if (nativeSelectionTouchActive) {
-    return true;
-  }
-  try {
-    return String(window.getSelection?.() || '').length > 0;
-  } catch {
-    return false;
-  }
-}
-
 function pinPageToOrigin() {
-  if (nativeSelectionHoldsPage()) {
-    return;
-  }
   window.scrollTo(0, 0);
   document.documentElement.scrollTop = 0;
   document.body.scrollTop = 0;
@@ -10281,190 +10205,6 @@ function cancelViewSwipe() {
  *
  * Without it the swipe would work on an iPhone terminal and silently nowhere else.
  */
-/**
- * What is under the finger, recorded into the transition dump.
- *
- * iOS selects whatever is at the touch point, so if a long press does nothing the
- * question is what is actually there. None of it can be observed from a desktop
- * browser: this host renders no frames, and xterm's DOM renderer paints inside
- * requestAnimationFrame, so its rows sit empty there however healthy the buffer
- * is. Only the device can answer, so the device reports it.
- *
- * No terminal content is recorded — only whether text was found, and how much.
- */
-function probeNativeSelectionTarget(x, y) {
-  try {
-    const rows = document.querySelector('#terminal .xterm-rows');
-    const element = document.elementFromPoint(x, y);
-    const range = document.caretRangeFromPoint
-      ? document.caretRangeFromPoint(x, y)
-      : null;
-    const rowsStyle = rows ? window.getComputedStyle(rows) : null;
-    // touch-action is not inherited, so every element in the chain has to be
-    // checked separately — one 'none' anywhere under the finger both blocks
-    // native scrolling and can stop Safari offering its selection UI.
-    const chain = ['body', 'main', '#terminal', '.xterm', '.xterm-viewport', '.xterm-screen']
-      .map((selector) => {
-        const node =
-          selector === 'body' ? document.body : document.querySelector(
-            selector.startsWith('.') ? '#terminal ' + selector : selector
-          );
-        if (!node) {
-          return selector + ':-';
-        }
-        return selector.replace('#terminal', 'term').replace('.xterm-', '') +
-          ':' + window.getComputedStyle(node).touchAction;
-      })
-      .join(' ');
-    const viewport = document.querySelector('#terminal .xterm-viewport');
-    return {
-      hit: element ? element.tagName.toLowerCase() : 'none',
-      inRows: rows && element ? (rows.contains(element) ? 1 : 0) : 0,
-      hitChars: element ? (element.textContent || '').trim().length : 0,
-      rowsChars: rows ? (rows.textContent || '').trim().length : 0,
-      caret: range ? (range.startContainer.nodeType === 3 ? 'text' : 'element') : 'none',
-      pe: rowsStyle ? rowsStyle.pointerEvents : '?',
-      us: rowsStyle ? rowsStyle.webkitUserSelect || rowsStyle.userSelect : '?',
-      ta: chain,
-      // Can the viewport scroll at all? scrollable is scrollHeight - clientHeight.
-      vp: viewport
-        ? window.getComputedStyle(viewport).overflowY +
-          '/' +
-          Math.max(0, viewport.scrollHeight - viewport.clientHeight)
-        : 'none'
-    };
-  } catch (error) {
-    return { probeError: String(error && error.message).slice(0, 40) };
-  }
-}
-
-function flushNativeSelectionOutput() {
-  nativeSelectionPendingBytes = 0;
-  if (nativeSelectionPendingOutput.length === 0 || !terminal) {
-    return;
-  }
-  const pending = nativeSelectionPendingOutput.join('');
-  nativeSelectionPendingOutput.length = 0;
-  terminal.write(pending);
-  // Any fit skipped during the selection happens now.
-  scheduleFit();
-}
-
-/**
- * Track whether a finger is on the terminal, without claiming the gesture.
- *
- * Every listener is passive: the point of the experiment is that the browser
- * keeps the gesture, so preventDefault here would defeat it. Release flushes on a
- * timer rather than immediately, because iOS raises its selection handles just
- * after touchend and a write in that instant re-renders the rows under them.
- */
-function installNativeSelectionOutputPause() {
-  if (!nativeSelectionExperiment || !terminalElement) {
-    return;
-  }
-  let flushTimer = null;
-  const hold = () => {
-    window.clearTimeout(flushTimer);
-    nativeSelectionTouchActive = true;
-  };
-  const release = () => {
-    window.clearTimeout(flushTimer);
-    flushTimer = window.setTimeout(() => {
-      nativeSelectionTouchActive = false;
-      flushNativeSelectionOutput();
-    }, nativeSelectionFlushDelayMilliseconds);
-  };
-  // iOS scopes selection to the focused editable element, and while the keyboard
-  // is up that is xterm's hidden helper textarea — so a long press on the rows
-  // does nothing at all. Letting go of that focus hands selection back to the
-  // page. It costs the keyboard, which is what the custom implementation did too:
-  // beginLongPressTerminalSelection() blurred on purpose, so the keyboard was out
-  // of the way of the text being selected.
-  //
-  // Released before iOS decides the gesture is a long press, so the same press
-  // can become a selection rather than needing a second one.
-  let pressTimer = null;
-  let pressX = 0;
-  let pressY = 0;
-  const cancelPress = () => {
-    window.clearTimeout(pressTimer);
-    pressTimer = null;
-  };
-  terminalElement.addEventListener(
-    'touchstart',
-    (event) => {
-      hold();
-      const touch = event.touches[0];
-      if (!touch || event.touches.length !== 1) {
-        cancelPress();
-        return;
-      }
-      pressX = touch.clientX;
-      pressY = touch.clientY;
-      cancelPress();
-      pressTimer = window.setTimeout(() => {
-        pressTimer = null;
-        recordKeyboardTransition(
-          'native-selection-probe',
-          probeNativeSelectionTarget(pressX, pressY)
-        );
-        if (!terminalInputIsFocused()) {
-          return;
-        }
-        recordKeyboardTransition('native-selection-focus-release');
-        terminal?.blur();
-      }, nativeSelectionFocusReleaseMilliseconds);
-    },
-    { passive: true }
-  );
-  terminalElement.addEventListener(
-    'touchmove',
-    (event) => {
-      const touch = event.touches[0];
-      if (!touch || !pressTimer) {
-        return;
-      }
-      // A moving finger is a scroll, not a press. Keep the keyboard.
-      if (
-        Math.hypot(touch.clientX - pressX, touch.clientY - pressY) >
-        nativeSelectionPressMoveTolerance
-      ) {
-        cancelPress();
-      }
-    },
-    { passive: true }
-  );
-  terminalElement.addEventListener(
-    'touchend',
-    () => {
-      cancelPress();
-      release();
-    },
-    { passive: true }
-  );
-  terminalElement.addEventListener(
-    'touchcancel',
-    () => {
-      cancelPress();
-      release();
-    },
-    { passive: true }
-  );
-  // A selection that is still up keeps the terminal still; losing it releases.
-  document.addEventListener(
-    'selectionchange',
-    () => {
-      const selected = String(window.getSelection?.() || '').length > 0;
-      if (selected) {
-        hold();
-      } else {
-        release();
-      }
-    },
-    { passive: true }
-  );
-}
-
 function installViewSwipeGestures() {
   const main = mainViewElement();
   if (!main) {
@@ -10986,11 +10726,6 @@ function installNativeTouchGestures() {
 }
 
 function installTouchScrolling() {
-  if (nativeSelectionExperiment) {
-    // The browser owns scrolling and selection. Claiming touches here is exactly
-    // what the experiment is testing the removal of.
-    return;
-  }
   if (nativeTouchSelection) {
     installNativeTouchGestures();
     return;
@@ -11124,11 +10859,6 @@ function installTouchScrolling() {
 
 function fit() {
   if (!terminal || terminalElement.hidden) {
-    return;
-  }
-  if (nativeSelectionHoldsPage()) {
-    // Refitting re-renders every row, which wipes the selection being made. The
-    // flush after release fits again, so nothing is lost but the timing.
     return;
   }
   const previousBuffer = terminal.buffer.active;
@@ -11289,20 +11019,9 @@ async function openSessionSocket(name) {
     if (socket !== nextSocket) {
       return;
     }
-    const chunk =
-      typeof event.data === 'string' ? event.data : decoder.decode(event.data);
-    if (nativeSelectionExperiment && nativeSelectionTouchActive) {
-      // Held, not dropped. Rows that re-render under a finger are what cancels
-      // iOS gestures and wipes its selection, so the terminal stands still until
-      // the touch ends. Capped, so a chatty session cannot buffer without bound.
-      nativeSelectionPendingOutput.push(chunk);
-      nativeSelectionPendingBytes += chunk.length;
-      if (nativeSelectionPendingBytes > maximumNativeSelectionPendingBytes) {
-        flushNativeSelectionOutput();
-      }
-      return;
-    }
-    terminal.write(chunk);
+    terminal.write(
+      typeof event.data === 'string' ? event.data : decoder.decode(event.data)
+    );
   });
   nextSocket.addEventListener('close', () => {
     stopNativeDeleteRepeat();
@@ -13423,7 +13142,6 @@ window.visualViewport?.addEventListener('resize', () => {
 });
 restorePasteHistoryIfOptedIn();
 installViewSwipeGestures();
-installNativeSelectionOutputPause();
 terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
@@ -13528,21 +13246,6 @@ commandPaletteDialog?.addEventListener('close', () => {
     // A control that vanished while the palette was open is not worth failing on.
   }
 });
-if (nativeSelectionToggle) {
-  nativeSelectionToggle.checked = nativeSelectionExperiment;
-  nativeSelectionToggle.addEventListener('change', () => {
-    try {
-      if (nativeSelectionToggle.checked) {
-        window.localStorage.setItem(nativeSelectionExperimentStorageKey, '1');
-      } else {
-        window.localStorage.removeItem(nativeSelectionExperimentStorageKey);
-      }
-    } catch {
-      // Continue without persistence; the reload will simply keep the old mode.
-    }
-    setStatus('Reload to apply');
-  });
-}
 quickMenuViewButton?.addEventListener('click', () => {
   const next = viewMode === 'files' ? 'term' : 'files';
   closeQuickMenu();
@@ -13881,7 +13584,7 @@ function updateVisualViewport() {
       );
       document.documentElement.style.setProperty('--app-top', '0px');
     }
-    pinPageToOrigin();
+    window.scrollTo(0, 0);
     return;
   }
   const viewport = window.visualViewport;
@@ -13985,7 +13688,7 @@ function updateVisualViewport() {
         skipIfFlagsUnchanged: true
       });
       scheduleVisualViewportUpdate();
-      pinPageToOrigin();
+      window.scrollTo(0, 0);
       return;
     }
   } else if (keyboardLayoutLock || !keyboardOpen) {
@@ -14000,14 +13703,14 @@ function updateVisualViewport() {
     height === lastAppliedViewportHeight &&
     top === lastAppliedViewportTop
   ) {
-    pinPageToOrigin();
+    window.scrollTo(0, 0);
     return;
   }
   lastAppliedViewportHeight = height;
   lastAppliedViewportTop = top;
   document.documentElement.style.setProperty('--app-height', `${height}px`);
   document.documentElement.style.setProperty('--app-top', `${top}px`);
-  pinPageToOrigin();
+  window.scrollTo(0, 0);
   scheduleFit();
 }
 
