@@ -101,7 +101,6 @@ const footerElement = document.querySelector('footer');
 const keyPanelElement = document.querySelector('#key-panel');
 const keyPanelBodyElement = document.querySelector('#key-panel-body');
 const keyPanelTabsElement = document.querySelector('#key-panel-tabs');
-const keyPanelCustomizeButton = document.querySelector('#key-panel-customize');
 const keyPanelKeyboardButton = document.querySelector('#key-panel-keyboard');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
@@ -1958,33 +1957,48 @@ function keyPanelIsAvailable() {
   return Boolean(keyPanelElement && viewMode === 'term');
 }
 
+// ---- Start of the pure keyboard height block. ----
 /**
- * Remember how tall the keyboard is, so the panel can take exactly its place.
+ * The keyboard a reduced viewport implies, or 0 when it implies none.
  *
- * Called on every visualViewport resize. Only a reduced viewport is a keyboard,
- * and keyboardViewportIsReduced() already carries the 120px threshold that keeps
- * a browser toolbar from counting as one.
+ * 120px keeps a collapsing browser toolbar from counting as a keyboard. The
+ * upper bound is the other half of it: no keyboard is more than about half the
+ * screen, and a larger reading is some other viewport change caught mid-flight.
+ * Storing one of those makes every later panel open too tall — the "terminal
+ * squeezed to the top" report.
  */
-function rememberKeyboardHeight() {
-  const viewport = window.visualViewport;
-  if (!viewport || !keyboardViewportIsReduced()) {
-    return;
+function keyboardHeightFromViewport(layoutHeight, viewportHeight, scale) {
+  if (!Number.isFinite(layoutHeight) || !Number.isFinite(viewportHeight)) {
+    return 0;
   }
-  // A reduced viewport is not proof of a keyboard on its own: iOS shrinks it
-  // while chrome collapses and during our own layout changes, and a measurement
-  // taken then is far too big. The class is only set once a keyboard is
-  // genuinely up, so it is what decides whether this reading counts.
-  if (!document.documentElement.classList.contains('keyboard-open')) {
-    return;
+  // A pinched page reports a smaller visual viewport for a reason that is not a
+  // keyboard.
+  if (Number.isFinite(scale) && Math.abs(scale - 1) > 0.01) {
+    return 0;
   }
-  const layoutHeight = Math.round(
-    document.documentElement.clientHeight || window.innerHeight
-  );
-  const height = layoutHeight - Math.round(viewport.height);
-  // No keyboard is more than about half the screen. A larger reading is some
-  // other viewport change caught mid-flight, and storing it makes every later
-  // panel open too tall — which is the "terminal squeezed to the top" report.
+  const height = Math.round(layoutHeight) - Math.round(viewportHeight);
   if (height <= 120 || height > layoutHeight * 0.55) {
+    return 0;
+  }
+  return height;
+}
+// ---- End of the pure keyboard height block. ----
+
+/** What the viewport says right now, whatever the app believes. */
+function measuredKeyboardHeight() {
+  const viewport = window.visualViewport;
+  if (!viewport) {
+    return 0;
+  }
+  return keyboardHeightFromViewport(
+    document.documentElement.clientHeight || window.innerHeight,
+    viewport.height,
+    viewport.scale
+  );
+}
+
+function storeKeyboardHeight(height) {
+  if (height <= 0) {
     return;
   }
   lastKeyboardHeight = height;
@@ -1993,6 +2007,21 @@ function rememberKeyboardHeight() {
   } catch {
     // Without persistence the measurement just does not survive a reload.
   }
+}
+
+/**
+ * Remember how tall the keyboard is, so the panel can take exactly its place.
+ *
+ * Called on every visualViewport resize. A reduced viewport is not proof of a
+ * keyboard on its own: iOS shrinks it while chrome collapses and during our own
+ * layout changes. The class is only set once a keyboard is genuinely up, so it
+ * is what decides whether this reading counts.
+ */
+function rememberKeyboardHeight() {
+  if (!document.documentElement.classList.contains('keyboard-open')) {
+    return;
+  }
+  storeKeyboardHeight(measuredKeyboardHeight());
 }
 
 /**
@@ -2098,6 +2127,13 @@ function setKeyPanelOpen(open) {
   keyPanelOpen = next;
   keyPanelKeysMode = 'list';
   if (next) {
+    // The keyboard being replaced is still up and still measurable, and this is
+    // the last moment it will be: the blur below is what ends it. Taking the
+    // reading here beats trusting the stored one, which the resize listener
+    // only records while `keyboard-open` is set — miss that window and a
+    // browser that has raised a keyboard all session still opens the panel at
+    // the blind guess, which is shorter than any phone keyboard.
+    storeKeyboardHeight(measuredKeyboardHeight());
     // Measured before the class hides the strip: the footer is pinned to this
     // plus the keyboard height, so the terminal keeps the rows it had.
     document.documentElement.style.setProperty(
@@ -2570,7 +2606,10 @@ function createCustomKeyForm() {
  */
 function renderKeyPanelSnippets(page) {
   if (snippetsList.length === 0) {
-    renderKeyPanelPlaceholder(page, 'No snippets yet — add them in Settings.');
+    // The button comes too. It is the only way into the dialog now, so an empty
+    // list must not be a dead end.
+    renderKeyPanelPlaceholder(page, 'No snippets yet.');
+    page.append(createSnippetLibraryButton());
     void loadSnippetsFromServer();
     return;
   }
@@ -2609,6 +2648,16 @@ function renderKeyPanelSnippets(page) {
     });
     list.append(item);
   }
+  page.replaceChildren(list, createSnippetLibraryButton());
+}
+
+/**
+ * The way to the settings dialog, which is the snippet library and nothing else.
+ *
+ * The panel's own Customize tab used to open it as well. Two entries into one
+ * list of snippets was one too many, and this is the one that sits beside them.
+ */
+function createSnippetLibraryButton() {
   const edit = document.createElement('button');
   edit.type = 'button';
   edit.className = 'key-panel-action';
@@ -2617,7 +2666,7 @@ function renderKeyPanelSnippets(page) {
     setKeyPanelOpen(false);
     openSettingsDialog();
   });
-  page.replaceChildren(list, edit);
+  return edit;
 }
 
 /**
@@ -12858,10 +12907,6 @@ keyPanelTabsElement?.addEventListener('click', (event) => {
   }
 });
 keyPanelKeyboardButton?.addEventListener('click', keyPanelShowKeyboard);
-keyPanelCustomizeButton?.addEventListener('click', () => {
-  setKeyPanelOpen(false);
-  openSettingsDialog();
-});
 installDialogBackdropDismiss(settingsDialogElement, () => {
   settingsDialogElement.close();
 });
