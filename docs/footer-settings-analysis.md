@@ -445,52 +445,49 @@ here that adapts to which hand is holding the phone.
 
 ---
 
-## Update — the two-row key surface, 2026-08-08
+## Update — the key bar, 2026-08-08
 
-**This is §"The architecture question, answered" built, and it changes §2's
-arithmetic.** Row 2 is no longer a drawer you open. It is present whenever the
-soft keyboard is up, holding the profile's keys, and a modifier chip swaps its
-contents for that modifier's keys.
+**§2's whole problem was choosing which chips got the space. That question is
+gone: row 1 now carries every key in the active profile, in profile order, with
+Edit at the end of the scroll.**
 
 ```
-row 1:  [⌨][📋] │ Esc  Ctrl  Shift  Alt  Tab  Enter  ↑ … │ [⚙]
-row 2:  Esc  Ctrl  Shift  Alt  Tab  Enter  ←  ↑  ↓  →  …  [Edit]
+row 1:  [⌨][📋] │ Esc Ctrl Shift Alt Tab Enter ← ↑ ↓ → … [Edit] │ [⚙]
+                  └──────────────── scrolls ──────────────────┘
 
 tap Ctrl ↓
 
 row 2:  [Ctrl+] C A B D E G K L N P R U W Z
         └ cancels
+row 1:  unchanged
 ```
 
-**Why the row stands open rather than opening on demand.** `#footer-drawer` used
-to be `display: none` when closed, so opening it grew the footer ~50px, shrank
-`#terminal` and tripped the `ResizeObserver` into `scheduleFit()` — xterm
-reflowing every row, about three text rows jumping, twice per use. Standing open
-costs that once, when the keyboard arrives, instead of on every modifier tap.
-Measured after the change: footer 93px and row 2 44px, unchanged across Ctrl →
-Shift → Alt → resting.
+**What this deleted.** Pinning, the pin limit, the pin hint, the Settings pin
+column, the contextual chip set (T21), the recent-chip ordering, the ten-chip
+cap, and the `pins` array on every stored profile. All of it existed to pick ten
+chips out of a profile. A scroller that carries all of them needs none of it —
+`test/footer-rail.test.js` went with the code it tested.
 
-**Portrait only.** The 85.5%-against-75% headroom this document measured is a
-portrait number. Landscape has no such room, so there row 2 appears for a picker
-and otherwise stays away.
+**§2's measurements, revisited.** The bar spent 65% of its width on fixed
+controls. Keys and Snips are gone from it, returning 88px; snippets are managed
+in Settings, where they were already fully editable. What remains fixed is
+Keyboard, Paste and Menu.
 
-**Row 1 gave back 88px.** Keys and Snips are gone from it — row 2 replaced Keys,
-and snippets live in Settings. Against §2's measurement of 65% of the bar going
-to fixed controls, that is the largest single reduction available without
-removing a feature.
+**Row 2 exists only while a picker is up.** It has no resting content now, so it
+appears and disappears, which costs the terminal reflow described in the previous
+revision of this section. That is the accepted price of keeping secondaries on
+their own line rather than swapping row 1's contents.
 
-**Tapping a modifier holds it and shows its keys, both.** The hold folds the next
-thing typed on either keyboard: Ctrl+letter to a control code, Alt+key to the ESC
-prefix, Shift+letter to a capital. Picking from the row sends that combination
-directly. Either spends the hold. `Ctrl+C` lost its own chip, so `C` leads the
-Ctrl row out of alphabetical order — the interrupt is in the same place every
-time and one tap after Ctrl.
-
-**Edit closes the row.** It sits after every shortcut, so scrolling to the end of
-your keys lands on the way to change them, and it costs no row 1 width.
+**Tapping a modifier holds it and shows its keys.** The hold folds the next thing
+typed on either keyboard — Ctrl+letter to a control code, Alt+key to the ESC
+prefix, Shift+letter to a capital — and only single characters fold, so an arrow
+key arriving while Ctrl is held passes through. `Ctrl+C` has no chip, so `C`
+leads the Ctrl row out of alphabetical order.
 
 **No migrations.** Nothing is distributed, so stored preferences are never worth
-carrying forward. The legacy readers, the starter-profile version gates and the
-snippet-selection one-shot are all gone, replaced by a single schema stamp: if
-what is stored was written against a different shape, key and profile
-preferences reset to defaults. Themes and paste history are left alone.
+carrying forward. The legacy localStorage readers, the starter-profile version
+gates and the snippet-selection one-shot are gone, replaced by a single schema
+stamp: a mismatch resets key and profile preferences to defaults. Themes and
+paste history are untouched. Starter profiles are still provisioned — that is
+setup, not migration, and it still runs for a fresh install or a shared-settings
+import.

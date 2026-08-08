@@ -456,8 +456,8 @@
             <p id="key-profile-summary" class="settings-profile-summary"></p>
           </div>
           <p class="settings-hint">
-            Profiles control Keys, Snippets, and pins on the main bar. Assign
-            a session from Menu; pin here, or hold a live chip as a shortcut.
+            Profiles control which keys the bar carries and which snippets are
+            available. Assign a session from Menu.
           </p>
           <section class="settings-profile-section" aria-labelledby="profile-keys-heading">
             <div class="settings-profile-section-heading">
@@ -594,7 +594,7 @@
               <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
             </div>
             <p id="preferences-sync-help" class="settings-hint">
-              Profiles, session assignments, pins, and themes can follow your
+              Profiles, session assignments, and themes can follow your
               login across browsers. Device layout stays local.
             </p>
             <div class="settings-sync-actions">
@@ -796,9 +796,8 @@
                 <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
               </svg>
             </button>
-            <!-- The one scrolling thing in row 1. Paste and Menu stay put either
-                 side of it; only the chips move. Keys and Snips used to sit here
-                 and cost 88px; row 2 replaced Keys, and Snips lives in Settings. -->
+            <!-- Every key in the active profile, in profile order, with Edit at
+                 the end. Paste and Menu stay put either side; only the keys move. -->
             <div id="footer-pins" aria-label="Shortcut chips"></div>
           </div>
           <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Menu" aria-label="Open menu">

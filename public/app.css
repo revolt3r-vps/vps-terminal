@@ -2639,27 +2639,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: var(--surface-pressed);
 }
 
-.settings-profile-pin {
-  display: grid;
-  place-items: center;
-  color: var(--muted);
-}
 
-.settings-profile-pin svg {
-  /* This path is a solid pin silhouette, not a stroke-drawn line icon —
-     fill it instead of stroking it, or it renders as a barely-visible
-     outline. */
-  width: 17px;
-  height: 17px;
-  fill: currentColor;
-  stroke: none;
-}
 
-.settings-profile-pin.active {
-  border-color: var(--accent);
-  background: var(--accent-surface);
-  color: var(--accent-text);
-}
 
 .settings-shortcut-add {
   display: grid;
@@ -2814,13 +2795,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   accent-color: var(--accent);
 }
 
-.settings-profile-snippet-item .settings-profile-pin {
-  width: var(--control-size);
-  min-width: var(--control-size);
-  min-height: var(--control-size);
-  padding: 0;
-  border-radius: var(--control-radius);
-}
 
 .settings-profile-snippet-label {
   min-width: 0;
@@ -3173,11 +3147,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   font-weight: 700;
 }
 
-#footer-drawer [data-snippet-id],
-#footer-pins [data-pin-kind="snip"] {
-  border-color: #3d4a63;
-  background: #252a3d;
-}
 
 /*
  * The chord row. Its lead names the modifier that opened it and sticks to the
@@ -3200,11 +3169,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   font-variant-numeric: tabular-nums;
 }
 
-#footer-drawer [data-snippet-id].snippet-run,
-#footer-pins [data-pin-kind="snip"].snippet-run {
-  border-color: #3d5a48;
-  background: #1f2e28;
-}
 
 /*
  * The scrolling sublist. Paste/Keys/Snips and Settings keep their places on the

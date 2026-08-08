@@ -210,7 +210,6 @@ const preferencesPendingCacheStorageKey =
   'vps-terminal-preferences-pending-cache-v1';
 const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
-const footerRecentChipsStorageKey = 'vps-terminal-footer-recent';
 const pasteHistoryStorageKey = 'vps-terminal-paste-history';
 const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
@@ -241,7 +240,6 @@ function reconnectDelayForAttempt(attempt) {
   const steps = Math.max(0, Math.min(safe - 1, 10));
   return Math.min(reconnectBaseDelayMs * 2 ** steps, reconnectMaxDelayMs);
 }
-const pinHintStorageKey = 'vps-terminal-pin-hint-seen';
 // Bump when the stored key/profile shape changes. There are no migrations: the
 // app is not distributed, so stored preferences are never worth carrying
 // forward, and one reset is cheaper to reason about than a chain of one-shots.
@@ -250,8 +248,6 @@ const preferencesSchemaStorageKey = 'vps-terminal-preferences-schema';
 const maximumPasteLength = 16384;
 const chipLongPressMilliseconds = 480;
 const chipLongPressMoveTolerance = 10;
-// Main strip scrolls; allow more pins without crowding Settings.
-const maximumFooterPins = 8;
 const maximumCustomKeys = 24;
 const maximumCustomKeyLabelLength = 16;
 const maximumCustomKeySequenceLength = 32;
@@ -474,11 +470,7 @@ const starterKeyProfileTemplates = [
       'pgdn',
       'scroll-end'
     ],
-    snippetIds: [],
-    pins: [
-      { kind: 'key', id: 'esc' },
-      { kind: 'key', id: 'shift-tab' }
-    ]
+    snippetIds: []
   },
   {
     id: 'profile-claude000',
@@ -501,11 +493,7 @@ const starterKeyProfileTemplates = [
       'pgdn',
       'scroll-end'
     ],
-    snippetIds: [],
-    pins: [
-      { kind: 'key', id: 'esc' },
-      { kind: 'key', id: 'shift-tab' }
-    ]
+    snippetIds: []
   },
   {
     id: 'profile-grok0000',
@@ -531,11 +519,7 @@ const starterKeyProfileTemplates = [
       'pgdn',
       'scroll-end'
     ],
-    snippetIds: [],
-    pins: [
-      { kind: 'key', id: 'esc' },
-      { kind: 'key', id: 'shift-tab' }
-    ]
+    snippetIds: []
   }
 ];
 // Display labels for the settings picker (order is picker order).
@@ -979,9 +963,6 @@ let lastSelectionApplyLogAt = 0;
 let lastTouchClientX = 0;
 let lastTouchClientY = 0;
 let deferredInstallPrompt = null;
-// Row 2 held open without the keyboard, by holding the keyboard button. The
-// keyboard raises row 2 on its own; this is for reaching the keys without it.
-let footerRowTwoHeldOpen = false;
 // Which modifier row 2 is showing. Null means it shows the profile's keys, which
 // is its resting state — row 2 is a surface, not a drawer that opens.
 let footerChordModifier = null;
@@ -1209,7 +1190,7 @@ function renderQuickMenu() {
   }
   if (quickMenuProfileHint) {
     quickMenuProfileHint.textContent =
-      `Keys, Snippets, and pins used by ${activeSession}.`;
+      `Keys and snippets used by ${activeSession}.`;
   }
   // A background reconnect can rebuild this list while it is open, so keep the
   // caller's place instead of dropping focus and scroll to the top.
@@ -1722,40 +1703,6 @@ function sanitizeProfileSnippetIds(ids) {
   return cleaned;
 }
 
-function sanitizeProfilePins(pins, customKeys = []) {
-  const customIds = new Set(customKeys.map((entry) => entry.id));
-  const seen = new Set();
-  const cleaned = [];
-  if (!Array.isArray(pins)) {
-    return cleaned;
-  }
-  for (const entry of pins) {
-    if (
-      !entry ||
-      typeof entry.id !== 'string' ||
-      entry.id.length === 0 ||
-      entry.id.length > 128
-    ) {
-      continue;
-    }
-    const valid =
-      (entry.kind === 'key' &&
-        entry.id !== 'find' &&
-        (Object.hasOwn(builtinShortcutCatalog, entry.id) ||
-          customIds.has(entry.id))) ||
-      entry.kind === 'snip';
-    const identity = `${entry.kind}:${entry.id}`;
-    if (!valid || seen.has(identity)) {
-      continue;
-    }
-    seen.add(identity);
-    cleaned.push({ kind: entry.kind, id: entry.id });
-    if (cleaned.length >= maximumFooterPins) {
-      break;
-    }
-  }
-  return cleaned;
-}
 
 
 function sanitizeKeyProfile(entry, usedIds = new Set()) {
@@ -1772,10 +1719,7 @@ function sanitizeKeyProfile(entry, usedIds = new Set()) {
     return null;
   }
   const customKeys = sanitizeCustomKeyDefs(entry.customKeys);
-  const pins = sanitizeProfilePins(
-    Array.isArray(entry.pins) ? entry.pins : [],
-    customKeys
-  );
+
   return {
     id: entry.id,
     name,
@@ -1784,8 +1728,7 @@ function sanitizeKeyProfile(entry, usedIds = new Set()) {
       customKeys
     ),
     customKeys,
-    snippetIds: sanitizeProfileSnippetIds(entry.snippetIds),
-    pins
+    snippetIds: sanitizeProfileSnippetIds(entry.snippetIds)
   };
 }
 
@@ -1805,8 +1748,6 @@ function resetPreferencesIfSchemaChanged() {
     for (const key of [
       keyProfilesStorageKey,
       sessionKeyProfilesStorageKey,
-      footerRecentChipsStorageKey,
-      pinHintStorageKey
     ]) {
       window.localStorage.removeItem(key);
     }
@@ -1826,8 +1767,7 @@ function defaultShellKeyProfile() {
     name: 'Terminal',
     shortcutIds: [...defaultShortcutIds],
     customKeys: [],
-    snippetIds: null,
-    pins: []
+    snippetIds: null
   };
 }
 
@@ -1881,8 +1821,7 @@ function withStarterKeyProfiles(documentValue) {
       name: template.name,
       shortcutIds: [...template.shortcutIds],
       customKeys: [],
-      snippetIds: [...template.snippetIds],
-      pins: template.pins.map((pin) => ({ ...pin }))
+      snippetIds: [...template.snippetIds]
     });
   }
   return { ...documentValue, profiles };
@@ -2034,8 +1973,7 @@ function updateKeyProfile(profileId, updater) {
       shortcutIds: [...profile.shortcutIds],
       customKeys: profile.customKeys.map((entry) => ({ ...entry })),
       snippetIds:
-        profile.snippetIds === null ? null : [...profile.snippetIds],
-      pins: profile.pins.map((entry) => ({ ...entry }))
+        profile.snippetIds === null ? null : [...profile.snippetIds]
     });
   });
   return saveKeyProfilesDocument({
@@ -2102,13 +2040,7 @@ function saveProfileSnippetIds(ids, profileId = editorKeyProfile().id) {
   const cleaned = sanitizeProfileSnippetIds(ids);
   updateKeyProfile(profileId, (profile) => ({
     ...profile,
-    snippetIds: cleaned,
-    pins:
-      cleaned === null
-        ? profile.pins
-        : profile.pins.filter(
-            (pin) => pin.kind !== 'snip' || cleaned.includes(pin.id)
-          )
+    snippetIds: cleaned
   }));
   refreshKeysUi();
   if (profileSnippetList) {
@@ -2127,19 +2059,12 @@ function reconcileSnippetReferences() {
       profile.snippetIds === null
         ? null
         : profile.snippetIds.filter((id) => knownIds.has(id));
-    const selectedIds = snippetIds === null ? knownIds : new Set(snippetIds);
-    const pins = profile.pins.filter(
-      (pin) =>
-        pin.kind !== 'snip' ||
-        (knownIds.has(pin.id) && selectedIds.has(pin.id))
-    );
     if (
-      (snippetIds !== null &&
-        snippetIds.length !== profile.snippetIds.length) ||
-      pins.length !== profile.pins.length
+      snippetIds !== null &&
+      snippetIds.length !== profile.snippetIds.length
     ) {
       changed = true;
-      return { ...profile, snippetIds, pins };
+      return { ...profile, snippetIds };
     }
     return profile;
   });
@@ -2153,7 +2078,6 @@ function activateShortcut(id) {
   if (!def) {
     return;
   }
-  noteChipUsed('key', id);
   if (def.kind === 'modifier') {
     clearTerminalSelection();
     toggleModifierChord(def.modifier);
@@ -2383,171 +2307,17 @@ function modifierChordKeys(modifier) {
 }
 // ---- End of the pure modifier chord block. ----
 
-// ---- Start of the pure footer rail block. ----
-// Written free of DOM and browser globals so it can be sliced out of the shipped
-// source for tests, the same way the keyboard transition block is.
-
-// How many chips the rail builds before the measure pass hides what does not fit.
-// The measure decides what is visible; this only bounds how much DOM is made.
-const maximumFooterRailChips = 10;
-
-/**
- * Chip sets by foreground command, keyed on tmux `pane_current_command`.
- *
- * The point of the rail is to be right most of the time without being curated.
- * Commands are matched as exact lowercase basenames — a prefix match would make
- * `nodemon` an agent and `vimdiff` an editor, and both are wrong often enough to
- * be worse than the fallback.
- */
-const contextualChipSets = [
-  {
-    // Agent CLIs. `node` is here because Codex and most agent wrappers report it.
-    commands: ['claude', 'codex', 'node', 'aider', 'grok'],
-    ids: ['esc', 'shift-tab', 'ctrl-c', 'up']
-  },
-  {
-    commands: ['vim', 'nvim', 'vi', 'view'],
-    ids: ['esc', 'vim-write', 'ctrl-c', 'up']
-  },
-  {
-    commands: ['bash', 'zsh', 'sh', 'fish', 'ksh', 'dash'],
-    ids: ['tab', 'ctrl-r', 'ctrl-c', 'up']
-  },
-  {
-    // Pagers: scrolling and quitting, not editing.
-    commands: ['less', 'more', 'man', 'git'],
-    ids: ['space', 'up', 'down', 'ctrl-c']
-  }
-];
-
-/**
- * Last resort, used only when pins, context and recents together produce nothing
- * — a fresh profile watching an unrecognised command. An empty rail reads as
- * broken, and these four are useful under anything.
- */
-const defaultRailChipIds = ['esc', 'tab', 'up', 'ctrl-c'];
-
-/**
- * Chip ids for a foreground command, or [] when the command is unknown. Empty is
- * the honest answer: the caller falls back to pins and recents rather than
- * emptying the rail.
- */
-function contextualChipIdsForCommand(command) {
-  if (typeof command !== 'string' || command.length === 0) {
-    return [];
-  }
-  const normalized = command.trim().toLowerCase();
-  const set = contextualChipSets.find((entry) =>
-    entry.commands.includes(normalized)
-  );
-  return set ? [...set.ids] : [];
-}
-
-/**
- * The rail, in order: pinned chips first, then the contextual set for whatever is
- * running, then most-recently-used. Pins keep their slots because they are listed
- * first and the measure pass hides from the end — so a contextual chip can never
- * push a pin off the rail.
- */
-function orderFooterRailChips(options = {}) {
-  const pins = options.pins || [];
-  const contextual = options.contextual || [];
-  const recent = options.recent || [];
-  const isKnown = options.isKnown || (() => true);
-  const limit = options.limit ?? maximumFooterRailChips;
-  const seen = new Set();
-  const chips = [];
-  const push = (kind, id, source) => {
-    const key = `${kind}:${id}`;
-    if (seen.has(key) || chips.length >= limit || !isKnown(kind, id)) {
-      return;
-    }
-    seen.add(key);
-    chips.push({ kind, id, source, pinned: source === 'pin' });
-  };
-  for (const pin of pins) {
-    push(pin.kind, pin.id, 'pin');
-  }
-  for (const id of contextual) {
-    push('key', id, 'contextual');
-  }
-  for (const entry of recent) {
-    push(entry.kind, entry.id, 'recent');
-  }
-  if (chips.length === 0) {
-    for (const id of options.fallback || defaultRailChipIds) {
-      push('key', id, 'default');
-    }
-  }
-  return chips;
-}
-
-/**
- * Move a chip to the front of the recent list. Bounded, and it stores only the
- * kind and id of a chip the user already has — no terminal content.
- */
-function recordChipUse(recent, kind, id, limit = maximumFooterRailChips) {
-  const next = (recent || []).filter(
-    (entry) => entry.kind !== kind || entry.id !== id
-  );
-  next.unshift({ kind, id });
-  return next.slice(0, limit);
-}
-// ---- End of the pure footer rail block. ----
 
 // Most-recently-used chips, newest first. Chip identities only — never terminal
 // content — so this is ordinary preference data, not paste-buffer data.
-let footerRecentChips = loadFooterRecentChips();
 
-function loadFooterRecentChips() {
-  if (qaShellMode) {
-    return [];
-  }
-  try {
-    const raw = window.localStorage.getItem(footerRecentChipsStorageKey);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) {
-      return [];
-    }
-    return parsed
-      .filter(
-        (entry) =>
-          entry &&
-          (entry.kind === 'key' || entry.kind === 'snip') &&
-          typeof entry.id === 'string' &&
-          entry.id.length > 0 &&
-          entry.id.length <= 64
-      )
-      .slice(0, maximumFooterRailChips)
-      .map((entry) => ({ kind: entry.kind, id: entry.id }));
-  } catch {
-    return [];
-  }
-}
 
-function saveFooterRecentChips() {
-  if (qaShellMode) {
-    return;
-  }
-  try {
-    window.localStorage.setItem(
-      footerRecentChipsStorageKey,
-      JSON.stringify(footerRecentChips)
-    );
-  } catch {
-    // Continue without persistence.
-  }
-}
 
 /**
  * Deliberately does not re-render. Rebuilding the rail on the tap that is being
  * handled would swap the DOM out from under the finger that pressed it; the new
  * order lands on the next natural rebuild (session, profile, or command change).
  */
-function noteChipUsed(kind, id) {
-  footerRecentChips = recordChipUse(footerRecentChips, kind, id);
-  saveFooterRecentChips();
-}
 
 /** The foreground command of the active session, or null when unknown. */
 function activeSessionCommand() {
@@ -2558,89 +2328,11 @@ function activeSessionCommand() {
   return typeof session?.command === 'string' ? session.command : null;
 }
 
-function loadFooterPins(profile = activeKeyProfile()) {
-  return sanitizeProfilePins(profile?.pins, profile?.customKeys);
-}
 
-function saveFooterPins(pins, profileId = activeKeyProfile().id) {
-  const profile = keyProfileById(profileId) || activeKeyProfile();
-  const cleaned = sanitizeProfilePins(pins, profile.customKeys);
-  updateKeyProfile(profile.id, (entry) => ({
-    ...entry,
-    pins: cleaned
-  }));
-  return cleaned;
-}
 
-function removeFooterPinFromEveryProfile(kind, id) {
-  const documentValue = loadKeyProfilesDocument();
-  let changed = false;
-  const profiles = documentValue.profiles.map((profile) => {
-    const pins = profile.pins.filter(
-      (pin) => pin.kind !== kind || pin.id !== id
-    );
-    if (pins.length === profile.pins.length) {
-      return profile;
-    }
-    changed = true;
-    return { ...profile, pins };
-  });
-  if (changed) {
-    saveKeyProfilesDocument({ ...documentValue, profiles });
-  }
-}
 
-function isPinned(kind, id, profile = activeKeyProfile()) {
-  return loadFooterPins(profile).some(
-    (entry) => entry.kind === kind && entry.id === id
-  );
-}
 
-function toggleProfilePin(profileId, kind, id) {
-  const profile = keyProfileById(profileId);
-  if (!profile) {
-    return;
-  }
-  const pins = loadFooterPins(profile);
-  const index = pins.findIndex(
-    (entry) => entry.kind === kind && entry.id === id
-  );
-  if (index >= 0) {
-    pins.splice(index, 1);
-    setStatus('Unpinned');
-  } else {
-    if (pins.length >= maximumFooterPins) {
-      setStatus(`Pin limit ${maximumFooterPins}`);
-      return;
-    }
-    if (kind === 'key' && !isKnownShortcutId(id, profile)) {
-      return;
-    }
-    if (
-      kind === 'snip' &&
-      !snippetsForProfile(profile).some((entry) => entry.id === id)
-    ) {
-      return;
-    }
-    pins.push({ kind, id });
-    try {
-      if (window.localStorage.getItem(pinHintStorageKey) !== '1') {
-        window.localStorage.setItem(pinHintStorageKey, '1');
-        setStatus('Pinned — hold chip again to remove');
-      } else {
-        setStatus('Pinned');
-      }
-    } catch {
-      setStatus('Pinned');
-    }
-  }
-  saveFooterPins(pins, profile.id);
-  refreshKeysUi();
-}
 
-function toggleFooterPin(kind, id) {
-  toggleProfilePin(activeKeyProfile().id, kind, id);
-}
 
 /**
  * Row 2 is visible while the keyboard is up, or while a picker is open.
@@ -2651,28 +2343,19 @@ function toggleFooterPin(kind, id) {
  * rows for keys that row 1 already carries, so it goes away — unless a picker
  * needs it, in which case it is worth the reflow for the moment it is up.
  */
-function footerRowTwoShouldShow() {
-  if (footerChordModifier || footerRowTwoHeldOpen) {
-    return true;
-  }
-  // Portrait only. The analysis measured 85.5% of portrait height going to the
-  // terminal against a 75% target, which is what makes the second row
-  // affordable. Landscape has no such headroom — the terminal is short and the
-  // footer already competes with it — so there the row appears for a picker and
-  // otherwise stays away.
-  return (
-    keyboardViewportIsReduced() &&
-    Boolean(
-      window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
-    )
-  );
-}
 
+/**
+ * Row 2 exists only while a modifier picker is up.
+ *
+ * Row 1 carries the whole profile now, so row 2 has no resting content to show.
+ * Appearing and disappearing costs a terminal reflow, which is the price of
+ * keeping the secondaries on their own line rather than swapping row 1.
+ */
 function updateFooterRowTwo() {
   if (!footerDrawerElement) {
     return;
   }
-  const show = footerRowTwoShouldShow();
+  const show = Boolean(footerChordModifier);
   const wasHidden = footerDrawerElement.hidden;
   footerDrawerElement.hidden = !show;
   if (show) {
@@ -2694,15 +2377,6 @@ function updateFooterRowTwo() {
  * reach when the keyboard is down — row 1 only carries ten chips. This is the way
  * back to it, and it stays until it is held again.
  */
-function toggleFooterRowTwoHeld() {
-  footerRowTwoHeldOpen = !footerRowTwoHeldOpen;
-  if (!footerRowTwoHeldOpen) {
-    footerChordModifier = null;
-    setArmedModifier(null);
-  }
-  updateFooterRowTwo();
-  setStatus(footerRowTwoHeldOpen ? 'Keys shown' : 'Keys hidden');
-}
 
 function closeFooterDrawer() {
   if (!footerChordModifier) {
@@ -2722,9 +2396,7 @@ function createKeyChipButton(id, options = {}) {
   button.type = 'button';
   button.dataset.shortcutId = id;
   button.textContent = def.label;
-  button.title = options.pinned
-    ? `${def.label} — hold to unpin`
-    : `${def.label} — hold to pin`;
+  button.title = def.label;
   if (def.kind === 'modifier') {
     const held = modifierChipIsHeld(def.modifier);
     button.setAttribute('aria-pressed', String(held));
@@ -2732,42 +2404,10 @@ function createKeyChipButton(id, options = {}) {
       button.classList.add('active');
     }
   }
-  if (options.pinned) {
-    button.dataset.pinKind = 'key';
-    button.dataset.pinId = id;
-  }
-  installChipLongPress(button, {
-    onTap: () => activateShortcut(id),
-    onHold: () => toggleFooterPin('key', id)
-  });
+  installChipLongPress(button, { onTap: () => activateShortcut(id) });
   return button;
 }
 
-function createSnipChipButton(snippet, options = {}) {
-  if (!snippet) {
-    return null;
-  }
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.dataset.snippetId = snippet.id;
-  button.textContent = snippet.label;
-  const runs = snippet.run !== false;
-  button.classList.toggle('snippet-run', runs);
-  button.title = options.pinned
-    ? `${snippet.label} — hold to unpin`
-    : runs
-      ? `${snippet.label} — tap to run, hold to pin`
-      : `${snippet.label} — tap to insert, hold to pin`;
-  if (options.pinned) {
-    button.dataset.pinKind = 'snip';
-    button.dataset.pinId = snippet.id;
-  }
-  installChipLongPress(button, {
-    onTap: () => runSnippet(snippet.id),
-    onHold: () => toggleFooterPin('snip', snippet.id)
-  });
-  return button;
-}
 
 /** An open drawer always says something; a blank strip looks broken. */
 function appendDrawerEmptyHint(text) {
@@ -2812,7 +2452,6 @@ function sendModifierChord(key) {
   sendInput(key.sequence);
   // Only the chords that exist as chips can come back as a recent chip.
   if (isKnownShortcutId(key.id)) {
-    noteChipUsed('key', key.id);
   }
   closeFooterDrawer();
 }
@@ -2854,18 +2493,7 @@ function renderFooterDrawer() {
   footerDrawerElement.replaceChildren();
   if (footerChordModifier) {
     renderModifierChordRow();
-    return;
   }
-  for (const id of loadShortcutIds()) {
-    const button = createKeyChipButton(id, { pinned: isPinned('key', id) });
-    if (button) {
-      if (isPinned('key', id)) {
-        button.classList.add('active');
-      }
-      footerDrawerElement.append(button);
-    }
-  }
-  appendFooterEditChip();
 }
 
 /**
@@ -2873,10 +2501,7 @@ function renderFooterDrawer() {
  * the way to change them. In row 2 rather than row 1, where it would cost bar
  * width that the removed Keys and Snips buttons just gave back.
  */
-function appendFooterEditChip() {
-  if (!footerDrawerElement) {
-    return;
-  }
+function createFooterEditChip() {
   const button = document.createElement('button');
   button.type = 'button';
   button.id = 'footer-edit-keys';
@@ -2889,57 +2514,32 @@ function appendFooterEditChip() {
     openSettingsDialog();
     setSettingsTab('profiles');
   });
-  footerDrawerElement.append(button);
+  return button;
 }
 
-// What the rail was last built for, so a poll that changed nothing does not
-// rebuild the DOM under the user's finger.
-let footerRailCommand = null;
-
+/**
+ * Row 1 is the profile: every key it holds, in the order the editor shows them,
+ * and Edit at the end of the scroll.
+ *
+ * There is no choosing which keys get the space any more. Pinning, the
+ * contextual set and the recent ordering all existed to pick ten chips out of
+ * the profile; a scroller that carries all of them needs none of it.
+ */
 function renderFooterPins() {
   if (!footerPinsElement) {
     return;
   }
-  const snippets = snippetsForProfile();
-  footerRailCommand = activeSessionCommand();
-  const chips = orderFooterRailChips({
-    pins: loadFooterPins(),
-    contextual: contextualChipIdsForCommand(footerRailCommand),
-    recent: footerRecentChips,
-    isKnown: (kind, id) =>
-      kind === 'key'
-        ? isKnownShortcutId(id)
-        : snippets.some((entry) => entry.id === id)
-  });
   footerPinsElement.replaceChildren();
-  for (const chip of chips) {
-    if (chip.kind === 'key') {
-      const button = createKeyChipButton(chip.id, { pinned: chip.pinned });
-      if (button) {
-        button.dataset.chipSource = chip.source;
-        footerPinsElement.append(button);
-      }
-      continue;
-    }
-    const snippet = snippets.find((entry) => entry.id === chip.id);
-    if (!snippet) {
-      continue;
-    }
-    const button = createSnipChipButton(snippet, { pinned: chip.pinned });
+  for (const id of loadShortcutIds()) {
+    const button = createKeyChipButton(id);
     if (button) {
-      button.dataset.chipSource = chip.source;
       footerPinsElement.append(button);
     }
   }
+  footerPinsElement.append(createFooterEditChip());
 }
 
 /** Rebuild the rail only when the foreground command actually moved. */
-function refreshFooterRailForCommand() {
-  if (activeSessionCommand() === footerRailCommand) {
-    return;
-  }
-  renderFooterPins();
-}
 
 function installChipLongPress(button, { onTap, onHold }) {
   let timer = null;
@@ -3064,7 +2664,7 @@ function updateAppHelpPanel() {
   }
   help.textContent = [
     `${appDisplayName}.`,
-    'Hold a Keys/Snips chip to pin it to the main bar.',
+    'The key bar carries every key in the active profile; Edit is at the end of it.',
     'Menu holds Find, rename, reconnect, and session profile.',
     'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
   ].join(' ');
@@ -3106,11 +2706,10 @@ function runSnippet(id, options = {}) {
     setStatus('Connect a session first');
     return;
   }
-  noteChipUsed('snip', id);
   clearTerminalSelection();
   setArmedModifier(null);
   let body = snippet.body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  // Default from snippet.run; options.invert flips for long-press on pin.
+  // Default from snippet.run; options.invert flips it.
   let shouldRun = snippet.run !== false;
   if (options.invert) {
     shouldRun = !shouldRun;
@@ -3295,7 +2894,6 @@ async function removeSnippet(id) {
   }
   try {
     await saveSnippetsToServer(next);
-    removeFooterPinFromEveryProfile('snip', id);
     renderFooterPins();
   } catch (error) {
     window.alert(error.message);
@@ -3459,8 +3057,7 @@ function renderKeyProfileControls() {
   if (keyProfileSummary) {
     keyProfileSummary.textContent = [
       `${profile.shortcutIds.length} keys`,
-      `${visibleSnippetCount} snippets`,
-      `${profile.pins.length} pinned`
+      `${visibleSnippetCount} snippets`
     ].join(' · ');
   }
   if (profileKeyCount) {
@@ -3474,23 +3071,6 @@ function renderKeyProfileControls() {
   }
 }
 
-function createProfilePinToggle(kind, id, label, profile, options = {}) {
-  const pinned = isPinned(kind, id, profile);
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'settings-profile-pin';
-  button.dataset.action = 'pin';
-  button.classList.toggle('active', pinned);
-  button.disabled = options.disabled === true;
-  button.title = pinned ? `Unpin ${label}` : `Pin ${label} to main bar`;
-  button.setAttribute('aria-label', button.title);
-  button.setAttribute('aria-pressed', String(pinned));
-  button.innerHTML =
-    '<svg viewBox="0 0 20 20" aria-hidden="true">' +
-    '<path d="M7 3h6l-.8 4 2.3 2.3v1.2h-4V17l-1 1-1-1v-6.5h-4V9.3L6.8 7z" />' +
-    '</svg>';
-  return button;
-}
 
 function renderProfileSnippetSelector() {
   if (!profileSnippetList) {
@@ -3535,16 +3115,8 @@ function renderProfileSnippetSelector() {
     behavior.className = 'settings-profile-snippet-behavior';
     behavior.textContent = snippet.run === false ? 'Insert' : 'Run';
 
-    const pin = createProfilePinToggle(
-      'snip',
-      snippet.id,
-      snippet.label,
-      profile,
-      { disabled: !input.checked }
-    );
-
     selection.append(input, label, behavior);
-    item.append(selection, pin);
+    item.append(selection);
     profileSnippetList.append(item);
   }
 }
@@ -3572,8 +3144,7 @@ function createKeyProfile() {
     name,
     shortcutIds: [...defaultShortcutIds],
     customKeys: [],
-    snippetIds: [],
-    pins: []
+    snippetIds: []
   };
   const documentValue = loadKeyProfilesDocument();
   saveKeyProfilesDocument({
@@ -3616,11 +3187,7 @@ function duplicateKeyProfile() {
     shortcutIds: source.shortcutIds.map((id) => idMap.get(id) || id),
     customKeys,
     snippetIds:
-      source.snippetIds === null ? null : [...source.snippetIds],
-    pins: source.pins.map((pin) => ({
-      ...pin,
-      id: pin.kind === 'key' ? idMap.get(pin.id) || pin.id : pin.id
-    }))
+      source.snippetIds === null ? null : [...source.snippetIds]
   };
   saveKeyProfilesDocument({
     ...documentValue,
@@ -3772,8 +3339,6 @@ function renderShortcutEditor() {
     const actions = document.createElement('div');
     actions.className = 'shortcut-editor-actions';
 
-    const pin = createProfilePinToggle('key', id, def.label, profile);
-
     const more = document.createElement('details');
     more.className = 'shortcut-editor-more';
     const moreSummary = document.createElement('summary');
@@ -3810,7 +3375,7 @@ function renderShortcutEditor() {
 
     moreActions.append(up, down, remove);
     more.append(moreSummary, moreActions);
-    actions.append(pin, more);
+    actions.append(more);
     item.append(label, actions);
     shortcutEditorList.append(item);
   });
@@ -3906,10 +3471,6 @@ function removeShortcut(id) {
       loadCustomKeyDefs(profile).filter((entry) => entry.id !== id),
       profile.id
     );
-    const pins = loadFooterPins(profile).filter(
-      (pin) => !(pin.kind === 'key' && pin.id === id)
-    );
-    saveFooterPins(pins, profile.id);
   }
   refreshKeysUi();
 }
@@ -4994,7 +4555,7 @@ function setKeyboardButtonState(visible) {
   keyboardButton.classList.toggle('active', visible);
   keyboardButton.setAttribute('aria-pressed', String(visible));
   const keyboardLabel = visible ? 'Hide keyboard' : 'Show keyboard';
-  keyboardButton.title = `${keyboardLabel} — hold to show keys`;
+  keyboardButton.title = keyboardLabel;
   keyboardButton.setAttribute('aria-label', keyboardLabel);
 }
 
@@ -7359,8 +6920,7 @@ function freshPreferencesSnapshot() {
           name: 'Terminal',
           shortcutIds: [...defaultShortcutIds],
           customKeys: [],
-          snippetIds: null,
-          pins: []
+          snippetIds: null
         }
       ]
     }),
@@ -7442,7 +7002,7 @@ function updatePreferencesSyncUi() {
     local: {
       label: 'Not enabled',
       help:
-        'This browser is local-only. Enable to sync profiles, pins, ' +
+        'This browser is local-only. Enable to sync profiles, ' +
         'sessions, and themes to your login.'
     },
     saving: {
@@ -7452,7 +7012,7 @@ function updatePreferencesSyncUi() {
     synced: {
       label: 'Synced',
       help:
-        'Profiles, pins, sessions, and themes follow your login; view, path, ' +
+        'Profiles, sessions, and themes follow your login; view, path, ' +
         'font size, and layout stay on this device.'
     },
     offline: {
@@ -9671,7 +9231,6 @@ async function refreshSessions(selectFirst = false, quiet = false) {
     }
     renderSessions();
     // The rail is keyed on the foreground command, which only this poll reports.
-    refreshFooterRailForCommand();
     if (selectFirst && !qaShellMode && !activeSession && sessions.length > 0) {
       const remembered = rememberedSession();
       const selected =
@@ -9995,8 +9554,6 @@ function captureKeyboardLayoutLock() {
   document.documentElement.classList.add('keyboard-open');
   document.documentElement.classList.remove('standalone-reserved-bottom');
   updateEffectiveSafeAreaInsets();
-  // Row 2 exists while the keyboard is up; this is where it starts existing.
-  updateFooterRowTwo();
   document.documentElement.style.setProperty(
     '--app-height',
     `${keyboardLayoutLock.height}px`
@@ -10053,8 +9610,6 @@ function clearLockedAppGeometry(options = {}) {
   lastAppliedViewportHeight = null;
   lastAppliedViewportTop = null;
   document.documentElement.classList.remove('keyboard-open');
-  // ...and this is where it stops, unless a picker is holding it open.
-  updateFooterRowTwo();
   // Prefer an explicit resting height over bare 100dvh (standalone hit-test).
   applyRestingAppHeight(options);
   updateEffectiveSafeAreaInsets();
@@ -13395,10 +12950,7 @@ for (const activity of ['pointerdown', 'keydown', 'focusin', 'scroll']) {
 document
   .querySelector('#collapse-header')
   .addEventListener('click', () => setHeaderCollapsed(true));
-installChipLongPress(keyboardButton, {
-  onTap: toggleKeyboard,
-  onHold: toggleFooterRowTwoHeld
-});
+keyboardButton.addEventListener('click', toggleKeyboard);
 // Start clipboard read on the earliest gesture (text + image in one call).
 pasteButton.addEventListener(
   'pointerdown',
@@ -13652,9 +13204,7 @@ shortcutEditorList?.addEventListener('click', (event) => {
   }
   const id = item.dataset.shortcutId;
   const action = button.dataset.action;
-  if (action === 'pin') {
-    toggleProfilePin(editorKeyProfile().id, 'key', id);
-  } else if (action === 'up') {
+  if (action === 'up') {
     moveShortcut(id, -1);
   } else if (action === 'down') {
     moveShortcut(id, 1);
@@ -13700,14 +13250,6 @@ profileSnippetList?.addEventListener('change', (event) => {
     'input[type="checkbox"]:checked'
   )].map((input) => input.value);
   saveProfileSnippetIds(ids);
-});
-profileSnippetList?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-action="pin"]');
-  const item = event.target.closest('[data-snippet-id]');
-  if (!button || !item || !profileSnippetList.contains(item)) {
-    return;
-  }
-  toggleProfilePin(editorKeyProfile().id, 'snip', item.dataset.snippetId);
 });
 profileSnippetsAllButton?.addEventListener('click', () => {
   saveProfileSnippetIds(null);
