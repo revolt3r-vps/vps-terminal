@@ -91,9 +91,8 @@
              location select move in here, because the Files header row is
              otherwise blank while the toolbar below it is crowded. -->
         <div id="files-header-nav" hidden></div>
-        <!-- Two segments, not a toggle: the active view is readable without
-             working out what the icon would do next. Text, because "Term" and
-             "Files" are shorter to read than either icon is to decode. -->
+        <!-- Two segments rather than one toggle, so the active view is readable
+             without working out what the icon would do next. -->
         <div id="view-mode" role="tablist" aria-label="Main view">
           <button
             type="button"
@@ -101,16 +100,28 @@
             data-view-mode="term"
             role="tab"
             aria-selected="true"
+            title="Terminal"
             aria-label="Terminal"
-          >Term</button>
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
+              <path d="m5.5 7 2.5 2.5L5.5 12M10 12h4" />
+            </svg>
+          </button>
           <button
             type="button"
             class="view-mode-btn"
             data-view-mode="files"
             role="tab"
             aria-selected="false"
+            title="Files"
             aria-label="Files"
-          >Files</button>
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M2.5 6.5h15v8a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z" />
+              <path d="M2.5 7V5.5a2 2 0 0 1 2-2h3l1.5 2h6.5a2 2 0 0 1 2 2" />
+            </svg>
+          </button>
         </div>
         <button
           id="header-settings"
@@ -695,7 +706,6 @@
         ></div>
       </section>
       <div class="quick-menu-actions">
-        <button id="quick-menu-find" type="button">Find in scrollback</button>
         <button id="quick-menu-reconnect" type="button">Reconnect session</button>
         <button id="quick-menu-settings" type="button">Terminal settings</button>
       </div>

@@ -89,7 +89,6 @@ const quickMenuProfileValue = document.querySelector(
 );
 const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
 const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
-const quickMenuFindButton = document.querySelector('#quick-menu-find');
 const quickMenuReconnectButton = document.querySelector(
   '#quick-menu-reconnect'
 );
@@ -1170,7 +1169,6 @@ function openQuickMenu() {
     return;
   }
   renderQuickMenu();
-  renderKeybindingHints();
   updateTermControlsEnabled();
   if (!quickMenuDialog.open) {
     quickMenuDialog.showModal();
@@ -1230,11 +1228,6 @@ function updateTermControlsEnabled() {
     button.title = name;
     button.setAttribute('aria-label', name);
   };
-  describeMenuAction(
-    quickMenuFindButton,
-    live,
-    live ? '' : 'connect a session first'
-  );
   describeMenuAction(
     quickMenuReconnectButton,
     Boolean(activeSession),
@@ -2309,9 +2302,36 @@ function renderFooterDrawer() {
 }
 
 /**
- * Edit sits after every shortcut, so scrolling to the end of your keys lands on
- * the way to change them. In row 2 rather than row 1, where it would cost bar
- * width that the removed Keys and Snips buttons just gave back.
+ * Search and Edit close the strip, in that order: the two things that are not
+ * keys, after every key.
+ *
+ * Search is a fixed chip rather than a configurable shortcut id on purpose.
+ * `find` is excluded from profiles in sanitizeShortcutIdsForProfile, and
+ * builtinShortcutCatalog says so in its header — rendering it here leaves both
+ * true, so a profile can never end up carrying two spellings of find.
+ */
+function createFooterFindChip() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = 'footer-find';
+  button.className = 'chip-edit';
+  button.textContent = 'Search';
+  button.title = 'Find in scrollback';
+  button.addEventListener('click', () => {
+    closeFooterDrawer();
+    openFindBar();
+  });
+  // The Ctrl/Cmd+F hint the Menu entry used to carry. It renders on fine
+  // pointers only, and now travels with the control rather than sitting in a
+  // sheet you had to open first.
+  renderKeybindingHint(button, 'find.open');
+  return button;
+}
+
+/**
+ * Edit sits last, so scrolling to the end of your keys lands on the way to change
+ * them. Inside the scroller rather than beside Paste and Menu, where it would
+ * cost permanent bar width for something reached once a month.
  */
 function createFooterEditChip() {
   const button = document.createElement('button');
@@ -2331,7 +2351,7 @@ function createFooterEditChip() {
 
 /**
  * Row 1 is the profile: every key it holds, in the order the editor shows them,
- * and Edit at the end of the scroll.
+ * then Search and Edit at the end of the scroll.
  *
  * There is no choosing which keys get the space any more. Pinning, the
  * contextual set and the recent ordering all existed to pick ten chips out of
@@ -2348,7 +2368,7 @@ function renderFooterPins() {
       footerPinsElement.append(button);
     }
   }
-  footerPinsElement.append(createFooterEditChip());
+  footerPinsElement.append(createFooterFindChip(), createFooterEditChip());
 }
 
 /** Rebuild the rail only when the foreground command actually moved. */
@@ -5170,10 +5190,6 @@ function renderKeybindingReference() {
       : row.label;
     list.append(term, description);
   }
-}
-
-function renderKeybindingHints() {
-  renderKeybindingHint(quickMenuFindButton, 'find.open');
 }
 
 function keybindingContext(event) {
@@ -9603,13 +9619,17 @@ function startNativeTouchGesture(touch) {
 
 /**
  * Which session a horizontal swipe of `dx` from `current` lands on, or null when
- * there is nothing that way. Null is what produces the rubber-band: the drag is
+ * there is nowhere to go. Null is what produces the rubber-band: the drag is
  * still tracked, it just cannot commit.
  *
  * `order` is the session list as the picker shows it, so the swipe and the list
- * agree on what "next" means. The deck is N sessions rather than a pair, and it
- * stops at both ends rather than wrapping — wrapping would make the last session
- * adjacent to the first, which is not how the list reads.
+ * agree on what "next" means. The deck wraps in both directions: swiping left off
+ * the last session lands on the first. Stopping at the ends read as a dead end in
+ * use, and a wrap costs nothing when the pill names where you are going anyway.
+ *
+ * With the wrap in place the only null left is a deck of one, which the
+ * target-is-current guard below catches — modulo would otherwise hand back the
+ * session you are already on.
  *
  * The viewSwipe* names are historical: this gesture used to switch between the
  * terminal and Files. The mechanics below — activation distance, dominance ratio,
@@ -9620,7 +9640,8 @@ function viewSwipeTarget(order, current, dx) {
   if (index < 0 || dx === 0) {
     return null;
   }
-  const target = order[index + (dx < 0 ? 1 : -1)] ?? null;
+  const step = dx < 0 ? 1 : -1;
+  const target = order[(index + step + order.length) % order.length];
   // Landing on the session already connected must be a no-op, not a reconnect.
   return target === current ? null : target;
 }
@@ -9680,9 +9701,11 @@ function viewSwipeCommitDistance(viewportWidth) {
 }
 
 /**
- * How far the view is dragged, in pixels. Movement toward a view that does not
- * exist is damped to a third so the edge of the deck is felt rather than moving
- * like a real page.
+ * How far the view is dragged, in pixels. A drag with nowhere to go is damped to
+ * a third, so it is felt as resistance rather than moving like a real page.
+ *
+ * Now that the deck wraps, the only way to get here is a deck of one session.
+ * Rare, but real: it is what stops a lone session sliding off its own screen.
  */
 function viewSwipeOffset(dx, hasTarget) {
   return hasTarget ? dx : Math.round(dx / 3);
@@ -12895,10 +12918,6 @@ commandPaletteDialog?.addEventListener('close', () => {
   } catch {
     // A control that vanished while the palette was open is not worth failing on.
   }
-});
-quickMenuFindButton?.addEventListener('click', () => {
-  closeQuickMenu();
-  openFindBar();
 });
 quickMenuReconnectButton?.addEventListener('click', () => {
   closeQuickMenu();

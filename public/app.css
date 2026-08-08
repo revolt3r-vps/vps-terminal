@@ -317,16 +317,25 @@ header.collapsed #view-mode {
 
 .view-mode-btn {
   flex: 0 0 auto;
-  min-width: 0;
+  min-width: var(--header-control);
   min-height: var(--header-control);
-  padding: 0 9px;
+  padding: 0;
   border: 0;
   border-radius: calc(var(--header-radius) - 1px);
   background: transparent;
   color: var(--muted);
-  font-size: var(--header-font);
   font-weight: 700;
   letter-spacing: 0.02em;
+}
+
+.view-mode-btn svg {
+  width: 17px;
+  height: 17px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .view-mode-btn[aria-selected='true'] {
@@ -344,16 +353,15 @@ header.collapsed #view-mode {
   body {
     --header-control: 44px;
     /* The floor: one 44px touch target plus the 1px bottom border. It used to be
-     * 52px to fit a 46px Term|Files switch. The switch is back as two text
-     * segments, but its frame is an inset shadow rather than a border, so the
-     * control is 44px in the 45px row instead of 46px. */
+     * 52px to fit a 46px Term|Files switch. The switch is back, but its frame is
+     * an inset shadow rather than a border, so the control is 44px in the 45px
+     * row instead of 46px. */
     --header-height: calc(var(--header-control) + 1px);
   }
 
-  /* Full control height, so each segment is a real 44px target. The width comes
-   * from the label rather than a square icon box. */
+  /* Full control size, so each segment is a real 44px target. */
   .view-mode-btn {
-    min-width: 0;
+    min-width: var(--header-control);
     min-height: var(--header-control);
   }
 
@@ -3095,13 +3103,14 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /*
- * Edit is an action, not a key: it keeps the control width, the roomier padding
- * and the dashed outline, so scanning the row for a key skips over it.
+ * Search and Edit are actions, not keys: they keep the control width, the roomier
+ * padding and the dashed outline, so scanning the row for a key skips over them.
  *
  * Scoped through #footer-pins on purpose. `#footer-edit-keys` alone is (1,0,0)
  * and loses to `#footer-pins button` at (1,0,1), which is why its padding and
  * font-size were already being ignored before the keys got their own sizing.
  */
+#footer-pins #footer-find,
 #footer-pins #footer-edit-keys {
   min-width: var(--control-size);
   /* Sits on the key strip, so it takes the key height. Only its width, padding
@@ -3679,9 +3688,10 @@ footer button {
   #footer-main .footer-fixed,
   #footer-drawer button,
   #footer-pins button,
-  /* Listed separately: the portrait rule for Edit is #footer-pins
-     #footer-edit-keys, which outranks #footer-pins button and would otherwise
-     keep Edit at 44px instead of stretching it across the rail. */
+  /* Listed separately: the portrait rule for these is #footer-pins #id, which
+     outranks #footer-pins button and would otherwise keep them at 44px instead
+     of stretching them across the rail. */
+  #footer-pins #footer-find,
   #footer-pins #footer-edit-keys,
   #footer-files-main > button,
   #footer-files-main > .files-upload-label {
@@ -3857,10 +3867,10 @@ footer button {
   }
 
   header .view-mode-btn {
-    width: auto;
-    min-width: 0;
+    width: var(--header-control);
+    min-width: var(--header-control);
     min-height: var(--header-control);
-    padding: 0 8px;
+    padding: 0;
   }
 
   header.collapsed #header-summary {
