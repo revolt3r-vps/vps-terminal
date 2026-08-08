@@ -9291,6 +9291,12 @@ function openSettingsDialog() {
   renderAppBuildId();
   renderKeybindingReference();
   setSettingsTab(loadLastSettingsTab());
+  // A modal over a raised keyboard leaves both up, with the dialog squeezed into
+  // whatever the keyboard did not take. Hand the space back before showing it.
+  if (terminalInputIsFocused()) {
+    terminal?.blur();
+  }
+  setKeyPanelOpen(false);
   if (settingsDialogElement && !settingsDialogElement.open) {
     settingsDialogElement.showModal();
   }
@@ -13336,9 +13342,6 @@ keyPanelProfileButton?.addEventListener('click', () => {
   setKeyPanelOpen(false);
   openSettingsDialog();
   setSettingsTab('profiles');
-});
-document.querySelector('#settings-close').addEventListener('click', () => {
-  settingsDialogElement.close();
 });
 installDialogBackdropDismiss(settingsDialogElement, () => {
   settingsDialogElement.close();

@@ -2149,6 +2149,18 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   backdrop-filter: none;
 }
 
+/*
+ * The footer steps aside while a modal is up.
+ *
+ * visibility, not display: the bar keeps its box, so hiding it cannot resize the
+ * terminal — and a terminal resize behind a dialog would send a new size to the
+ * pty and make the remote app redraw, twice per visit to Settings.
+ */
+body:has(#settings-dialog[open]) footer,
+body:has(#files-options-dialog[open]) footer {
+  visibility: hidden;
+}
+
 .settings-heading {
   display: flex;
   align-items: center;

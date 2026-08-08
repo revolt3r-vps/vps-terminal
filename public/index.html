@@ -422,11 +422,10 @@
 
     <div id="status" role="status" aria-live="polite"></div>
 
-    <dialog id="settings-dialog" aria-labelledby="settings-title">
-      <div class="settings-heading">
-        <strong id="settings-title">Terminal settings</strong>
-        <button id="settings-close" class="icon-button" type="button" title="Close settings">×</button>
-      </div>
+    <!-- No heading row. The tab strip says where you are, and a title plus a
+         close button cost ~110px of a 844px screen to repeat it. Dismissal is
+         the backdrop tap installDialogBackdropDismiss wires up, plus Escape. -->
+    <dialog id="settings-dialog" aria-label="Terminal settings">
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Library</button>
