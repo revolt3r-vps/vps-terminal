@@ -126,14 +126,6 @@ const keyProfileDefaultSelect = document.querySelector(
 );
 const keyProfileSummary = document.querySelector('#key-profile-summary');
 const profileKeyCount = document.querySelector('#profile-key-count');
-const profileSnippetCount = document.querySelector('#profile-snippet-count');
-const profileSnippetList = document.querySelector('#profile-snippet-list');
-const profileSnippetsAllButton = document.querySelector(
-  '#profile-snippets-all'
-);
-const profileSnippetsNoneButton = document.querySelector(
-  '#profile-snippets-none'
-);
 const keyProfileNewButton = document.querySelector('#key-profile-new');
 const keyProfileDuplicateButton = document.querySelector(
   '#key-profile-duplicate'
@@ -243,7 +235,11 @@ function reconnectDelayForAttempt(attempt) {
 // Bump when the stored key/profile shape changes. There are no migrations: the
 // app is not distributed, so stored preferences are never worth carrying
 // forward, and one reset is cheaper to reason about than a chain of one-shots.
-const preferencesSchemaVersion = 1;
+// 2: the combination chips came out of the defaults and the starter profiles.
+// Nothing about the shape changed, but a profile saved under 1 still carries
+// ctrl-c and shift-tab, so without this the bar keeps them on every install that
+// already ran a 1.4.0 build.
+const preferencesSchemaVersion = 2;
 const preferencesSchemaStorageKey = 'vps-terminal-preferences-schema';
 const maximumPasteLength = 16384;
 const chipLongPressMilliseconds = 480;
@@ -253,7 +249,6 @@ const maximumCustomKeyLabelLength = 16;
 const maximumCustomKeySequenceLength = 32;
 const maximumKeyProfiles = 12;
 const maximumKeyProfileNameLength = 24;
-const maximumProfileSnippetIds = 50;
 const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
@@ -375,6 +370,11 @@ const builtinShortcutCatalog = {
   'vim-write': { label: ':w', kind: 'sequence', sequence: ':w\r' }
 };
 // Grouped for the Settings → Keys add picker (order within groups is picker order).
+// Single keys and modifiers only. Every combination — ctrl-a…ctrl-z, shift-tab —
+// is reachable by holding its modifier and tapping the key, so a chip for it would
+// be a second spelling of something already on the bar. The definitions stay in
+// builtinShortcutCatalog so older profiles keep loading, and the Custom key editor
+// (type Ctrl, letter c) puts any of them back for anyone who wants the one tap.
 const builtinShortcutGroups = [
   {
     label: 'Shell',
@@ -384,20 +384,12 @@ const builtinShortcutGroups = [
       'shift',
       'alt',
       'tab',
-      'shift-tab',
       'enter',
       'space',
       'backspace',
       'delete',
       'insert'
     ]
-  },
-  {
-    // The Ctrl chip reaches all 26 letters through its chord row, so the picker
-    // only carries the handful worth a dedicated one-tap chip. The rest stay in
-    // builtinShortcutCatalog so profiles saved before the chord row still load.
-    label: 'Ctrl (one-tap)',
-    ids: ['ctrl-c', 'ctrl-d', 'ctrl-z', 'ctrl-l', 'ctrl-r', 'ctrl-b']
   },
   {
     label: 'Arrows',
@@ -425,7 +417,9 @@ const builtinShortcutGroups = [
     ]
   }
 ];
-// Drawer defaults: shell/tmux essentials. Arrows live here (not main bar).
+// Single keys and modifiers, in the order the bar shows them. Ctrl+C, Ctrl+D and
+// the rest are one tap of Ctrl away, so a chip each would spend bar width on a
+// second route to the same byte.
 const defaultShortcutIds = [
   'esc',
   'ctrl',
@@ -433,11 +427,6 @@ const defaultShortcutIds = [
   'alt',
   'tab',
   'enter',
-  'ctrl-c',
-  'ctrl-d',
-  'ctrl-z',
-  'ctrl-l',
-  'ctrl-b',
   'left',
   'up',
   'down',
@@ -446,81 +435,14 @@ const defaultShortcutIds = [
   'pgdn',
   'scroll-end'
 ];
-// Starter profiles stay deliberately small. Agent-specific additions are
-// documented TUI controls; shared prompt text remains user-owned in Library.
+// Named starting points, not different keyboards. The agent-specific chips they
+// used to differ by were all combinations (shift-tab for mode switching, ctrl-o,
+// ctrl-p, f2), and those are a modifier tap away now, so all three open on the
+// same keys and diverge only once you edit one.
 const starterKeyProfileTemplates = [
-  {
-    id: 'profile-codex0000',
-    name: 'Codex',
-    shortcutIds: [
-      'esc',
-      'ctrl',
-      'shift',
-      'alt',
-      'shift-tab',
-      'ctrl-c',
-      'ctrl-o',
-      'tab',
-      'enter',
-      'left',
-      'up',
-      'down',
-      'right',
-      'pgup',
-      'pgdn',
-      'scroll-end'
-    ],
-    snippetIds: []
-  },
-  {
-    id: 'profile-claude000',
-    name: 'Claude',
-    shortcutIds: [
-      'esc',
-      'ctrl',
-      'shift',
-      'alt',
-      'shift-tab',
-      'ctrl-c',
-      'ctrl-d',
-      'tab',
-      'enter',
-      'left',
-      'up',
-      'down',
-      'right',
-      'pgup',
-      'pgdn',
-      'scroll-end'
-    ],
-    snippetIds: []
-  },
-  {
-    id: 'profile-grok0000',
-    name: 'Grok',
-    shortcutIds: [
-      'esc',
-      'ctrl',
-      'shift',
-      'alt',
-      'shift-tab',
-      'ctrl-p',
-      'ctrl-x',
-      'f2',
-      'ctrl-c',
-      'ctrl-d',
-      'tab',
-      'enter',
-      'left',
-      'up',
-      'down',
-      'right',
-      'pgup',
-      'pgdn',
-      'scroll-end'
-    ],
-    snippetIds: []
-  }
+  { id: 'profile-codex0000', name: 'Codex', shortcutIds: [...defaultShortcutIds] },
+  { id: 'profile-claude000', name: 'Claude', shortcutIds: [...defaultShortcutIds] },
+  { id: 'profile-grok0000', name: 'Grok', shortcutIds: [...defaultShortcutIds] }
 ];
 // Display labels for the settings picker (order is picker order).
 // The picker's contents. populateThemeSelect() calls replaceChildren(), so the
@@ -1676,35 +1598,6 @@ function sanitizeShortcutIdsForProfile(ids, customKeys, useDefaults = true) {
   return [...defaultShortcutIds];
 }
 
-function sanitizeProfileSnippetIds(ids) {
-  if (ids === null || ids === undefined) {
-    // Legacy profiles showed the whole shared library.
-    return null;
-  }
-  if (!Array.isArray(ids)) {
-    return [];
-  }
-  const seen = new Set();
-  const cleaned = [];
-  for (const id of ids) {
-    if (
-      typeof id !== 'string' ||
-      !/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/.test(id) ||
-      seen.has(id)
-    ) {
-      continue;
-    }
-    seen.add(id);
-    cleaned.push(id);
-    if (cleaned.length >= maximumProfileSnippetIds) {
-      break;
-    }
-  }
-  return cleaned;
-}
-
-
-
 function sanitizeKeyProfile(entry, usedIds = new Set()) {
   if (
     !entry ||
@@ -1727,8 +1620,7 @@ function sanitizeKeyProfile(entry, usedIds = new Set()) {
       entry.shortcutIds,
       customKeys
     ),
-    customKeys,
-    snippetIds: sanitizeProfileSnippetIds(entry.snippetIds)
+    customKeys
   };
 }
 
@@ -1766,8 +1658,7 @@ function defaultShellKeyProfile() {
     id: 'shell',
     name: 'Terminal',
     shortcutIds: [...defaultShortcutIds],
-    customKeys: [],
-    snippetIds: null
+    customKeys: []
   };
 }
 
@@ -1820,8 +1711,7 @@ function withStarterKeyProfiles(documentValue) {
       id: template.id,
       name: template.name,
       shortcutIds: [...template.shortcutIds],
-      customKeys: [],
-      snippetIds: [...template.snippetIds]
+      customKeys: []
     });
   }
   return { ...documentValue, profiles };
@@ -1971,9 +1861,7 @@ function updateKeyProfile(profileId, updater) {
     return updater({
       ...profile,
       shortcutIds: [...profile.shortcutIds],
-      customKeys: profile.customKeys.map((entry) => ({ ...entry })),
-      snippetIds:
-        profile.snippetIds === null ? null : [...profile.snippetIds]
+      customKeys: profile.customKeys.map((entry) => ({ ...entry }))
     });
   });
   return saveKeyProfilesDocument({
@@ -2025,52 +1913,6 @@ function saveShortcutIds(ids, profileId = editorKeyProfile().id) {
     shortcutIds: cleaned
   }));
   return cleaned;
-}
-
-function snippetsForProfile(profile = activeKeyProfile()) {
-  if (!profile || profile.snippetIds === null) {
-    return [...snippetsList];
-  }
-  const included = new Set(profile.snippetIds);
-  return snippetsList.filter((snippet) => included.has(snippet.id));
-}
-
-function saveProfileSnippetIds(ids, profileId = editorKeyProfile().id) {
-  const previousScrollTop = profileSnippetList?.scrollTop || 0;
-  const cleaned = sanitizeProfileSnippetIds(ids);
-  updateKeyProfile(profileId, (profile) => ({
-    ...profile,
-    snippetIds: cleaned
-  }));
-  refreshKeysUi();
-  if (profileSnippetList) {
-    profileSnippetList.scrollTop = previousScrollTop;
-  }
-  return cleaned;
-}
-
-
-function reconcileSnippetReferences() {
-  const knownIds = new Set(snippetsList.map((snippet) => snippet.id));
-  const documentValue = loadKeyProfilesDocument();
-  let changed = false;
-  const profiles = documentValue.profiles.map((profile) => {
-    const snippetIds =
-      profile.snippetIds === null
-        ? null
-        : profile.snippetIds.filter((id) => knownIds.has(id));
-    if (
-      snippetIds !== null &&
-      snippetIds.length !== profile.snippetIds.length
-    ) {
-      changed = true;
-      return { ...profile, snippetIds };
-    }
-    return profile;
-  });
-  if (changed) {
-    saveKeyProfilesDocument({ ...documentValue, profiles });
-  }
 }
 
 function activateShortcut(id) {
@@ -2621,10 +2463,6 @@ function setSettingsTab(tabId) {
   if (active === 'profiles') {
     renderKeyProfileControls();
     renderShortcutEditor();
-    renderProfileSnippetSelector();
-    if (snippetsList.length === 0) {
-      void loadSnippetsFromServer();
-    }
   }
   if (active === 'library') {
     void loadSnippetsFromServer();
@@ -2746,7 +2584,6 @@ async function loadSnippetsFromServer() {
       snippetsList = Array.isArray(documentValue.snippets)
         ? documentValue.snippets
         : [];
-      reconcileSnippetReferences();
     } catch (error) {
       snippetsList = [];
       setStatus(error.message || 'Could not load snippets');
@@ -2755,7 +2592,6 @@ async function loadSnippetsFromServer() {
     }
     renderFooterPins();
     renderSnippetEditor();
-    renderProfileSnippetSelector();
     return snippetsList;
   })();
   return snippetsLoadPromise;
@@ -2768,10 +2604,8 @@ async function saveSnippetsToServer(nextList) {
     body: JSON.stringify({ version: 1, snippets: nextList })
   });
   snippetsList = Array.isArray(saved.snippets) ? saved.snippets : nextList;
-  reconcileSnippetReferences();
   renderFooterPins();
   renderSnippetEditor();
-  renderProfileSnippetSelector();
   return snippetsList;
 }
 
@@ -2962,7 +2796,6 @@ function refreshKeysUi() {
   renderHeaderSummary();
   renderKeyProfileControls();
   renderShortcutEditor();
-  renderProfileSnippetSelector();
   syncCustomKeyFormFields();
 }
 
@@ -3053,73 +2886,16 @@ function renderKeyProfileControls() {
     keyProfileDeleteButton.disabled = documentValue.profiles.length <= 1;
   }
   const profile = editorKeyProfile();
-  const visibleSnippetCount = snippetsForProfile(profile).length;
+  // Keys only. A profile no longer decides which snippets you see, so counting
+  // them here would report the same number under every profile.
   if (keyProfileSummary) {
-    keyProfileSummary.textContent = [
-      `${profile.shortcutIds.length} keys`,
-      `${visibleSnippetCount} snippets`
-    ].join(' · ');
+    keyProfileSummary.textContent = `${profile.shortcutIds.length} keys`;
   }
   if (profileKeyCount) {
     profileKeyCount.textContent = String(profile.shortcutIds.length);
   }
-  if (profileSnippetCount) {
-    profileSnippetCount.textContent =
-      profile.snippetIds === null
-        ? `${visibleSnippetCount} · all`
-        : String(visibleSnippetCount);
-  }
 }
 
-
-function renderProfileSnippetSelector() {
-  if (!profileSnippetList) {
-    return;
-  }
-  profileSnippetList.replaceChildren();
-  if (snippetsList.length === 0) {
-    const empty = document.createElement('p');
-    empty.className = 'settings-hint';
-    empty.textContent = 'No Library snippets available.';
-    profileSnippetList.append(empty);
-    return;
-  }
-  const profile = editorKeyProfile();
-  const selected = new Set(
-    profile.snippetIds === null
-      ? snippetsList.map((snippet) => snippet.id)
-      : profile.snippetIds
-  );
-  for (const snippet of snippetsList) {
-    const item = document.createElement('div');
-    item.className = 'settings-profile-snippet-item';
-    item.dataset.snippetId = snippet.id;
-
-    const input = document.createElement('input');
-    input.type = 'checkbox';
-    input.value = snippet.id;
-    input.checked = selected.has(snippet.id);
-    input.setAttribute(
-      'aria-label',
-      `${input.checked ? 'Remove' : 'Add'} ${snippet.label} from ${profile.name}`
-    );
-
-    const selection = document.createElement('label');
-    selection.className = 'settings-profile-snippet-select';
-
-    const label = document.createElement('span');
-    label.className = 'settings-profile-snippet-label';
-    label.textContent = snippet.label;
-
-    const behavior = document.createElement('span');
-    behavior.className = 'settings-profile-snippet-behavior';
-    behavior.textContent = snippet.run === false ? 'Insert' : 'Run';
-
-    selection.append(input, label, behavior);
-    item.append(selection);
-    profileSnippetList.append(item);
-  }
-}
 
 function createKeyProfile() {
   if (loadKeyProfilesDocument().profiles.length >= maximumKeyProfiles) {
@@ -3143,8 +2919,7 @@ function createKeyProfile() {
     id: createKeyProfileId(),
     name,
     shortcutIds: [...defaultShortcutIds],
-    customKeys: [],
-    snippetIds: []
+    customKeys: []
   };
   const documentValue = loadKeyProfilesDocument();
   saveKeyProfilesDocument({
@@ -3185,9 +2960,7 @@ function duplicateKeyProfile() {
     id: createKeyProfileId(),
     name,
     shortcutIds: source.shortcutIds.map((id) => idMap.get(id) || id),
-    customKeys,
-    snippetIds:
-      source.snippetIds === null ? null : [...source.snippetIds]
+    customKeys
   };
   saveKeyProfilesDocument({
     ...documentValue,
@@ -3265,7 +3038,6 @@ function selectKeyProfileForEditor(profileId) {
   keyProfileEditorId = profileId;
   renderKeyProfileControls();
   renderShortcutEditor();
-  renderProfileSnippetSelector();
 }
 
 function setDefaultKeyProfile(profileId) {
@@ -6919,8 +6691,7 @@ function freshPreferencesSnapshot() {
           id: 'shell',
           name: 'Terminal',
           shortcutIds: [...defaultShortcutIds],
-          customKeys: [],
-          snippetIds: null
+          customKeys: []
         }
       ]
     }),
@@ -13242,21 +13013,6 @@ for (const button of [
     button.closest('details')?.removeAttribute('open');
   });
 }
-profileSnippetList?.addEventListener('change', (event) => {
-  if (!event.target.matches('input[type="checkbox"]')) {
-    return;
-  }
-  const ids = [...profileSnippetList.querySelectorAll(
-    'input[type="checkbox"]:checked'
-  )].map((input) => input.value);
-  saveProfileSnippetIds(ids);
-});
-profileSnippetsAllButton?.addEventListener('click', () => {
-  saveProfileSnippetIds(null);
-});
-profileSnippetsNoneButton?.addEventListener('click', () => {
-  saveProfileSnippetIds([]);
-});
 customKeyTypeSelect?.addEventListener('change', () => {
   syncCustomKeyFormFields();
 });

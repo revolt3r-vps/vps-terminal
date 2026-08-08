@@ -61,6 +61,12 @@
   --control-font: 11px;
   --control-font-label: 13px;
   --control-border: #37414e;
+  /* Keys, as distinct from controls. 32px on a 4px gap is the iOS keyboard's own
+     geometry — the width a row of single glyphs should be. Height is not here:
+     keys keep the 44px --control-size so the vertical target never shrinks. */
+  --key-width: 32px;
+  --key-gap: 4px;
+  --key-radius: 6px;
   /* Top chrome — denser so the terminal keeps vertical space. */
   --header-control: 32px;
   --header-gap: 4px;
@@ -2735,83 +2741,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   color: var(--muted);
 }
 
-.settings-profile-snippet-actions {
-  display: flex;
-  gap: var(--control-gap);
-}
-
-.settings-profile-snippet-actions button {
-  min-height: 34px;
-  padding: 0 10px;
-  border-color: var(--control-border);
-  border-radius: 7px;
-  background: var(--surface-raised);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.settings-profile-snippet-list {
-  display: grid;
-  gap: 4px;
-  max-height: min(28vh, 220px);
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-
-.settings-profile-snippet-item {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) var(--control-size);
-  align-items: center;
-  gap: 5px;
-  min-height: var(--control-size);
-  padding: 4px 5px 4px 9px;
-  border: 1px solid var(--control-border);
-  border-radius: 8px;
-  background: var(--surface-raised);
-  color: var(--text);
-  cursor: pointer;
-  user-select: none;
-}
-
-.settings-profile-snippet-select {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 9px;
-  min-width: 0;
-  min-height: var(--control-size);
-  cursor: pointer;
-}
-
-.settings-profile-snippet-item:has(input:checked) {
-  border-color: var(--accent);
-  background: var(--accent-surface);
-}
-
-.settings-profile-snippet-item input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-
-.settings-profile-snippet-label {
-  min-width: 0;
-  overflow: hidden;
-  font-size: 12px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.settings-profile-snippet-behavior {
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 650;
-  text-transform: uppercase;
-}
-
 #snippet-editor-list {
   display: grid;
   gap: 6px;
@@ -2909,10 +2838,17 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   grid-row: 1;
   display: flex;
   flex-wrap: nowrap;
-  gap: var(--control-gap);
+  gap: var(--key-gap);
   /* Stands in for #footer-main's row-gap, which is 0 so the closed drawer costs
    * nothing. Hidden means display:none, so this margin does not apply either. */
   margin-bottom: var(--control-gap);
+  /* The same trough as #footer-pins, so both scrolling strips read alike.
+   * Horizontal padding only: vertical padding here would grow the footer and
+   * bring back the reflow that reserving this row exists to avoid. */
+  padding: 0 3px;
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+  box-shadow: inset 0 0 0 1px var(--border);
   min-height: var(--control-size);
   max-width: 100%;
   overflow-x: auto;
@@ -3116,14 +3052,20 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /*
- * Edit closes row 2. It is an action, not a key, so it does not borrow the key
- * styling — muted and outlined, so scanning the row for a key skips over it.
+ * Edit is an action, not a key: it keeps the control width, the roomier padding
+ * and the dashed outline, so scanning the row for a key skips over it.
+ *
+ * Scoped through #footer-pins on purpose. `#footer-edit-keys` alone is (1,0,0)
+ * and loses to `#footer-pins button` at (1,0,1), which is why its padding and
+ * font-size were already being ignored before the keys got their own sizing.
  */
-#footer-edit-keys {
+#footer-pins #footer-edit-keys {
   min-width: var(--control-size);
   min-height: var(--control-size);
   padding: 0 10px;
+  border-color: var(--control-border);
   border-style: dashed;
+  border-radius: var(--control-radius);
   background: transparent;
   color: var(--muted);
   font-size: var(--control-font);
@@ -3134,17 +3076,33 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: none;
 }
 
+/*
+ * Keys, in both rows. Flatter than a control chip — no inset highlight, the plain
+ * --border instead of the heavier --control-border, a tighter radius — so Paste
+ * and Menu still read as the fixed controls and the keys read as a keyboard.
+ *
+ * min-width is the key width, not the touch target. Esc and ↑ were being padded
+ * out to 44px for a single glyph; a wider label still grows past 32px on its own.
+ * Height is untouched, so every key is still a 44px target.
+ */
 #footer-drawer button,
 #footer-pins button {
   flex: 0 0 auto;
-  min-width: var(--control-size);
+  min-width: var(--key-width);
   min-height: var(--control-size);
-  /* 6px, not 10px. min-width keeps the 44px touch target, so this narrows only
-   * the chips whose label is already wider than the target. */
-  padding: 0 6px;
-  border-color: var(--control-border);
-  font-size: var(--control-font);
-  font-weight: 700;
+  padding: 0 4px;
+  border-color: var(--border);
+  border-radius: var(--key-radius);
+  box-shadow: none;
+  font-size: var(--control-font-label);
+  font-weight: 600;
+}
+
+/* An id selector outranks button.active, so the accent border has to be restated
+ * here or a held modifier chip shows its fill and text but keeps a grey edge. */
+#footer-drawer button.active,
+#footer-pins button.active {
+  border-color: var(--accent);
 }
 
 
@@ -3162,23 +3120,31 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   color: var(--accent-text);
 }
 
-/* Single characters, so the 44px target is all the width they need. */
+/* Width and padding come from the shared key rule; PgUp and Home need the 4px.
+ * Tabular figures only, so the Ctrl row's letters do not shift width. */
 #footer-drawer .chord-key {
-  min-width: var(--control-size);
-  padding: 0;
   font-variant-numeric: tabular-nums;
 }
 
 
 /*
- * The scrolling sublist. Paste/Keys/Snips and Settings keep their places on the
- * bar; only the chips move, and every chip stays reachable by scrolling rather
- * than being hidden behind a count.
+ * The scrolling sublist. Paste and Settings keep their places on the bar; only
+ * the keys move, and every key stays reachable by scrolling rather than being
+ * hidden behind a count.
+ *
+ * It sits in a trough so the edge between what scrolls and what does not is
+ * visible standing still. --surface-deep, one step under the footer, because the
+ * keys inside it are the raised things; the hairline is an inset shadow rather
+ * than a border so it costs no width. See #footer-drawer for the same treatment.
  */
 #footer-pins {
   display: flex;
   flex: 1 1 auto;
-  gap: var(--control-gap);
+  gap: var(--key-gap);
+  padding: 0 3px;
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+  box-shadow: inset 0 0 0 1px var(--border);
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -3582,6 +3548,8 @@ footer button {
     max-width: none;
     min-height: 0;
     gap: 4px;
+    /* The trough turns with the strip: it scrolls down the rail here, not across. */
+    padding: 3px 0;
     overflow-x: hidden;
     overflow-y: auto;
     overscroll-behavior-x: none;
@@ -3629,6 +3597,7 @@ footer button {
     flex-direction: column;
     flex: 1 1 auto;
     gap: 4px;
+    padding: 3px 0;
     /* Landscape side rail: the sublist scrolls down the strip, not across it. */
     overflow-x: hidden;
     overflow-y: auto;
@@ -3640,6 +3609,10 @@ footer button {
   #footer-main .footer-fixed,
   #footer-drawer button,
   #footer-pins button,
+  /* Listed separately: the portrait rule for Edit is #footer-pins
+     #footer-edit-keys, which outranks #footer-pins button and would otherwise
+     keep Edit at 44px instead of stretching it across the rail. */
+  #footer-pins #footer-edit-keys,
   #footer-files-main > button,
   #footer-files-main > .files-upload-label {
     width: 100%;
