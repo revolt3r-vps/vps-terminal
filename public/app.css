@@ -2863,12 +2863,29 @@ body:has(#files-options-dialog[open]) footer {
 #key-panel {
   display: flex;
   flex-direction: column;
-  height: var(--key-panel-height, 300px);
+  flex: 1 1 auto;
   min-height: 0;
-  margin: var(--control-gap) calc(-7px - var(--safe-right))
+  margin: 0 calc(-7px - var(--safe-right))
     calc(0px - var(--footer-bottom-padding)) calc(-7px - var(--safe-left));
   border-top: 1px solid var(--border);
   background: var(--surface-deep);
+}
+
+/*
+ * The key strip steps aside for the panel, and the panel takes its height rather
+ * than handing it to the terminal.
+ *
+ * The footer is pinned to what it measured at rest plus the keyboard it is
+ * standing in for, so swapping keyboard for panel leaves the terminal exactly
+ * as many rows as it had. Giving the strip's height back to the terminal instead
+ * would reflow it on every open — the one cost this shape exists to avoid.
+ */
+body.key-panel-open footer {
+  height: calc(var(--key-panel-base, 53px) + var(--key-panel-height, 300px));
+}
+
+body.key-panel-open #footer-term {
+  display: none !important;
 }
 
 #key-panel[hidden] {

@@ -96,6 +96,9 @@ const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
 const scrollThumbElement = document.querySelector('#scroll-thumb');
 const footerDrawerElement = document.querySelector('#footer-drawer');
+// Declared here rather than beside publishFooterHeight, which is where it is
+// consumed: setKeyPanelOpen measures the footer and runs long before that point.
+const footerElement = document.querySelector('footer');
 const keyPanelElement = document.querySelector('#key-panel');
 const keyPanelBodyElement = document.querySelector('#key-panel-body');
 const keyPanelTabsElement = document.querySelector('#key-panel-tabs');
@@ -2296,6 +2299,12 @@ function setKeyPanelOpen(open) {
   }
   keyPanelOpen = next;
   if (next) {
+    // Measured before the class hides the strip: the footer is pinned to this
+    // plus the keyboard height, so the terminal keeps the rows it had.
+    document.documentElement.style.setProperty(
+      '--key-panel-base',
+      `${Math.round(footerElement?.getBoundingClientRect().height || 53)}px`
+    );
     document.documentElement.style.setProperty(
       '--key-panel-height',
       `${keyPanelHeight()}px`
@@ -2311,6 +2320,7 @@ function setKeyPanelOpen(open) {
     keyPanelElement.hidden = true;
     document.body.classList.remove('key-panel-open');
     document.documentElement.style.removeProperty('--key-panel-height');
+    document.documentElement.style.removeProperty('--key-panel-base');
   }
   scheduleLayoutDebug('key-panel');
 }
@@ -13503,9 +13513,6 @@ document.addEventListener('pointerdown', preserveKeyboardState, {
 });
 const resizeObserver = new ResizeObserver(scheduleFit);
 resizeObserver.observe(terminalElement);
-// The portrait session menu sizes itself against the real footer, which grows
-// when a Keys/Snips drawer is open.
-const footerElement = document.querySelector('footer');
 const publishFooterHeight = () => {
   if (!footerElement) {
     return;
