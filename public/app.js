@@ -81,18 +81,6 @@ const commandPaletteInput = document.querySelector('#command-palette-input');
 const commandPaletteList = document.querySelector('#command-palette-list');
 const commandPaletteEmpty = document.querySelector('#command-palette-empty');
 const commandPaletteClose = document.querySelector('#command-palette-close');
-const quickMenuDialog = document.querySelector('#quick-menu-dialog');
-const quickMenuCloseButton = document.querySelector('#quick-menu-close');
-const quickMenuProfileSection = document.querySelector('#quick-menu-profile');
-const quickMenuProfileValue = document.querySelector(
-  '#quick-menu-profile-value'
-);
-const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
-const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
-const quickMenuReconnectButton = document.querySelector(
-  '#quick-menu-reconnect'
-);
-const quickMenuSettingsButton = document.querySelector('#quick-menu-settings');
 const connectionStateLabelElement = document.querySelector(
   '#connection-state-label'
 );
@@ -100,7 +88,6 @@ const connectionDotElement = document.querySelector('#connection-dot');
 const statusElement = document.querySelector('#status');
 const keyboardButton = document.querySelector('#keyboard');
 const pasteButton = document.querySelector('#paste');
-const pasteHistoryElement = document.querySelector('#paste-history');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
 const viewSwipeLabelElement = document.querySelector('#swipe-session-name');
 const terminalLinkChip = document.querySelector('#terminal-link-chip');
@@ -109,11 +96,22 @@ const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
 const scrollThumbElement = document.querySelector('#scroll-thumb');
 const footerDrawerElement = document.querySelector('#footer-drawer');
+const keyPanelElement = document.querySelector('#key-panel');
+const keyPanelBodyElement = document.querySelector('#key-panel-body');
+const keyPanelTabsElement = document.querySelector('#key-panel-tabs');
+const keyPanelProfileButton = document.querySelector('#key-panel-profile');
+const keyPanelCustomizeButton = document.querySelector('#key-panel-customize');
+const keyPanelKeyboardButton = document.querySelector('#key-panel-keyboard');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
 const terminalThemeElement = document.querySelector('#terminal-theme');
+const terminalFontSizeElement = document.querySelector('#terminal-font-size');
+const keyProfileSessionSelect = document.querySelector(
+  '#key-profile-session-select'
+);
+const settingsReconnectButton = document.querySelector('#settings-reconnect');
 const shortcutEditorList = document.querySelector('#shortcut-editor-list');
 const shortcutAddSelect = document.querySelector('#shortcut-add-select');
 const shortcutAddButton = document.querySelector('#shortcut-add');
@@ -200,6 +198,8 @@ const preferencesPendingCacheStorageKey =
   'vps-terminal-preferences-pending-cache-v1';
 const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
+const keyPanelHeightStorageKey = 'vps-terminal-key-panel-height';
+const keyPanelTabStorageKey = 'vps-terminal-key-panel-tab';
 const pasteHistoryStorageKey = 'vps-terminal-paste-history';
 const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
@@ -1001,7 +1001,7 @@ function connectionDotTitle() {
     return 'No session';
   }
   if (connectionState === 'connected') {
-    return `Connected to ${activeSession}. Tap to reconnect.`;
+    return `Connected to ${activeSession}`;
   }
   if (connectionState === 'connecting') {
     return lastConnectionDetail || `Connecting to ${activeSession}…`;
@@ -1066,123 +1066,11 @@ function renderHeaderSummary() {
     connectionStateLabelElement.dataset.state = connectionState;
     connectionStateLabelElement.hidden = !activeSession;
   }
-  renderQuickMenu();
+  renderKeyPanel();
   syncPickerScrim();
 }
 
-/** Session profile assignment lives in the Menu sheet, not in the top bar. */
-function renderQuickMenu() {
-  if (!quickMenuProfileSection || !quickMenuProfileList) {
-    return;
-  }
-  quickMenuProfileSection.hidden = !activeSession;
-  if (!activeSession) {
-    quickMenuProfileList.replaceChildren();
-    return;
-  }
-  const profile = activeKeyProfile();
-  const assignments = loadSessionKeyProfileAssignments();
-  const assignedProfileId = assignments[activeSession] || '';
-  if (quickMenuProfileValue) {
-    quickMenuProfileValue.textContent = profile.name;
-  }
-  if (quickMenuProfileHint) {
-    quickMenuProfileHint.textContent =
-      `Keys and snippets used by ${activeSession}.`;
-  }
-  // A background reconnect can rebuild this list while it is open, so keep the
-  // caller's place instead of dropping focus and scroll to the top.
-  const focusedProfileId = quickMenuProfileList.contains(document.activeElement)
-    ? document.activeElement.dataset.profileId ?? null
-    : null;
-  const listScrollTop = quickMenuProfileList.scrollTop;
-  quickMenuProfileList.replaceChildren();
-
-  const options = [
-    {
-      id: '',
-      label: `Use default — ${defaultKeyProfile().name}`
-    },
-    ...loadKeyProfilesDocument().profiles.map((entry) => ({
-      id: entry.id,
-      label: entry.name
-    }))
-  ];
-  for (const option of options) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.role = 'menuitemradio';
-    button.dataset.profileId = option.id;
-    button.textContent = option.label;
-    const checked = option.id === assignedProfileId;
-    button.setAttribute('aria-checked', String(checked));
-    // Roving tabindex: Tab reaches the list once, arrows move inside it. The
-    // tab stop follows the arrow-key position, not the assignment, so a
-    // background re-render cannot desync the focus ring from the Tab order.
-    button.tabIndex = option.id === (focusedProfileId ?? assignedProfileId)
-      ? 0
-      : -1;
-    quickMenuProfileList.append(button);
-  }
-  quickMenuProfileList.scrollTop = listScrollTop;
-  if (focusedProfileId !== null) {
-    quickMenuProfileList.querySelector(
-      `button[data-profile-id="${CSS.escape(focusedProfileId)}"]`
-    )?.focus({ preventScroll: true });
-  }
-}
-
-/** role="menu" implies arrow-key movement, so implement it. */
-function moveQuickMenuProfileFocus(key) {
-  if (!quickMenuProfileList) {
-    return false;
-  }
-  const options = [...quickMenuProfileList.querySelectorAll('button')];
-  if (options.length === 0) {
-    return false;
-  }
-  const current = options.indexOf(document.activeElement);
-  let next = current;
-  if (key === 'ArrowDown') {
-    next = current < 0 ? 0 : (current + 1) % options.length;
-  } else if (key === 'ArrowUp') {
-    next = current <= 0 ? options.length - 1 : current - 1;
-  } else if (key === 'Home') {
-    next = 0;
-  } else if (key === 'End') {
-    next = options.length - 1;
-  } else {
-    return false;
-  }
-  for (const option of options) {
-    option.tabIndex = option === options[next] ? 0 : -1;
-  }
-  options[next].focus({ preventScroll: false });
-  return true;
-}
-
-function openQuickMenu() {
-  // Everything in the sheet is session-scoped, so with no session the control
-  // keeps its old meaning and opens settings directly.
-  if (!quickMenuDialog || !activeSession) {
-    openSettingsDialog();
-    return;
-  }
-  renderQuickMenu();
-  updateTermControlsEnabled();
-  if (!quickMenuDialog.open) {
-    quickMenuDialog.showModal();
-    // Focus the sheet, not the close button, so nothing reads as pre-selected.
-    quickMenuDialog.focus({ preventScroll: true });
-  }
-}
-
-function closeQuickMenu() {
-  if (quickMenuDialog?.open) {
-    quickMenuDialog.close();
-  }
-}
-
+/** The header shows which session is live; assigning its profile is elsewhere. */
 function sessionTransportLive() {
   return Boolean(
     activeSession && socket && socket.readyState === WebSocket.OPEN
@@ -1215,25 +1103,8 @@ function updateTermControlsEnabled() {
   } else if (pasteButton && terminalHasCopyableSelection()) {
     pasteButton.disabled = false;
   }
-  // Reasons go on aria-label too, because a disabled button's title is not
-  // announced — but the accessible name keeps the visible label as a prefix so
-  // voice control still matches what the user reads (WCAG 2.5.3).
-  const describeMenuAction = (button, enabled, detail) => {
-    if (!button) {
-      return;
-    }
-    const visible = button.textContent.trim();
-    const name = detail ? `${visible} — ${detail}` : visible;
-    button.disabled = !enabled;
-    button.title = name;
-    button.setAttribute('aria-label', name);
-  };
-  describeMenuAction(
-    quickMenuReconnectButton,
-    Boolean(activeSession),
-    activeSession || 'select a session first'
-  );
-  // With no session the control opens settings directly, so it says so.
+  // The gear reaches the panel on a phone and the settings dialog everywhere
+  // else, so it says the one that is actually going to open.
   for (const button of [
     document.querySelector('#settings'),
     headerSettingsButton
@@ -1241,10 +1112,11 @@ function updateTermControlsEnabled() {
     if (!button) {
       continue;
     }
-    button.title = activeSession ? 'Menu' : 'Settings';
+    const opensPanel = keyPanelIsAvailable();
+    button.title = opensPanel ? 'Panel' : 'Settings';
     button.setAttribute(
       'aria-label',
-      activeSession ? 'Open menu' : 'Open settings'
+      opensPanel ? 'Open panel' : 'Open settings'
     );
   }
 }
@@ -2301,6 +2173,520 @@ function renderFooterDrawer() {
   }
 }
 
+/*
+ * The keyboard-area panel.
+ *
+ * Settings that you reach for mid-session belong in the keyboard's space, not
+ * over the terminal. A full-screen dialog covers the thing you are working on;
+ * this covers the keyboard, which you were not using anyway.
+ */
+
+// Non-zero once a keyboard has actually been seen this session.
+let lastKeyboardHeight = 0;
+let keyPanelOpen = false;
+let keyPanelTab = 'snippets';
+
+/** Portrait touch, in Term. Everywhere else the settings dialog does this job. */
+function keyPanelIsAvailable() {
+  if (!keyPanelElement || viewMode !== 'term') {
+    return false;
+  }
+  return Boolean(
+    window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
+  );
+}
+
+/**
+ * Remember how tall the keyboard is, so the panel can take exactly its place.
+ *
+ * Called on every visualViewport resize. Only a reduced viewport is a keyboard,
+ * and keyboardViewportIsReduced() already carries the 120px threshold that keeps
+ * a browser toolbar from counting as one.
+ */
+function rememberKeyboardHeight() {
+  const viewport = window.visualViewport;
+  if (!viewport || !keyboardViewportIsReduced()) {
+    return;
+  }
+  const layoutHeight = Math.round(
+    document.documentElement.clientHeight || window.innerHeight
+  );
+  const height = layoutHeight - Math.round(viewport.height);
+  if (height <= 120) {
+    return;
+  }
+  lastKeyboardHeight = height;
+  try {
+    window.localStorage.setItem(keyPanelHeightStorageKey, String(height));
+  } catch {
+    // Without persistence the measurement just does not survive a reload.
+  }
+}
+
+/**
+ * What the panel should be. The measured keyboard first, then the last one this
+ * browser saw, then a guess — a fresh install has never raised a keyboard, and
+ * the panel still has to open at a sane size.
+ */
+function keyPanelHeight() {
+  if (lastKeyboardHeight > 0) {
+    return lastKeyboardHeight;
+  }
+  try {
+    const stored = Number.parseInt(
+      window.localStorage.getItem(keyPanelHeightStorageKey) || '',
+      10
+    );
+    if (Number.isFinite(stored) && stored > 120) {
+      return stored;
+    }
+  } catch {
+    // Fall through to the guess.
+  }
+  return Math.round(Math.min(320, (window.innerHeight || 700) * 0.45));
+}
+
+function loadKeyPanelTab() {
+  try {
+    const stored = window.localStorage.getItem(keyPanelTabStorageKey);
+    if (stored === 'snippets' || stored === 'paste' || stored === 'appearance') {
+      return stored;
+    }
+  } catch {
+    // Default below.
+  }
+  return 'snippets';
+}
+
+function setKeyPanelTab(tab) {
+  keyPanelTab = ['snippets', 'paste', 'appearance'].includes(tab)
+    ? tab
+    : 'snippets';
+  try {
+    window.localStorage.setItem(keyPanelTabStorageKey, keyPanelTab);
+  } catch {
+    // The tab just will not survive a reload.
+  }
+  for (const button of document.querySelectorAll('.key-panel-tab[data-panel-tab]')) {
+    button.setAttribute(
+      'aria-selected',
+      String(button.dataset.panelTab === keyPanelTab)
+    );
+  }
+  for (const page of document.querySelectorAll('.key-panel-page')) {
+    page.hidden = page.dataset.panelPage !== keyPanelTab;
+  }
+  renderKeyPanel();
+}
+
+/**
+ * Open the panel, closing the keyboard as it goes.
+ *
+ * The blur and the panel are the handover: the keyboard leaves and the panel
+ * takes its height in the same frame, so the terminal keeps its row count and
+ * never reflows between the two.
+ */
+function setKeyPanelOpen(open) {
+  if (!keyPanelElement) {
+    return;
+  }
+  const next = open && keyPanelIsAvailable();
+  if (next === keyPanelOpen) {
+    return;
+  }
+  keyPanelOpen = next;
+  if (next) {
+    document.documentElement.style.setProperty(
+      '--key-panel-height',
+      `${keyPanelHeight()}px`
+    );
+    keyPanelElement.hidden = false;
+    document.body.classList.add('key-panel-open');
+    // Hand the keyboard's space over rather than stacking on top of it.
+    if (terminalInputIsFocused()) {
+      terminal?.blur();
+    }
+    setKeyPanelTab(keyPanelTab);
+  } else {
+    keyPanelElement.hidden = true;
+    document.body.classList.remove('key-panel-open');
+    document.documentElement.style.removeProperty('--key-panel-height');
+  }
+  scheduleLayoutDebug('key-panel');
+}
+
+function toggleKeyPanel() {
+  setKeyPanelOpen(!keyPanelOpen);
+}
+
+/** Leave the panel and get the keyboard back. */
+function keyPanelShowKeyboard() {
+  setKeyPanelOpen(false);
+  if (terminal && activeSession) {
+    clearTerminalSelection();
+    terminal.focus();
+  }
+}
+
+function renderKeyPanel() {
+  if (!keyPanelElement || keyPanelElement.hidden) {
+    return;
+  }
+  if (keyPanelProfileButton) {
+    keyPanelProfileButton.textContent = activeKeyProfile().name;
+  }
+  const page = keyPanelBodyElement?.querySelector(
+    `.key-panel-page[data-panel-page="${keyPanelTab}"]`
+  );
+  if (!page) {
+    return;
+  }
+  if (keyPanelTab === 'snippets') {
+    renderKeyPanelSnippets(page);
+  } else if (keyPanelTab === 'paste') {
+    renderKeyPanelPaste(page);
+  } else {
+    renderKeyPanelAppearance(page);
+  }
+}
+
+/** Placeholder until each tab lands. */
+function renderKeyPanelPlaceholder(page, text) {
+  const note = document.createElement('p');
+  note.className = 'key-panel-empty';
+  note.textContent = text;
+  page.replaceChildren(note);
+}
+
+/**
+ * The Library, as somewhere you can actually run one.
+ *
+ * runSnippet lost its only caller when the Snips drawer went, so until now you
+ * could edit snippets and never send one. There is no search field: the list is
+ * short, and a text input in here would summon the keyboard over the panel that
+ * is standing in the keyboard's place.
+ */
+function renderKeyPanelSnippets(page) {
+  if (snippetsList.length === 0) {
+    renderKeyPanelPlaceholder(page, 'No snippets yet — add them in Settings.');
+    void loadSnippetsFromServer();
+    return;
+  }
+  const list = document.createElement('div');
+  list.className = 'key-panel-list';
+  for (const snippet of snippetsList) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'key-panel-item';
+    item.dataset.snippetId = snippet.id;
+
+    const label = document.createElement('span');
+    label.className = 'key-panel-item-label';
+    label.textContent = snippet.label;
+
+    const body = document.createElement('span');
+    body.className = 'key-panel-item-detail';
+    body.textContent = snippet.body.replace(/\s+/g, ' ').trim().slice(0, 80);
+
+    const mode = document.createElement('span');
+    mode.className = 'key-panel-item-mode';
+    mode.textContent = snippet.run === false ? 'Insert' : 'Run';
+
+    item.append(label, body, mode);
+    item.addEventListener('click', () => {
+      const inserts = snippet.run === false;
+      runSnippet(snippet.id);
+      // Either way the panel closes. Insert additionally hands the keyboard
+      // back, because inserting is how you say you will finish the command
+      // yourself — leaving the panel up would only be in the way.
+      if (inserts) {
+        keyPanelShowKeyboard();
+      } else {
+        setKeyPanelOpen(false);
+      }
+    });
+    list.append(item);
+  }
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'key-panel-action';
+  edit.textContent = 'Add or edit snippets';
+  edit.addEventListener('click', () => {
+    setKeyPanelOpen(false);
+    openSettingsDialog();
+    setSettingsTab('library');
+  });
+  page.replaceChildren(list, edit);
+}
+
+/**
+ * A photo or file from the device, pasted as a path.
+ *
+ * The picker is opened from a tap inside the panel, not from the long press that
+ * got you here: installChipLongPress fires onHold from a timer, which is outside
+ * a user-activation context, and Safari refuses input.click() there.
+ */
+function openDeviceUploadPicker() {
+  const input = document.createElement('input');
+  input.type = 'file';
+  // No accept filter: the one entry covers photos and files alike.
+  input.hidden = true;
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.remove();
+    if (file) {
+      void uploadDeviceFile(file);
+    }
+  });
+  document.body.append(input);
+  input.click();
+}
+
+/**
+ * Name it ourselves rather than trusting the device's.
+ *
+ * safeUploadFileName on the server rejects anything outside
+ * `letters, numbers, . _ + -`, so an iOS "Photo Jun 3, 2025.jpeg" is a 400; and
+ * writeFsUpload writes with flag 'w', so two photos both called IMG_0001.jpg
+ * would overwrite each other. A random token is the same scheme the clipboard
+ * image path already uses, and it stays short enough to read at a prompt.
+ */
+function deviceUploadFileName(file) {
+  const match = /\.([A-Za-z0-9]{1,8})$/.exec(file.name || '');
+  const extension = match ? match[1].toLowerCase() : 'bin';
+  const token = Array.from(
+    window.crypto.getRandomValues(new Uint8Array(4)),
+    (byte) => byte.toString(16).padStart(2, '0')
+  ).join('');
+  return `${token}.${extension}`;
+}
+
+async function uploadDeviceFile(file) {
+  if (!file.size) {
+    setStatus('File is empty');
+    return;
+  }
+  setKeyPanelOpen(false);
+  setStatus(`Uploading ${file.name || 'file'}…`);
+  try {
+    const query = new URLSearchParams({
+      root: 'paste',
+      path: '',
+      filename: deviceUploadFileName(file)
+    });
+    const response = await fetch(`/api/fs/upload?${query}`, {
+      method: 'POST',
+      credentials: 'same-origin',
+      redirect: 'manual',
+      headers: { 'Content-Type': 'application/octet-stream' },
+      body: file
+    });
+    if (response.type === 'opaqueredirect' || response.status === 0) {
+      window.location.reload();
+      return;
+    }
+    const type = response.headers.get('content-type') || '';
+    if (!type.includes('application/json')) {
+      window.location.reload();
+      return;
+    }
+    const saved = await response.json();
+    if (!response.ok) {
+      throw new Error(saved.error || 'Upload failed');
+    }
+    // The same helper the clipboard image path uses: prefers the short
+    // ~/paste/… form and leaves a trailing space.
+    const pathText = pasteTextForImage(saved);
+    clearTerminalSelection();
+    setArmedModifier(null);
+    if (!sendInput(pathText)) {
+      terminal?.paste?.(pathText);
+    }
+    setStatus(`Uploaded: ${saved.displayPath || pathText.trim()}`);
+    clientDebug('device-upload', {
+      bytes: file.size,
+      mimeType: file.type || 'application/octet-stream'
+    });
+  } catch (error) {
+    clientDebug('device-upload-error', { errorName: error?.name || 'Error' });
+    setStatus(error.message || 'Upload failed');
+  }
+}
+
+/**
+ * Paste history, plus the one route to a photo or file on the device.
+ *
+ * The popover this replaces was anchored to the Paste button and clipped by the
+ * footer; here the same list has the panel's whole width.
+ */
+function renderKeyPanelPaste(page) {
+  const list = document.createElement('div');
+  list.className = 'key-panel-list';
+
+  // The system clipboard cannot be previewed on iOS without reading it, and a
+  // read needs a user gesture. A tap is its own gesture, so this row stays
+  // unlabelled until then.
+  list.append(
+    createKeyPanelPasteItem('Clipboard', 'read on tap', 'Paste', () => {
+      setKeyPanelOpen(false);
+      void pasteClipboard();
+    })
+  );
+  list.append(
+    createKeyPanelPasteItem(
+      'Upload from device',
+      'photo or file, pasted as a path',
+      'Pick',
+      openDeviceUploadPicker
+    )
+  );
+  for (const entry of pasteHistory.entries()) {
+    const preview = formatPasteEntryPreview(entry.text);
+    list.append(
+      createKeyPanelPasteItem(preview.label, preview.detail, 'Paste', () => {
+        setKeyPanelOpen(false);
+        insertPastedText(entry.text);
+      })
+    );
+  }
+
+  const actions = document.createElement('div');
+  actions.className = 'key-panel-row-actions';
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.className = 'key-panel-action';
+  clear.textContent = 'Clear history';
+  clear.addEventListener('click', () => {
+    clearPasteHistory();
+    renderKeyPanel();
+  });
+  const persisted = pasteHistoryPersistEnabled();
+  const keep = document.createElement('button');
+  keep.type = 'button';
+  keep.className = 'key-panel-action';
+  keep.textContent = persisted ? 'Keep: on' : 'Keep: off';
+  keep.title = persisted
+    ? 'Stop keeping paste history after this tab closes'
+    : 'Keep paste history after this tab closes';
+  keep.addEventListener('click', () => {
+    setPasteHistoryPersist(!persisted);
+    renderKeyPanel();
+  });
+  actions.append(clear, keep);
+  page.replaceChildren(list, actions);
+}
+
+function createKeyPanelPasteItem(label, detail, mode, onTap) {
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.className = 'key-panel-item';
+  const name = document.createElement('span');
+  name.className = 'key-panel-item-label';
+  name.textContent = label;
+  const note = document.createElement('span');
+  note.className = 'key-panel-item-detail';
+  note.textContent = detail;
+  const tag = document.createElement('span');
+  tag.className = 'key-panel-item-mode';
+  tag.textContent = mode;
+  item.append(name, note, tag);
+  item.addEventListener('click', onTap);
+  return item;
+}
+
+/**
+ * Themes you can see, and a font size you can set without pinching.
+ *
+ * Each card is a miniature terminal drawn straight from the theme's own colours
+ * in terminalThemes, so nothing has to be applied to preview one. Picking a theme
+ * applies to this session and is remembered for it, exactly as the select it
+ * replaces did.
+ */
+function renderKeyPanelAppearance(page) {
+  const size = document.createElement('div');
+  size.className = 'key-panel-size';
+  const sizeLabel = document.createElement('span');
+  sizeLabel.className = 'key-panel-size-label';
+  sizeLabel.textContent = `Font ${terminalFontSize}px`;
+  const smaller = document.createElement('button');
+  smaller.type = 'button';
+  smaller.textContent = 'A';
+  smaller.className = 'key-panel-size-step key-panel-size-small';
+  smaller.title = 'Smaller';
+  smaller.setAttribute('aria-label', 'Smaller font');
+  const bigger = document.createElement('button');
+  bigger.type = 'button';
+  bigger.textContent = 'A';
+  bigger.className = 'key-panel-size-step';
+  bigger.title = 'Larger';
+  bigger.setAttribute('aria-label', 'Larger font');
+  smaller.addEventListener('click', () => stepTerminalFontSize(-1));
+  bigger.addEventListener('click', () => stepTerminalFontSize(1));
+  size.append(smaller, sizeLabel, bigger);
+
+  const grid = document.createElement('div');
+  grid.className = 'key-panel-theme-grid';
+  for (const [id, label] of Object.entries(terminalThemeLabels)) {
+    const theme = terminalThemes[id];
+    if (!theme) {
+      continue;
+    }
+    const card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'key-panel-theme';
+    card.dataset.themeId = id;
+    card.setAttribute('aria-pressed', String(id === terminalThemeName));
+    if (id === terminalThemeName) {
+      card.classList.add('active');
+    }
+
+    const preview = document.createElement('span');
+    preview.className = 'key-panel-theme-preview';
+    preview.style.background = theme.background;
+    // Three bars of prompt-ish colour: enough to tell two themes apart at a
+    // glance without pretending to be a real terminal.
+    for (const [width, colour] of [
+      ['80%', theme.green || theme.foreground],
+      ['60%', theme.foreground],
+      ['40%', theme.cyan || theme.blue || theme.foreground]
+    ]) {
+      const bar = document.createElement('span');
+      bar.className = 'key-panel-theme-bar';
+      bar.style.width = width;
+      bar.style.background = colour;
+      preview.append(bar);
+    }
+
+    const name = document.createElement('span');
+    name.className = 'key-panel-theme-name';
+    name.textContent = label;
+    card.append(preview, name);
+    card.addEventListener('click', () => {
+      applyTerminalTheme(id);
+      renderKeyPanel();
+    });
+    grid.append(card);
+  }
+  page.replaceChildren(size, grid);
+}
+
+/** The stepper half of what pinch-to-zoom already does, sharing its state. */
+function stepTerminalFontSize(direction) {
+  const next = Math.min(
+    maximumTerminalFontSize,
+    Math.max(minimumTerminalFontSize, terminalFontSize + direction)
+  );
+  if (next === terminalFontSize || !terminal) {
+    return;
+  }
+  terminalFontSize = next;
+  terminal.options.fontSize = next;
+  rememberFontSize();
+  setStatus(`Font size ${next}px`);
+  scheduleFontResize();
+  renderKeyPanel();
+}
+
 /**
  * Search and Edit close the strip, in that order: the two things that are not
  * keys, after every key.
@@ -2450,6 +2836,9 @@ function setSettingsTab(tabId) {
   // that tab the sheet drops to a bottom strip and stops blurring what is behind
   // it. Keyed off the sheet so the ::backdrop can be restyled too.
   settingsDialogElement?.classList.toggle('theme-preview', active === 'theme');
+  if (active === 'theme') {
+    renderFontSizeSelect();
+  }
   if (active === 'profiles') {
     renderKeyProfileControls();
     renderShortcutEditor();
@@ -2783,6 +3172,7 @@ async function resetSnippetsToPresets() {
 function refreshKeysUi() {
   updateFooterRowTwo();
   renderFooterPins();
+  renderKeyPanel();
   renderHeaderSummary();
   renderKeyProfileControls();
   renderShortcutEditor();
@@ -2848,6 +3238,66 @@ function appendKeyProfileOptions(select) {
   }
 }
 
+/**
+ * Which profile this session uses, for the surfaces that have no panel.
+ *
+ * The panel carries this on a phone; landscape, desktop and Files reach it here.
+ * A select rather than the menu-radio list the Menu sheet used: the dialog is a
+ * form, and the list was shaped for a thumb.
+ */
+function renderSessionProfileSelect() {
+  if (!keyProfileSessionSelect) {
+    return;
+  }
+  const row = keyProfileSessionSelect.closest('.settings-session-row');
+  if (row) {
+    row.hidden = !activeSession;
+  }
+  if (!activeSession) {
+    keyProfileSessionSelect.replaceChildren();
+    return;
+  }
+  const label = document.querySelector('#key-profile-session-label');
+  if (label) {
+    label.textContent = `Profile for ${activeSession}`;
+  }
+  const assigned = loadSessionKeyProfileAssignments()[activeSession] || '';
+  const options = [
+    { id: '', label: `Use default — ${defaultKeyProfile().name}` },
+    ...loadKeyProfilesDocument().profiles.map((entry) => ({
+      id: entry.id,
+      label: entry.name
+    }))
+  ];
+  keyProfileSessionSelect.replaceChildren();
+  for (const option of options) {
+    const element = document.createElement('option');
+    element.value = option.id;
+    element.textContent = option.label;
+    keyProfileSessionSelect.append(element);
+  }
+  keyProfileSessionSelect.value = assigned;
+}
+
+/** Font size as a list, since the dialog has no room for a stepper. */
+function renderFontSizeSelect() {
+  if (!terminalFontSizeElement) {
+    return;
+  }
+  terminalFontSizeElement.replaceChildren();
+  for (
+    let size = minimumTerminalFontSize;
+    size <= maximumTerminalFontSize;
+    size += 1
+  ) {
+    const option = document.createElement('option');
+    option.value = String(size);
+    option.textContent = `${size}px`;
+    terminalFontSizeElement.append(option);
+  }
+  terminalFontSizeElement.value = String(Math.round(terminalFontSize));
+}
+
 function renderKeyProfileControls() {
   if (!keyProfileSelect) {
     return;
@@ -2875,6 +3325,7 @@ function renderKeyProfileControls() {
   if (keyProfileDeleteButton) {
     keyProfileDeleteButton.disabled = documentValue.profiles.length <= 1;
   }
+  renderSessionProfileSelect();
   const profile = editorKeyProfile();
   // Keys only. A profile no longer decides which snippets you see, so counting
   // them here would report the same number under every profile.
@@ -4543,13 +4994,6 @@ function commandPaletteCommands() {
       keywords: 'retry transport socket',
       available: () => hasSession,
       run: () => forceReconnectActiveSession()
-    },
-    {
-      id: 'menu.open',
-      label: 'Open Menu',
-      keywords: 'sheet profile actions',
-      available: () => hasSession,
-      run: () => openQuickMenu()
     },
     {
       id: 'settings.open',
@@ -7542,6 +7986,7 @@ function setViewMode(mode, options = {}) {
   if (next === 'files') {
     closeFindBar();
     closeFooterDrawer();
+    setKeyPanelOpen(false);
     // It describes a terminal cell, so it has no meaning here.
     hideTerminalLinkChip();
     terminal?.blur();
@@ -9224,9 +9669,18 @@ function handleTerminalTap(clientX, clientY) {
   // A tap on a link offers the chip. Deliberately before the focus handling below,
   // and additive: the tap still positions the cursor and raises the keyboard.
   offerTerminalLinkOnTap(clientX, clientY);
-  // Open keyboard on a plain tap when closed. Prefer the lower area (prompt),
-  // but any non-scroll tap should also bring up the keyboard for typing.
+  // The panel is standing in the keyboard's space, so a tap must not summon the
+  // keyboard back over it. Taps still position the cursor and drive mouse mode;
+  // the panel's own keyboard button is the way back to typing.
   const nearPrompt = row > terminal.rows - 8;
+  if (keyPanelOpen) {
+    if (terminal.modes.mouseTrackingMode === 'none') {
+      return;
+    }
+    const held = `\u001b[<0;${col};${row}M\u001b[<0;${col};${row}m`;
+    socket.send(JSON.stringify({ type: 'input', data: held }));
+    return;
+  }
   if (!terminalInputIsFocused() && nearPrompt) {
     clearTerminalSelection();
     terminal.focus();
@@ -12216,7 +12670,7 @@ async function pasteFromLongPress(clientX, clientY) {
   showTerminalActionChip('paste', clientX, clientY);
 }
 
-// ---- Paste history popover ----
+// ---- Paste history ----
 
 /**
  * Persistence is opt-in and off by default. A terminal paste buffer is where
@@ -12270,7 +12724,6 @@ function clearPasteHistory() {
   } catch {
     // Nothing to remove.
   }
-  closePasteHistoryPopover();
   setStatus('Paste history cleared');
 }
 
@@ -12288,136 +12741,20 @@ function setPasteHistoryPersist(enabled) {
   }
 }
 
-function pasteHistoryPopoverIsOpen() {
-  return Boolean(pasteHistoryElement && !pasteHistoryElement.hidden);
-}
-
-function closePasteHistoryPopover() {
-  if (!pasteHistoryElement || pasteHistoryElement.hidden) {
-    return;
-  }
-  pasteHistoryElement.hidden = true;
-  pasteHistoryElement.replaceChildren();
-  pasteButton?.setAttribute('aria-expanded', 'false');
-}
-
-function createPasteHistoryItem(label, detail, onChoose) {
-  const item = document.createElement('button');
-  item.type = 'button';
-  item.className = 'paste-popover-item';
-  item.setAttribute('role', 'menuitem');
-  const labelElement = document.createElement('span');
-  labelElement.className = 'paste-popover-label';
-  // textContent, never innerHTML: an entry is terminal text, not markup.
-  labelElement.textContent = label;
-  item.append(labelElement);
-  if (detail) {
-    const detailElement = document.createElement('span');
-    detailElement.className = 'paste-popover-detail';
-    detailElement.textContent = detail;
-    item.append(detailElement);
-  }
-  item.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    onChoose();
-  });
-  return item;
-}
-
-function positionPasteHistoryPopover() {
-  if (!pasteHistoryElement || !pasteButton) {
-    return;
-  }
-  const anchor = pasteButton.getBoundingClientRect();
-  const width = pasteHistoryElement.offsetWidth;
-  const margin = 12;
-  const maximumLeft = Math.max(margin, window.innerWidth - width - margin);
-  pasteHistoryElement.style.left = `${Math.min(Math.max(anchor.left, margin), maximumLeft)}px`;
-  pasteHistoryElement.style.bottom = `${Math.max(margin, window.innerHeight - anchor.top + 8)}px`;
-}
-
-function openPasteHistoryPopover() {
-  if (!pasteHistoryElement) {
-    return;
-  }
-  pasteHistoryElement.replaceChildren();
-  const heading = document.createElement('div');
-  heading.className = 'paste-popover-heading';
-  // Named for what it is. Something copied in another app is legitimately
-  // absent, and without this label that reads as a bug.
-  heading.textContent = 'Pasted in this app';
-  pasteHistoryElement.append(heading);
-
-  // The system clipboard cannot be previewed on iOS without reading it, and a
-  // read needs a user gesture. A menu-item tap is its own gesture, so the read
-  // happens on tap and this row stays unlabelled until then.
-  pasteHistoryElement.append(
-    createPasteHistoryItem('Clipboard', 'read on tap', () => {
-      closePasteHistoryPopover();
-      void pasteClipboard();
-    })
-  );
-
-  for (const entry of pasteHistory.entries()) {
-    const preview = formatPasteEntryPreview(entry.text);
-    pasteHistoryElement.append(
-      createPasteHistoryItem(preview.label, preview.detail, () => {
-        closePasteHistoryPopover();
-        insertPastedText(entry.text);
-      })
-    );
-  }
-
-  const footer = document.createElement('div');
-  footer.className = 'paste-popover-footer';
-  const clearButton = document.createElement('button');
-  clearButton.type = 'button';
-  clearButton.textContent = 'Clear';
-  clearButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    clearPasteHistory();
-  });
-  const persistButton = document.createElement('button');
-  persistButton.type = 'button';
-  const persisted = pasteHistoryPersistEnabled();
-  persistButton.textContent = persisted ? 'Keep: on' : 'Keep: off';
-  persistButton.title = persisted
-    ? 'Stop keeping paste history after this tab closes'
-    : 'Keep paste history after this tab closes';
-  persistButton.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    setPasteHistoryPersist(!persisted);
-    openPasteHistoryPopover();
-  });
-  footer.append(clearButton, persistButton);
-  pasteHistoryElement.append(footer);
-
-  pasteHistoryElement.hidden = false;
-  pasteButton?.setAttribute('aria-expanded', 'true');
-  positionPasteHistoryPopover();
-}
-
+/**
+ * Tap pastes. Every time.
+ *
+ * It used to open a history popover whenever there was history, which made the
+ * common case two steps for the sake of the rare one. History now lives in the
+ * panel's Paste tab, a long press away.
+ */
 async function pasteOrCopyClipboard() {
   if (terminalHasCopyableSelection()) {
     pasteGesturePayload = null;
-    closePasteHistoryPopover();
     await copyTerminalSelection({ source: 'button' });
     return;
   }
-  if (pasteHistoryPopoverIsOpen()) {
-    closePasteHistoryPopover();
-    return;
-  }
-  // With nothing in the history there is no choice to offer, so Paste still
-  // pastes. The popover only appears once picking one is a real decision.
-  if (pasteHistory.size() === 0) {
-    await pasteClipboard();
-    return;
-  }
-  openPasteHistoryPopover();
+  await pasteClipboard();
 }
 
 /**
@@ -12738,6 +13075,12 @@ headerSummaryButton.addEventListener('click', () => {
 connectionDotElement.addEventListener('click', (event) => {
   event.preventDefault();
   event.stopPropagation();
+  // Inert while connected. It used to reconnect from any state, which meant a
+  // stray tap on a healthy session tore down its socket and redrew for nothing.
+  // A session that reports connected but is wedged is reconnected from Settings.
+  if (connectionState === 'connected') {
+    return;
+  }
   forceReconnectActiveSession();
 });
 // Any interaction with the picker — pointer, keyboard, or scrolling a long
@@ -12779,45 +13122,53 @@ pasteButton.addEventListener(
   },
   { capture: true, passive: true }
 );
+/*
+ * Hold Paste for the panel's Paste tab: history, and the way to a photo or file
+ * on the device.
+ *
+ * Its own timer rather than installChipLongPress, because Paste already owns
+ * pointerdown and touchstart in the capture phase for the clipboard read, and a
+ * second set of handlers on the same button would fight them.
+ */
+let pasteHoldTimer = null;
+let pasteHoldFired = false;
+
+const cancelPasteHold = () => {
+  window.clearTimeout(pasteHoldTimer);
+  pasteHoldTimer = null;
+};
+
+pasteButton.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) {
+    return;
+  }
+  // Copy mode is a tap, and opening the panel while reaching for Copy would be
+  // a bad surprise.
+  if (terminalHasCopyableSelection()) {
+    return;
+  }
+  pasteHoldFired = false;
+  cancelPasteHold();
+  pasteHoldTimer = window.setTimeout(() => {
+    pasteHoldTimer = null;
+    pasteHoldFired = true;
+    setKeyPanelTab('paste');
+    setKeyPanelOpen(true);
+  }, chipLongPressMilliseconds);
+});
+pasteButton.addEventListener('pointermove', cancelPasteHold);
+pasteButton.addEventListener('pointerup', cancelPasteHold);
+pasteButton.addEventListener('pointercancel', () => {
+  cancelPasteHold();
+  pasteHoldFired = false;
+});
 pasteButton.addEventListener('click', (event) => {
   event.preventDefault();
+  if (pasteHoldFired) {
+    pasteHoldFired = false;
+    return;
+  }
   void pasteOrCopyClipboard();
-});
-// Tapping away dismisses. Bound on pointerdown so it closes before the tap
-// reaches the terminal, and armed only while the popover is actually open.
-document.addEventListener(
-  'pointerdown',
-  (event) => {
-    if (!pasteHistoryPopoverIsOpen()) {
-      return;
-    }
-    if (
-      pasteHistoryElement?.contains(event.target) ||
-      pasteButton?.contains(event.target)
-    ) {
-      return;
-    }
-    closePasteHistoryPopover();
-  },
-  { capture: true }
-);
-document.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && pasteHistoryPopoverIsOpen()) {
-    closePasteHistoryPopover();
-    pasteButton?.focus();
-  }
-});
-// The popover is position:fixed against the button's rect, so it has to move
-// when the footer does — a keyboard open is the common case.
-window.addEventListener('resize', () => {
-  if (pasteHistoryPopoverIsOpen()) {
-    positionPasteHistoryPopover();
-  }
-});
-window.visualViewport?.addEventListener('resize', () => {
-  if (pasteHistoryPopoverIsOpen()) {
-    positionPasteHistoryPopover();
-  }
 });
 restorePasteHistoryIfOptedIn();
 installViewSwipeGestures();
@@ -12834,24 +13185,6 @@ selectionCopyChip?.addEventListener(
   },
   { passive: false }
 );
-quickMenuProfileList?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-profile-id]');
-  if (!button || !quickMenuProfileList.contains(button)) {
-    return;
-  }
-  assignActiveSessionKeyProfile(button.dataset.profileId);
-  closeQuickMenu();
-});
-quickMenuProfileList?.addEventListener('keydown', (event) => {
-  if (event.altKey || event.ctrlKey || event.metaKey) {
-    return;
-  }
-  if (moveQuickMenuProfileFocus(event.key)) {
-    event.preventDefault();
-    event.stopPropagation();
-  }
-});
-quickMenuCloseButton?.addEventListener('click', closeQuickMenu);
 commandPaletteClose?.addEventListener('click', () => closeCommandPalette());
 commandPaletteInput?.addEventListener('input', () => {
   // A new query invalidates the old selection, so start from the top.
@@ -12919,14 +13252,6 @@ commandPaletteDialog?.addEventListener('close', () => {
     // A control that vanished while the palette was open is not worth failing on.
   }
 });
-quickMenuReconnectButton?.addEventListener('click', () => {
-  closeQuickMenu();
-  forceReconnectActiveSession();
-});
-quickMenuSettingsButton?.addEventListener('click', () => {
-  closeQuickMenu();
-  openSettingsDialog();
-});
 // Tapping the app outside an open session picker dismisses it. Taps over the
 // terminal land on #picker-scrim, so they never reach the session; other
 // controls (find bar, footer) stay one-tap. Without a session the expanded bar
@@ -12981,8 +13306,37 @@ document
     renderKeyboardTransitionDump();
     setStatus('Transitions cleared');
   });
-document.querySelector('#settings').addEventListener('click', openQuickMenu);
-headerSettingsButton?.addEventListener('click', openQuickMenu);
+/**
+ * The gear opens the panel where the panel exists, and the settings dialog where
+ * it does not. Landscape, desktop and Files have no keyboard area for a panel to
+ * take, and the Menu sheet that used to serve them is gone — everything it held
+ * is in the dialog now.
+ */
+function openFooterMenu() {
+  if (keyPanelIsAvailable()) {
+    toggleKeyPanel();
+    return;
+  }
+  openSettingsDialog();
+}
+document.querySelector('#settings').addEventListener('click', openFooterMenu);
+headerSettingsButton?.addEventListener('click', openFooterMenu);
+keyPanelTabsElement?.addEventListener('click', (event) => {
+  const button = event.target.closest('.key-panel-tab[data-panel-tab]');
+  if (button) {
+    setKeyPanelTab(button.dataset.panelTab);
+  }
+});
+keyPanelKeyboardButton?.addEventListener('click', keyPanelShowKeyboard);
+keyPanelCustomizeButton?.addEventListener('click', () => {
+  setKeyPanelOpen(false);
+  openSettingsDialog();
+});
+keyPanelProfileButton?.addEventListener('click', () => {
+  setKeyPanelOpen(false);
+  openSettingsDialog();
+  setSettingsTab('profiles');
+});
 document.querySelector('#settings-close').addEventListener('click', () => {
   settingsDialogElement.close();
 });
@@ -13094,6 +13448,7 @@ resetPreferencesIfSchemaChanged();
 loadKeyProfilesDocument();
 keyProfileEditorId = activeKeyProfile().id;
 renderKeyProfileControls();
+keyPanelTab = loadKeyPanelTab();
 renderFooterPins();
 closeFooterDrawer();
 loadFilesNav();
@@ -13106,6 +13461,26 @@ setViewMode(loadViewMode(), { persist: false });
 if (viewMode === 'files') {
   void ensureFilesRoots();
 }
+keyProfileSessionSelect?.addEventListener('change', () => {
+  // The Menu sheet's own handler, reused: it also resets the editor target and
+  // the armed modifier, and redraws the session list's profile badges.
+  assignActiveSessionKeyProfile(keyProfileSessionSelect.value);
+});
+settingsReconnectButton?.addEventListener('click', () => {
+  settingsDialogElement?.close();
+  forceReconnectActiveSession();
+});
+terminalFontSizeElement?.addEventListener('change', () => {
+  const next = Number(terminalFontSizeElement.value);
+  if (!Number.isFinite(next) || !terminal) {
+    return;
+  }
+  terminalFontSize = next;
+  terminal.options.fontSize = next;
+  rememberFontSize();
+  scheduleFontResize();
+  renderKeyPanel();
+});
 terminalThemeElement.addEventListener('change', () => {
   applyTerminalTheme(terminalThemeElement.value, { persist: true });
 });
@@ -13166,6 +13541,7 @@ const handleViewportGeometryChange = () => {
 };
 window.addEventListener('resize', handleViewportGeometryChange);
 window.addEventListener('orientationchange', handleViewportGeometryChange);
+window.visualViewport?.addEventListener('resize', rememberKeyboardHeight);
 window.visualViewport?.addEventListener('resize', handleViewportGeometryChange);
 window.visualViewport?.addEventListener('scroll', () => {
   scheduleVisualViewportUpdate();

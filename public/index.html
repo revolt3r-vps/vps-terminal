@@ -430,7 +430,7 @@
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Library</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Theme</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Appearance</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="debug" aria-selected="false">Debug</button>
       </div>
@@ -465,10 +465,21 @@
             </div>
             <p id="key-profile-summary" class="settings-profile-summary"></p>
           </div>
+          <!-- Session-scoped, so grouped away from the profile being edited. On
+               a phone the panel carries these; this is the route for landscape,
+               desktop and Files, where the panel does not exist. -->
+          <div class="settings-session-row">
+            <label class="settings-field" for="key-profile-session-select">
+              <span id="key-profile-session-label">Profile for this session</span>
+              <select id="key-profile-session-select"></select>
+            </label>
+            <button id="settings-reconnect" type="button" class="settings-secondary">
+              Reconnect session
+            </button>
+          </div>
           <p class="settings-hint">
-            Profiles control which keys the bar carries. Assign a session from
-            Menu. Snippets are one shared list in Library, the same under every
-            profile.
+            Profiles control which keys the bar carries. Snippets are one shared
+            list in Library, the same under every profile.
           </p>
           <section class="settings-profile-section" aria-labelledby="profile-keys-heading">
             <div class="settings-profile-section-heading">
@@ -565,7 +576,7 @@
           class="settings-panel"
           data-settings-panel="theme"
           role="tabpanel"
-          aria-label="Theme"
+          aria-label="Appearance"
           hidden
         >
           <label class="settings-field" for="terminal-theme">
@@ -577,6 +588,14 @@
             <select id="terminal-theme"></select>
           </label>
           <p class="settings-hint">Per-session theme is remembered when you change it.</p>
+          <label class="settings-field" for="terminal-font-size">
+            <span>Font size</span>
+            <select id="terminal-font-size"></select>
+          </label>
+          <p class="settings-hint">
+            Pinch the terminal to change this too. Font size is per device, so a
+            phone and a laptop keep their own.
+          </p>
         </section>
         <section
           class="settings-panel"
@@ -672,44 +691,6 @@
       </div>
     </dialog>
 
-    <!-- Session-scoped chrome that does not deserve permanent bar space:
-         opened by the Terminal footer's Settings button and, on desktop, the
-         header's. Files mode keeps its own folder-scoped options sheet. -->
-    <dialog id="quick-menu-dialog" aria-labelledby="quick-menu-title" tabindex="-1">
-      <div class="settings-heading">
-        <strong id="quick-menu-title">Menu</strong>
-        <button
-          id="quick-menu-close"
-          class="icon-button"
-          type="button"
-          title="Close menu"
-          aria-label="Close menu"
-        >
-          ×
-        </button>
-      </div>
-      <section
-        id="quick-menu-profile"
-        class="quick-menu-section"
-        aria-labelledby="quick-menu-profile-heading"
-      >
-        <div class="quick-menu-section-heading">
-          <h3 id="quick-menu-profile-heading">Session profile</h3>
-          <span id="quick-menu-profile-value" class="quick-menu-value"></span>
-        </div>
-        <p id="quick-menu-profile-hint" class="settings-hint"></p>
-        <div
-          id="quick-menu-profile-list"
-          class="quick-menu-profile-list"
-          role="menu"
-          aria-label="Session profile"
-        ></div>
-      </section>
-      <div class="quick-menu-actions">
-        <button id="quick-menu-reconnect" type="button">Reconnect session</button>
-        <button id="quick-menu-settings" type="button">Terminal settings</button>
-      </div>
-    </dialog>
     <!-- Keyboard-only, desktop-only: opened with mod+K while focus is outside the
          terminal. Adds no persistent chrome. -->
     <dialog
@@ -756,11 +737,6 @@
     </dialog>
 
     <footer aria-label="App shortcuts">
-      <!-- Anchored to the Paste button, but a child of the footer rather than of
-           #footer-scroll: that rail is overflow:hidden so the collapse can
-           measure it, and a popover inside it would be clipped. Its left edge is
-           set from the button's rect when it opens. -->
-      <div id="paste-history" class="paste-popover" hidden role="menu" aria-label="Recent pastes"></div>
       <!-- Term mode footer: drawer lives in #footer-main so landscape can
            swap it into the middle rail (replacing paste/keys/snips scroll). -->
       <div id="footer-term">
@@ -783,7 +759,7 @@
                picker is open. Holds the profile's keys, or the picker. -->
           <div id="footer-drawer" hidden aria-label="Shortcut keys"></div>
           <div id="footer-scroll">
-            <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste" aria-haspopup="menu" aria-expanded="false">
+            <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
               </svg>
@@ -845,6 +821,119 @@
             <svg viewBox="0 0 24 24" aria-hidden="true">
               <circle cx="12" cy="12" r="3" />
               <path d="M19 13.5v-3l-2-.7-.6-1.4.9-1.9-2.1-2.1-1.9.9-1.4-.6-.7-2h-3l-.7 2-1.4.6-1.9-.9-2.1 2.1.9 1.9-.6 1.4-2 .7v3l2 .7.6 1.4-.9 1.9 2.1 2.1 1.9-.9 1.4.6.7 2h3l.7-2 1.4-.6 1.9.9 2.1-2.1-.9-1.9.6-1.4z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+      <!--
+        The panel takes the keyboard's space, not the terminal's. It lives inside
+        <footer> on purpose: publishFooterHeight observes the footer element, so
+        --footer-height follows the panel with no extra wiring and the portrait
+        session menu keeps clearing it.
+
+        Portrait touch in Term only. Landscape has no room, desktop has no
+        keyboard area to occupy, and every tab here is a terminal concept Files
+        does not have — all three keep the settings dialog instead.
+      -->
+      <div id="key-panel" hidden aria-label="Terminal panel">
+        <div id="key-panel-top">
+          <button
+            id="key-panel-profile"
+            type="button"
+            title="Switch key profile"
+          ></button>
+        </div>
+        <div id="key-panel-body">
+          <div
+            class="key-panel-page"
+            data-panel-page="snippets"
+            role="tabpanel"
+            aria-label="Snippets"
+          ></div>
+          <div
+            class="key-panel-page"
+            data-panel-page="paste"
+            role="tabpanel"
+            aria-label="Paste"
+            hidden
+          ></div>
+          <div
+            class="key-panel-page"
+            data-panel-page="appearance"
+            role="tabpanel"
+            aria-label="Appearance"
+            hidden
+          ></div>
+        </div>
+        <div id="key-panel-tabs" role="tablist" aria-label="Panel sections">
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="snippets"
+            role="tab"
+            aria-selected="true"
+            title="Snippets"
+            aria-label="Snippets"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M7.5 4.5h-1a2 2 0 0 0-2 2v1a2 2 0 0 1-2 2 2 2 0 0 1 2 2v1a2 2 0 0 0 2 2h1M12.5 4.5h1a2 2 0 0 1 2 2v1a2 2 0 0 0 2 2 2 2 0 0 0-2 2v1a2 2 0 0 1-2 2h-1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="paste"
+            role="tab"
+            aria-selected="false"
+            title="Paste"
+            aria-label="Paste"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M7.5 4h5M7.5 2.5h5v3h-5zM6 4H4.5v13.5h11V4H14M7 9h6M7 12.5h6" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="appearance"
+            role="tab"
+            aria-selected="false"
+            title="Appearance"
+            aria-label="Appearance"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M10 2.5a7.5 7.5 0 1 0 0 15c1 0 1.5-.7 1.5-1.5 0-.9-.7-1.4-.7-2.1 0-.6.5-1.1 1.2-1.1h1.5a4 4 0 0 0 4-4c0-3.5-3.4-6.3-7.5-6.3z" />
+              <circle cx="6.5" cy="8" r="1" />
+              <circle cx="10" cy="6" r="1" />
+              <circle cx="13.5" cy="8" r="1" />
+            </svg>
+          </button>
+          <!-- A sliders glyph, not a second gear: the footer gear means "panel",
+               and a gear here would be one icon for two different things. -->
+          <button
+            id="key-panel-customize"
+            type="button"
+            class="key-panel-tab"
+            title="Terminal settings"
+            aria-label="Terminal settings"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M3 6h6M13 6h4M3 14h4M11 14h6" />
+              <circle cx="11" cy="6" r="2" />
+              <circle cx="9" cy="14" r="2" />
+            </svg>
+          </button>
+          <span class="key-panel-tabs-spacer" aria-hidden="true"></span>
+          <button
+            id="key-panel-keyboard"
+            type="button"
+            class="key-panel-tab"
+            title="Show keyboard"
+            aria-label="Show keyboard"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="2.5" y="6" width="19" height="12" rx="2" />
+              <path d="M6 10h1.5M10 10h1.5M14 10h1.5M18 10h.5M6 13h1.5M10 13h4M16 13h2M8 16h8" />
             </svg>
           </button>
         </div>

@@ -997,8 +997,7 @@ body.files-view #files-name-dialog {
 #files-actions-dialog,
 #files-options-dialog,
 #files-session-dialog,
-#files-name-dialog,
-#quick-menu-dialog {
+#files-name-dialog {
   width: min(92vw, 360px);
   padding: 12px;
   border: 1px solid var(--border);
@@ -1113,7 +1112,6 @@ body.files-view #terminal-link-chip {
 #command-palette-list,
 #footer-drawer,
 #settings-dialog,
-#quick-menu-dialog,
 #files-preview-body,
 #files-preview-pane-body {
   scrollbar-width: thin;
@@ -1124,7 +1122,6 @@ body.files-view #terminal-link-chip {
 #command-palette-list::-webkit-scrollbar,
 #footer-drawer::-webkit-scrollbar,
 #settings-dialog::-webkit-scrollbar,
-#quick-menu-dialog::-webkit-scrollbar,
 #files-preview-body::-webkit-scrollbar,
 #files-preview-pane-body::-webkit-scrollbar {
   width: var(--app-scrollbar-width);
@@ -1135,7 +1132,6 @@ body.files-view #terminal-link-chip {
 #command-palette-list::-webkit-scrollbar-track,
 #footer-drawer::-webkit-scrollbar-track,
 #settings-dialog::-webkit-scrollbar-track,
-#quick-menu-dialog::-webkit-scrollbar-track,
 #files-preview-body::-webkit-scrollbar-track,
 #files-preview-pane-body::-webkit-scrollbar-track {
   background: var(--app-scrollbar-track);
@@ -1145,7 +1141,6 @@ body.files-view #terminal-link-chip {
 #command-palette-list::-webkit-scrollbar-thumb,
 #footer-drawer::-webkit-scrollbar-thumb,
 #settings-dialog::-webkit-scrollbar-thumb,
-#quick-menu-dialog::-webkit-scrollbar-thumb,
 #files-preview-body::-webkit-scrollbar-thumb,
 #files-preview-pane-body::-webkit-scrollbar-thumb {
   border-radius: 999px;
@@ -1157,7 +1152,6 @@ body.files-view #terminal-link-chip {
   #command-palette-list::-webkit-scrollbar-thumb:hover,
   #footer-drawer::-webkit-scrollbar-thumb:hover,
   #settings-dialog::-webkit-scrollbar-thumb:hover,
-  #quick-menu-dialog::-webkit-scrollbar-thumb:hover,
   #files-preview-body::-webkit-scrollbar-thumb:hover,
   #files-preview-pane-body::-webkit-scrollbar-thumb:hover {
     background: var(--app-scrollbar-thumb-hover);
@@ -1230,8 +1224,7 @@ body.files-view #terminal-link-chip {
 /* Settings menus (Terminal Menu, File options) stay a small contextual card,
  * never a full-screen sheet — so they get a lighter scrim with no blur. */
 #files-options-dialog,
-#files-session-dialog,
-#quick-menu-dialog {
+#files-session-dialog {
   width: min(90vw, 300px);
 }
 
@@ -1243,8 +1236,7 @@ body.files-view #terminal-link-chip {
 }
 
 #files-options-dialog::backdrop,
-#files-session-dialog::backdrop,
-#quick-menu-dialog::backdrop {
+#files-session-dialog::backdrop {
   background: rgba(4, 7, 11, 0.32);
 }
 
@@ -1380,133 +1372,22 @@ body.files-view #terminal-link-chip {
 }
 
 #files-options-dialog:focus,
-#files-session-dialog:focus,
-#quick-menu-dialog:focus {
+#files-session-dialog:focus {
   outline: 0;
 }
 
 /* Settings menus stay the small contextual card everywhere, including touch —
  * see the rule above. Only their close-button touch target grows here. */
 @media (pointer: coarse) {
-  #quick-menu-close {
-    min-width: var(--control-size);
-    min-height: var(--control-size);
-  }
-}
-
-/* Term-mode Menu card: session profile plus the actions that do not earn
- * permanent bar space (find, rename, reconnect, full settings). */
-#quick-menu-dialog {
-  max-height: 88dvh;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-.quick-menu-section {
-  display: grid;
-  gap: 7px;
-  margin-bottom: 12px;
-}
-
-.quick-menu-section[hidden] {
-  display: none;
-}
-
-.quick-menu-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.quick-menu-section-heading h3 {
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 750;
-  letter-spacing: 0.07em;
-  text-transform: uppercase;
-}
-
-.quick-menu-value {
-  padding: 3px 9px;
-  border-radius: 999px;
-  background: var(--accent-surface);
-  color: var(--accent-text);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.quick-menu-profile-list {
-  display: grid;
-  gap: 4px;
-  max-height: min(34dvh, 240px);
-  overflow-y: auto;
-  overscroll-behavior-y: contain;
-  -webkit-overflow-scrolling: touch;
-}
-
-.quick-menu-profile-list button,
-.quick-menu-actions button {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  width: 100%;
-  min-height: var(--control-size);
-  padding: 0 12px;
-  font-size: 13px;
-  text-align: left;
-}
-
-.quick-menu-profile-list button {
-  border-color: transparent;
-  background: var(--surface-deep);
-  color: var(--text);
-}
-
-.quick-menu-profile-list button[aria-checked="true"] {
-  border-color: var(--accent);
-  background: var(--accent-surface);
-  color: var(--accent-text);
-}
-
-.quick-menu-profile-list button:not([aria-checked="true"]):hover,
-.quick-menu-profile-list button:not([aria-checked="true"]):focus-visible {
-  background: var(--surface-pressed);
-}
-
-.quick-menu-actions {
-  display: grid;
-  gap: 8px;
-}
-
-.quick-menu-actions button {
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
 }
 
 /* Short viewports: scroll the profile list, never the sheet's own actions. */
 @media (max-height: 700px) {
-  #quick-menu-dialog {
-    max-height: 92dvh;
-  }
-
-  .quick-menu-profile-list {
-    max-height: 120px;
-  }
 }
 
 /* Short landscape: pair the actions and shorten the profile list so the whole
  * sheet still fits without scrolling. */
 @media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
-  .quick-menu-profile-list {
-    max-height: 92px;
-  }
-
-  .quick-menu-actions {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
 }
 
 body.files-view #empty,
@@ -2692,9 +2573,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: var(--surface-pressed);
 }
 
-
-
-
 .settings-shortcut-add {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -2959,111 +2837,319 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   min-width: 0;
 }
 
-/* The rail no longer scrolls; the drawer is the one strip that still does. */
-#footer-drawer::-webkit-scrollbar {
-  display: none;
-}
-
 /*
- * Paste history: a compact popover anchored above the Paste button, sized to its
- * content. Not a session-style sheet — switching sessions is deliberate, picking
- * a paste is a glance, and one line per entry keeps the whole list inside thumb
- * reach of the button that opened it.
+ * The keyboard-area panel.
+ *
+ * Height is set from JS to the last measured keyboard height, so swapping
+ * keyboard for panel moves nothing: the terminal keeps the same row count either
+ * way. Opening it with the keyboard down costs one reflow, which is the same
+ * cost as raising the keyboard and is unavoidable.
+ *
+ * It is a child of <footer>, so publishFooterHeight's ResizeObserver already
+ * measures it and --footer-height follows for free.
  */
-.paste-popover {
-  /* Fixed, not absolute: both `footer` and `#footer-scroll` are overflow:hidden,
-   * and a popover that sits above the footer would be clipped by either. Left
-   * and bottom are set from the Paste button's rect when it opens. */
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  z-index: 40;
+#key-panel {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  min-width: 200px;
-  max-width: min(320px, calc(100vw - 24px));
-  padding: 6px;
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface-raised);
-  box-shadow: 0 12px 32px rgb(0 0 0 / 45%);
+  height: var(--key-panel-height, 300px);
+  min-height: 0;
+  margin: var(--control-gap) calc(-7px - var(--safe-right))
+    calc(0px - var(--footer-bottom-padding)) calc(-7px - var(--safe-left));
+  border-top: 1px solid var(--border);
+  background: var(--surface-deep);
 }
 
-.paste-popover[hidden] {
+#key-panel[hidden] {
   display: none !important;
 }
 
-.paste-popover-heading {
-  padding: 2px 8px 4px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
+/* Landscape, fine pointers and Files all keep the settings dialog: there is no
+ * keyboard area to occupy, and every tab in here is a terminal concept. */
+@media (orientation: landscape), (pointer: fine) {
+  #key-panel {
+    display: none !important;
+  }
 }
 
-.paste-popover-item {
+body.files-view #key-panel {
+  display: none !important;
+}
+
+/* The active profile, readable from every tab. */
+#key-panel-top {
   display: flex;
-  gap: 8px;
-  align-items: baseline;
-  justify-content: space-between;
-  width: 100%;
-  padding: 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: var(--control-font);
-  text-align: left;
-  cursor: pointer;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--control-gap);
+  padding: 6px calc(8px + var(--safe-left)) 6px calc(8px + var(--safe-right));
 }
 
-.paste-popover-item:hover,
-.paste-popover-item:focus-visible {
-  background: var(--surface-hover);
+#key-panel-profile {
+  min-width: 0;
+  /* 38px, matching the tab bar. It is a real tap target — it switches profile —
+   * so it does not get to be smaller than the things around it. */
+  min-height: 38px;
+  padding: 0 12px;
+  border-color: var(--accent);
+  border-radius: 999px;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font-size: var(--control-font-label);
+  font-weight: 700;
 }
 
-.paste-popover-label {
+#key-panel-body {
   flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 calc(8px + var(--safe-left)) 8px calc(8px + var(--safe-right));
+}
+
+.key-panel-page[hidden] {
+  display: none !important;
+}
+
+/* The tab bar sits at the very bottom, where the keyboard's own bottom row was. */
+#key-panel-tabs {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 4px calc(8px + var(--safe-left))
+    calc(4px + var(--layout-safe-bottom)) calc(8px + var(--safe-right));
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+/* Pushes the keyboard button to the right, away from the tabs: it leaves the
+ * panel rather than switching within it. */
+.key-panel-tabs-spacer {
+  flex: 1 1 auto;
+}
+
+.key-panel-tab {
+  flex: 0 0 auto;
+  min-width: var(--control-size);
+  min-height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--key-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+}
+
+.key-panel-tab svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: var(--icon-stroke-width);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.key-panel-tab[aria-selected='true'] {
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+#key-panel-keyboard {
+  color: var(--accent-text);
+}
+
+/* One tappable row per item, across every tab that lists things. */
+.key-panel-list {
+  display: grid;
+  gap: 4px;
+  padding-top: 4px;
+}
+
+.key-panel-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    'label mode'
+    'detail mode';
+  align-items: center;
+  gap: 0 8px;
+  width: 100%;
+  min-height: var(--control-size);
+  padding: 7px 10px;
+  border-color: var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  box-shadow: none;
+  text-align: left;
+}
+
+.key-panel-item-label {
+  grid-area: label;
   min-width: 0;
   overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-
-.paste-popover-detail {
-  flex: 0 0 auto;
-  color: var(--muted);
-  font-size: 11px;
-  font-variant-numeric: tabular-nums;
-}
-
-.paste-popover-footer {
-  display: flex;
-  gap: 6px;
-  margin-top: 2px;
-  padding-top: 4px;
-  border-top: 1px solid var(--border);
-}
-
-.paste-popover-footer button {
-  flex: 1 1 auto;
-  padding: 6px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 11px;
-  cursor: pointer;
-}
-
-.paste-popover-footer button:hover,
-.paste-popover-footer button:focus-visible {
   color: var(--text);
-  background: var(--surface-hover);
+  font-size: var(--control-font-label);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-panel-item-detail {
+  grid-area: detail;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-panel-item-mode {
+  grid-area: mode;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* Font size: two steppers either side of the current value. */
+.key-panel-size {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--control-gap);
+  margin: 4px 0 10px;
+  padding: 4px 10px;
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+}
+
+.key-panel-size-label {
+  color: var(--text);
+  font-size: var(--control-font-label);
+  font-weight: 650;
+}
+
+.key-panel-size-step {
+  min-width: var(--control-size);
+  min-height: 34px;
+  border: 0;
+  border-radius: var(--key-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 700;
+}
+
+/* The pair reads as a size range: the same glyph, small and large. */
+.key-panel-size-small {
+  font-size: 13px;
+}
+
+/*
+ * Theme cards. Each preview is drawn from the theme's own colours rather than by
+ * applying it, so the grid shows every theme at once without touching the one
+ * you are using.
+ */
+.key-panel-theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.key-panel-theme {
+  display: grid;
+  gap: 5px;
+  min-height: 0;
+  min-width: 0;
+  padding: 5px;
+  border-color: var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+
+.key-panel-theme.active {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+}
+
+.key-panel-theme-preview {
+  display: grid;
+  align-content: center;
+  gap: 4px;
+  height: 52px;
+  padding: 0 8px;
+  border-radius: 6px;
+}
+
+.key-panel-theme-bar {
+  height: 5px;
+  border-radius: 999px;
+}
+
+.key-panel-theme-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Two actions side by side, where a tab has a pair rather than one way out. */
+.key-panel-row-actions {
+  display: flex;
+  gap: var(--control-gap);
+}
+
+.key-panel-row-actions .key-panel-action {
+  flex: 1 1 0;
+}
+
+/* The way out to the full editor, at the end of a tab's own content. */
+.key-panel-action {
+  width: 100%;
+  min-height: 38px;
+  margin-top: 8px;
+  border-color: var(--control-border);
+  border-style: dashed;
+  border-radius: var(--control-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--control-font);
+  font-weight: 600;
+}
+
+/* An empty tab still says something; a blank panel looks broken. */
+.key-panel-empty {
+  padding: 18px 6px;
+  color: var(--muted);
+  font-size: var(--control-font-label);
+  text-align: center;
+}
+
+/* Session-scoped controls in the dialog, for the layouts with no panel. */
+.settings-session-row {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.settings-session-row[hidden] {
+  display: none !important;
+}
+
+/* The rail no longer scrolls; the drawer is the one strip that still does. */
+#footer-drawer::-webkit-scrollbar {
+  display: none;
 }
 
 #files-hidden-toggle {
@@ -3176,7 +3262,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   border-color: var(--accent);
 }
 
-
 /*
  * The chord row. Its lead names the modifier that opened it and sticks to the
  * left edge while the secondaries scroll, so what is held stays on screen no
@@ -3200,7 +3285,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #footer-drawer .chord-key {
   font-variant-numeric: tabular-nums;
 }
-
 
 /*
  * The scrolling sublist. Paste and Settings keep their places on the bar; only
