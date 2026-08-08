@@ -2902,11 +2902,34 @@ body:has(#files-options-dialog[open]) footer {
   display: none !important;
 }
 
-/* Fine pointers keep the dialog: there is no keyboard area for a panel to stand
- * in for, and every tab in here is a terminal concept Files does not have. */
+/*
+ * Fine pointers: the footer is display:none there, so the footer is brought back
+ * as a fixed strip holding nothing but the panel. Fixed rather than in the grid,
+ * because the desktop grid has no footer row — and overlaying keeps the terminal
+ * from resizing, the same bargain landscape makes.
+ */
 @media (pointer: fine) {
-  #key-panel {
+  body.key-panel-open footer {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 20;
+    display: flex;
+    min-height: 0;
+    padding: 0;
+    border-top: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+
+  body.key-panel-open #footer-term {
     display: none !important;
+  }
+
+  body.key-panel-open #key-panel {
+    height: var(--key-panel-height, 320px);
+    margin: 0;
   }
 }
 
@@ -2976,6 +2999,82 @@ body.files-view #key-panel {
 }
 
 #key-panel-keyboard {
+  color: var(--accent-text);
+}
+
+/* Keys tab: which profile the bar carries, and the way to edit it. */
+.key-panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--control-gap);
+  margin-bottom: 8px;
+}
+
+.key-panel-profile-select {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--control-font-label);
+  font-weight: 650;
+}
+
+.key-panel-header-action {
+  flex: 0 0 auto;
+  min-width: var(--control-size);
+  min-height: 38px;
+  padding: 0 14px;
+  border-color: var(--control-border);
+  border-radius: var(--control-radius);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--control-font);
+  font-weight: 650;
+}
+
+/*
+ * Every key in the profile at once. The strip along the bottom carries the same
+ * set but shows about five of them; here they all fit, which is the one thing a
+ * surface this size can offer that the strip cannot.
+ */
+.key-panel-keys {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  gap: var(--key-gap);
+}
+
+.key-panel-key {
+  min-width: 0;
+  min-height: var(--key-height);
+  padding: 0 4px;
+  overflow: hidden;
+  border-color: transparent;
+  border-radius: var(--key-radius);
+  background: var(--surface-pressed);
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
+  color: var(--text);
+  font-size: var(--control-font-label);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.key-panel-key:active {
+  background: var(--surface-raised);
+  box-shadow: none;
+}
+
+/* The modifier that opened this set, and the way back out of it. */
+.key-panel-key-lead,
+.key-panel-key.active {
+  border-color: var(--accent);
+  background: var(--accent-surface);
   color: var(--accent-text);
 }
 
@@ -3050,6 +3149,8 @@ body.files-view #key-panel {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  /* Capped, or the two steppers end up a screen apart on a desktop panel. */
+  max-width: 420px;
   gap: var(--control-gap);
   margin: 4px 0 10px;
   padding: 4px 10px;

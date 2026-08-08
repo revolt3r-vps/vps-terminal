@@ -108,7 +108,6 @@ const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
-const settingsAppearanceElement = document.querySelector('#settings-appearance');
 const keyProfileSessionSelect = document.querySelector(
   '#key-profile-session-select'
 );
@@ -2187,18 +2186,15 @@ let keyPanelOpen = false;
 let keyPanelTab = 'keys';
 
 /**
- * Touch, in Term, either orientation.
+ * Anywhere, in Term.
  *
- * Portrait puts the panel in the footer's flow, standing in for the keyboard.
- * Landscape has no room to give — the footer is a 48px side rail there — so it
- * overlays the bottom of the terminal instead. Fine pointers keep the dialog:
- * there is no keyboard area for a panel to take the place of.
+ * It takes a different shape in each layout. Portrait puts it in the footer's
+ * flow, standing in for the keyboard, so nothing reflows on the swap. Landscape
+ * and desktop have no room to give — a side rail and no footer at all — so it
+ * overlays the bottom of the terminal there.
  */
 function keyPanelIsAvailable() {
-  if (!keyPanelElement || viewMode !== 'term') {
-    return false;
-  }
-  return Boolean(window.matchMedia?.('(pointer: coarse)').matches);
+  return Boolean(keyPanelElement && viewMode === 'term');
 }
 
 /**
@@ -2391,74 +2387,107 @@ function renderKeyPanelPlaceholder(page, text) {
  * is standing in the keyboard's place.
  */
 /**
- * Which profile the key bar is carrying, and the way to change it.
+ * The active profile's keys, laid out where there is room for all of them.
  *
- * The bar itself stays where it is — this picks what it holds. It is the Menu
- * sheet's profile list, which was the one thing in that sheet with nowhere else
- * to go on a phone.
+ * The strip along the bottom carries the same keys but shows five at a time; the
+ * grid shows every one. A dropdown picks which profile the bar carries, and Edit
+ * goes through to the full editor.
  */
 function renderKeyPanelKeys(page) {
+  const header = document.createElement('div');
+  header.className = 'key-panel-header';
+
+  const select = document.createElement('select');
+  select.className = 'key-panel-profile-select';
+  select.setAttribute('aria-label', 'Key profile for this session');
   const assigned = activeSession
     ? loadSessionKeyProfileAssignments()[activeSession] || ''
     : '';
-  const list = document.createElement('div');
-  list.className = 'key-panel-list';
-
   const options = [
-    { id: '', label: `Use default — ${defaultKeyProfile().name}` },
+    { id: '', label: `Default — ${defaultKeyProfile().name}` },
     ...loadKeyProfilesDocument().profiles.map((entry) => ({
       id: entry.id,
-      name: entry.name,
-      label: entry.name,
-      keys: entry.shortcutIds.length
+      label: entry.name
     }))
   ];
   for (const option of options) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'key-panel-item';
-    item.dataset.profileId = option.id;
-    const chosen = option.id === assigned;
-    item.setAttribute('aria-pressed', String(chosen));
-    if (chosen) {
-      item.classList.add('active');
-    }
-
-    const label = document.createElement('span');
-    label.className = 'key-panel-item-label';
-    label.textContent = option.label;
-
-    const detail = document.createElement('span');
-    detail.className = 'key-panel-item-detail';
-    detail.textContent = option.id
-      ? `${option.keys} keys`
-      : `${defaultKeyProfile().shortcutIds.length} keys, follows the default`;
-
-    const mode = document.createElement('span');
-    mode.className = 'key-panel-item-mode';
-    // Only the chosen row, never two. Marking every row that resolves to the
-    // active profile put "In use" on both "Use default" and the profile it
-    // falls through to, which reads as two answers to one question.
-    mode.textContent = chosen ? 'In use' : '';
-
-    item.append(label, detail, mode);
-    item.addEventListener('click', () => {
-      assignActiveSessionKeyProfile(option.id);
-      renderKeyPanel();
-    });
-    list.append(item);
+    const element = document.createElement('option');
+    element.value = option.id;
+    element.textContent = option.label;
+    select.append(element);
   }
+  select.value = assigned;
+  select.disabled = !activeSession;
+  select.addEventListener('change', () => {
+    assignActiveSessionKeyProfile(select.value);
+    renderKeyPanel();
+  });
 
   const edit = document.createElement('button');
   edit.type = 'button';
-  edit.className = 'key-panel-action';
-  edit.textContent = 'Edit keys and profiles';
+  edit.className = 'key-panel-header-action';
+  edit.textContent = 'Edit';
+  edit.title = 'Edit keys and profiles';
   edit.addEventListener('click', () => {
     setKeyPanelOpen(false);
     openSettingsDialog();
     setSettingsTab('profiles');
   });
-  page.replaceChildren(list, edit);
+  header.append(select, edit);
+
+  const grid = document.createElement('div');
+  grid.className = 'key-panel-keys';
+
+  // A modifier's secondaries normally open in row 2, which is not on screen
+  // while the panel is up — so the grid shows them in place instead.
+  if (footerChordModifier) {
+    const definition = modifierChordDefinitions[footerChordModifier];
+    const lead = document.createElement('button');
+    lead.type = 'button';
+    lead.className = 'key-panel-key key-panel-key-lead';
+    lead.textContent = `${definition.label}+`;
+    lead.title = `${definition.label} held — tap a key, or tap here to cancel`;
+    lead.addEventListener('click', () => {
+      closeFooterDrawer();
+      renderKeyPanel();
+    });
+    grid.append(lead);
+    for (const key of modifierChordKeys(footerChordModifier)) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'key-panel-key';
+      button.textContent = key.label;
+      button.title = key.title;
+      button.addEventListener('click', () => {
+        sendModifierChord(key);
+        renderKeyPanel();
+      });
+      grid.append(button);
+    }
+  } else {
+    for (const id of loadShortcutIds()) {
+      const def = getShortcutDef(id);
+      if (!def) {
+        continue;
+      }
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'key-panel-key';
+      button.textContent = def.label;
+      button.title = def.label;
+      if (def.kind === 'modifier' && modifierChipIsHeld(def.modifier)) {
+        button.classList.add('active');
+      }
+      button.addEventListener('click', () => {
+        activateShortcut(id);
+        // A modifier swaps the grid for its secondaries; everything else just
+        // sends, and the panel stays put so you can send another.
+        renderKeyPanel();
+      });
+      grid.append(button);
+    }
+  }
+  page.replaceChildren(header, grid);
 }
 
 function renderKeyPanelSnippets(page) {
@@ -2931,10 +2960,6 @@ function setSettingsTab(tabId) {
   // that tab the sheet drops to a bottom strip and stops blurring what is behind
   // it. Keyed off the sheet so the ::backdrop can be restyled too.
   settingsDialogElement?.classList.toggle('theme-preview', active === 'theme');
-  if (active === 'theme' && settingsAppearanceElement) {
-    // The same renderer the panel uses, so there is one appearance UI.
-    renderKeyPanelAppearance(settingsAppearanceElement);
-  }
   if (active === 'profiles') {
     renderKeyProfileControls();
     renderShortcutEditor();
@@ -2961,7 +2986,8 @@ function loadLastSettingsTab() {
     if (tab === 'snips') {
       return 'library';
     }
-    if (tab === 'profiles' || tab === 'library' || tab === 'theme' || tab === 'app') {
+    // 'theme' is a stored value from before Appearance moved to the panel.
+    if (tab === 'profiles' || tab === 'library' || tab === 'app') {
       return tab;
     }
   } catch {

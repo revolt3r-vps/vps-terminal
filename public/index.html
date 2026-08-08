@@ -429,7 +429,6 @@
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Snippets</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Appearance</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="debug" aria-selected="false">Debug</button>
       </div>
@@ -567,24 +566,6 @@
           <button id="snippet-reset" type="button" class="settings-secondary">
             Reset snippet defaults
           </button>
-        </section>
-        <section
-          class="settings-panel"
-          data-settings-panel="theme"
-          role="tabpanel"
-          aria-label="Appearance"
-          hidden
-        >
-          <!-- Filled by renderKeyPanelAppearance, the same function that draws the
-               panel's Appearance tab. One appearance UI in two hosts: a select
-               here and a grid there would be two designs for one job, and the
-               select was the worse of them. This is the only route on landscape,
-               desktop and Files, where there is no panel. -->
-          <div id="settings-appearance"></div>
-          <p class="settings-hint">
-            Theme is remembered per session. Font size is per device, so a phone
-            and a laptop keep their own — pinching the terminal changes it too.
-          </p>
         </section>
         <section
           class="settings-panel"
