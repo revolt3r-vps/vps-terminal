@@ -75,7 +75,6 @@ const headerSettingsButton = document.querySelector('#header-settings');
 const headerSummaryButton = document.querySelector('#header-summary');
 const headerExpandedElement = document.querySelector('#header-expanded');
 const currentSessionElement = document.querySelector('#current-session');
-const activeProfileElement = document.querySelector('#active-profile');
 const commandPaletteDialog = document.querySelector('#command-palette');
 const commandPaletteInput = document.querySelector('#command-palette-input');
 const commandPaletteList = document.querySelector('#command-palette-list');
@@ -108,34 +107,12 @@ const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
-const shortcutEditorList = document.querySelector('#shortcut-editor-list');
-const shortcutAddSelect = document.querySelector('#shortcut-add-select');
-const shortcutAddButton = document.querySelector('#shortcut-add');
-const shortcutResetButton = document.querySelector('#shortcut-reset');
-const keyProfileSelect = document.querySelector('#key-profile-select');
-const keyProfileDefaultSelect = document.querySelector(
-  '#key-profile-default-select'
-);
-const keyProfileSummary = document.querySelector('#key-profile-summary');
-const profileKeyCount = document.querySelector('#profile-key-count');
-const keyProfileNewButton = document.querySelector('#key-profile-new');
-const keyProfileDuplicateButton = document.querySelector(
-  '#key-profile-duplicate'
-);
-const keyProfileRenameButton = document.querySelector('#key-profile-rename');
-const keyProfileDeleteButton = document.querySelector('#key-profile-delete');
-const customKeyLabelInput = document.querySelector('#custom-key-label');
-const customKeyTypeSelect = document.querySelector('#custom-key-type');
-const customKeyValueInput = document.querySelector('#custom-key-value');
-const customKeyScrollSelect = document.querySelector('#custom-key-scroll');
-const customKeyAddButton = document.querySelector('#custom-key-add');
 const snippetEditorList = document.querySelector('#snippet-editor-list');
 const snippetLabelInput = document.querySelector('#snippet-label-input');
 const snippetBodyInput = document.querySelector('#snippet-body-input');
 const snippetRunInput = document.querySelector('#snippet-run-input');
 const snippetSaveButton = document.querySelector('#snippet-save');
 const snippetResetButton = document.querySelector('#snippet-reset');
-const settingsTabsElement = document.querySelector('.settings-tabs');
 const findBarElement = document.querySelector('#find-bar');
 const findInputElement = document.querySelector('#find-input');
 const findPrevButton = document.querySelector('#find-prev');
@@ -183,9 +160,13 @@ const terminalThemePaintTokens = [
   '--accent'
 ];
 const sessionThemeStorageKey = 'vps-terminal-session-themes';
-// Legacy keys are read once when creating the initial Shell profile.
-const keyProfilesStorageKey = 'vps-terminal-key-profiles-v1';
-const sessionKeyProfilesStorageKey = 'vps-terminal-session-key-profiles-v1';
+const keySetStorageKey = 'vps-terminal-keys-v1';
+// Written by the builds that had key profiles. Nothing reads them; the schema
+// reset below clears them so they do not sit in storage forever.
+const retiredKeyStorageKeys = [
+  'vps-terminal-key-profiles-v1',
+  'vps-terminal-session-key-profiles-v1'
+];
 const preferencesSyncStorageKey = 'vps-terminal-preferences-sync-v1';
 const preferencesCacheStorageKey = 'vps-terminal-preferences-cache-v1';
 const preferencesLastIdentityStorageKey =
@@ -201,7 +182,6 @@ const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
 const filesNavStorageKey = 'vps-terminal-files-nav';
 const filesShowHiddenStorageKey = 'vps-terminal-files-show-hidden';
-const settingsLastTabStorageKey = 'vps-terminal-settings-tab';
 const qaShellMode =
   new URLSearchParams(window.location.search).get('qa-shell') === '1';
 const connectionConnectTimeoutMs = 10000;
@@ -233,7 +213,9 @@ function reconnectDelayForAttempt(attempt) {
 // Nothing about the shape changed, but a profile saved under 1 still carries
 // ctrl-c and shift-tab, so without this the bar keeps them on every install that
 // already ran a 1.4.0 build.
-const preferencesSchemaVersion = 2;
+// 3: profiles are gone. There is one key set, stored under its own key, and the
+// profile documents are cleared rather than folded into it.
+const preferencesSchemaVersion = 3;
 const preferencesSchemaStorageKey = 'vps-terminal-preferences-schema';
 const maximumPasteLength = 16384;
 const chipLongPressMilliseconds = 480;
@@ -241,8 +223,6 @@ const chipLongPressMoveTolerance = 10;
 const maximumCustomKeys = 24;
 const maximumCustomKeyLabelLength = 16;
 const maximumCustomKeySequenceLength = 32;
-const maximumKeyProfiles = 12;
-const maximumKeyProfileNameLength = 24;
 const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
@@ -344,8 +324,8 @@ const builtinShortcutCatalog = {
 // Grouped for the Settings → Keys add picker (order within groups is picker order).
 // The catalog above holds single keys and modifiers only. A combination is made by
 // holding its modifier and tapping the key, so a chip for one would be a second
-// spelling of something the bar already does. Profiles that still name a removed id
-// drop it in sanitizeShortcutIdsForProfile, and the Custom key editor (type Ctrl,
+// spelling of something the bar already does. A key set that still names a removed
+// id drops it in sanitizeShortcutIds, and the Custom key editor (type Ctrl,
 // letter c) rebuilds any of them for anyone who wants the one tap back.
 const builtinShortcutGroups = [
   {
@@ -406,15 +386,6 @@ const defaultShortcutIds = [
   'pgup',
   'pgdn',
   'scroll-end'
-];
-// Named starting points, not different keyboards. The agent-specific chips they
-// used to differ by were all combinations (shift-tab for mode switching, ctrl-o,
-// ctrl-p, f2), and those are a modifier tap away now, so all three open on the
-// same keys and diverge only once you edit one.
-const starterKeyProfileTemplates = [
-  { id: 'profile-codex0000', name: 'Codex', shortcutIds: [...defaultShortcutIds] },
-  { id: 'profile-claude000', name: 'Claude', shortcutIds: [...defaultShortcutIds] },
-  { id: 'profile-grok0000', name: 'Grok', shortcutIds: [...defaultShortcutIds] }
 ];
 // Display labels for the settings picker (order is picker order).
 // Names for the theme grid, and the list of what can be picked at all: the grid
@@ -856,8 +827,8 @@ let lastSelectionApplyLogAt = 0;
 let lastTouchClientX = 0;
 let lastTouchClientY = 0;
 let deferredInstallPrompt = null;
-// Which modifier row 2 is showing. Null means it shows the profile's keys, which
-// is its resting state — row 2 is a surface, not a drawer that opens.
+// Which modifier row 2 is showing. Null means it shows the key set, which is its
+// resting state — row 2 is a surface, not a drawer that opens.
 let footerChordModifier = null;
 let viewMode = 'term'; // 'term' | 'files'
 let filesRootId = 'home';
@@ -889,9 +860,7 @@ let appDisplayName = 'VPS Terminal';
 let snippetsList = [];
 let snippetsLoadPromise = null;
 let snippetEditorSelectedId = null;
-let keyProfilesDocument = null;
-let keyProfileEditorId = null;
-let sessionKeyProfileAssignments = null;
+let keySetDocument = null;
 let sessionThemesMemory = null;
 const hadDurablePreferencesAtBoot = hasDurableBrowserPreferences();
 const initialPreferencesLastIdentity = loadLastPreferencesIdentity();
@@ -952,7 +921,7 @@ let lastConnectionDetail = '';
 const statusErrorPattern =
   /\b(failed|error|could not|cannot|invalid|expired|rejected|unavailable|too large|too many|limit|required|already exists|does not exist|not found|not a (directory|file)|permission denied|read-only|forbidden|not allowed|unsupported|empty)\b/i;
 const statusSuccessPattern =
-  /^(Copied|Saved|Created|Duplicated|Renamed|Deleted|Uploaded|Downloaded|Inserted|Loaded latest|Connected to|Pinned|Unpinned|Ran:|Added:|Shared setup (enabled|replaced)|Snippets (saved|reset)|(Created|Duplicated|Renamed|Deleted|Default) profile)/;
+  /^(Copied|Saved|Created|Duplicated|Renamed|Deleted|Uploaded|Downloaded|Inserted|Loaded latest|Connected to|Pinned|Unpinned|Ran:|Added:|Removed:|Shared setup (enabled|replaced)|Snippets (saved|reset)|Keys reset)/;
 
 function inferStatusTone(message) {
   if (typeof message !== 'string') {
@@ -1023,35 +992,8 @@ function connectionStateLabel() {
   return '';
 }
 
-function shortProfileLabel(profile) {
-  const known = {
-    Terminal: 'TM',
-    Codex: 'CX',
-    Claude: 'CL',
-    Grok: 'GR'
-  };
-  if (known[profile?.name]) {
-    return known[profile.name];
-  }
-  return String(profile?.name || '')
-    .replace(/[^A-Za-z0-9]+/g, '')
-    .slice(0, 2)
-    .toLocaleUpperCase();
-}
-
 function renderHeaderSummary() {
-  const profile = activeKeyProfile();
   currentSessionElement.textContent = activeSession || 'No session';
-  if (activeProfileElement) {
-    activeProfileElement.textContent = profile.name;
-    activeProfileElement.dataset.shortLabel = shortProfileLabel(profile);
-    activeProfileElement.title = `Profile: ${profile.name}`;
-    activeProfileElement.setAttribute(
-      'aria-label',
-      `Active profile: ${profile.name}`
-    );
-    activeProfileElement.hidden = !activeSession;
-  }
   connectionDotElement.dataset.state = connectionState;
   connectionDotElement.title = connectionDotTitle();
   connectionDotElement.setAttribute('aria-label', connectionDotTitle());
@@ -1065,7 +1007,6 @@ function renderHeaderSummary() {
   syncPickerScrim();
 }
 
-/** The header shows which session is live; assigning its profile is elsewhere. */
 function sessionTransportLive() {
   return Boolean(
     activeSession && socket && socket.readyState === WebSocket.OPEN
@@ -1386,26 +1327,7 @@ function sanitizeCustomKeyDefs(defs) {
   return cleaned;
 }
 
-
-function sanitizeKeyProfileName(value) {
-  if (typeof value !== 'string') {
-    return '';
-  }
-  return value
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maximumKeyProfileNameLength);
-}
-
-function isValidKeyProfileId(value) {
-  return (
-    value === 'shell' ||
-    (typeof value === 'string' &&
-      /^profile-[a-z0-9]{8,48}$/.test(value))
-  );
-}
-
-function sanitizeShortcutIdsForProfile(ids, customKeys, useDefaults = true) {
+function sanitizeShortcutIds(ids, customKeys, useDefaults = true) {
   const customIds = new Set(customKeys.map((entry) => entry.id));
   const seen = new Set();
   const cleaned = [];
@@ -1428,35 +1350,17 @@ function sanitizeShortcutIdsForProfile(ids, customKeys, useDefaults = true) {
   return [...defaultShortcutIds];
 }
 
-function sanitizeKeyProfile(entry, usedIds = new Set()) {
-  if (
-    !entry ||
-    typeof entry !== 'object' ||
-    !isValidKeyProfileId(entry.id) ||
-    usedIds.has(entry.id)
-  ) {
-    return null;
-  }
-  const name = sanitizeKeyProfileName(entry.name);
-  if (!name) {
-    return null;
-  }
-  const customKeys = sanitizeCustomKeyDefs(entry.customKeys);
-
+/** The key set: which keys the bar carries, and any custom ones it names. */
+function sanitizeKeySet(value) {
+  const customKeys = sanitizeCustomKeyDefs(value?.customKeys);
   return {
-    id: entry.id,
-    name,
-    shortcutIds: sanitizeShortcutIdsForProfile(
-      entry.shortcutIds,
-      customKeys
-    ),
+    shortcutIds: sanitizeShortcutIds(value?.shortcutIds, customKeys),
     customKeys
   };
 }
 
-
 /**
- * Reset key and profile preferences when the stored schema is not this one.
+ * Reset key preferences when the stored schema is not this one.
  *
  * Themes, paste history and file navigation are left alone — they do not depend
  * on the key schema, and wiping them would be collateral damage.
@@ -1467,10 +1371,7 @@ function resetPreferencesIfSchemaChanged() {
     if (stored === String(preferencesSchemaVersion)) {
       return;
     }
-    for (const key of [
-      keyProfilesStorageKey,
-      sessionKeyProfilesStorageKey,
-    ]) {
+    for (const key of [keySetStorageKey, ...retiredKeyStorageKeys]) {
       window.localStorage.removeItem(key);
     }
     window.localStorage.setItem(
@@ -1482,269 +1383,117 @@ function resetPreferencesIfSchemaChanged() {
   }
 }
 
-/** The profile a fresh install starts with. */
-function defaultShellKeyProfile() {
+/** What a fresh install carries. */
+function defaultKeySet() {
+  return { shortcutIds: [...defaultShortcutIds], customKeys: [] };
+}
+
+/**
+ * The shape the server stores and other browsers read.
+ *
+ * Still a profile document, still one entry. preferences-store.js rejects a
+ * blob whose `keyProfiles.profiles` is empty, and a browser left open on an
+ * older build would find no profile to show. Keeping the envelope costs one
+ * wrapper each way and keeps both of those working.
+ */
+function keySetToPreferences(keySet) {
   return {
-    id: 'shell',
-    name: 'Terminal',
-    shortcutIds: [...defaultShortcutIds],
-    customKeys: []
+    defaultProfileId: 'shell',
+    profiles: [
+      {
+        id: 'shell',
+        name: 'Terminal',
+        shortcutIds: [...keySet.shortcutIds],
+        customKeys: keySet.customKeys.map((entry) => ({ ...entry }))
+      }
+    ]
   };
 }
 
-function sanitizeKeyProfilesDocument(value) {
-  const usedIds = new Set();
-  const profiles = [];
-  if (value && typeof value === 'object' && Array.isArray(value.profiles)) {
-    for (const entry of value.profiles) {
-      const profile = sanitizeKeyProfile(entry, usedIds);
-      if (!profile) {
-        continue;
-      }
-      usedIds.add(profile.id);
-      profiles.push(profile);
-      if (profiles.length >= maximumKeyProfiles) {
-        break;
-      }
-    }
-  }
-  if (profiles.length === 0) {
-    profiles.push(defaultShellKeyProfile());
-  }
-  const requestedDefault =
-    typeof value?.defaultProfileId === 'string'
-      ? value.defaultProfileId
-      : '';
-  const defaultProfileId = profiles.some(
-    (profile) => profile.id === requestedDefault
-  )
-    ? requestedDefault
-    : profiles.find((profile) => profile.id === 'shell')?.id || profiles[0].id;
-  return { defaultProfileId, profiles };
+function keySetFromPreferences(value) {
+  const profiles = Array.isArray(value?.profiles) ? value.profiles : [];
+  return sanitizeKeySet(profiles[0]);
 }
 
-function withStarterKeyProfiles(documentValue) {
-  const profiles = [...documentValue.profiles];
-  for (const template of starterKeyProfileTemplates) {
-    if (profiles.length >= maximumKeyProfiles) {
-      break;
-    }
-    const duplicate = profiles.some(
-      (profile) =>
-        profile.id === template.id ||
-        profile.name.toLocaleLowerCase() === template.name.toLocaleLowerCase()
-    );
-    if (duplicate) {
-      continue;
-    }
-    profiles.push({
-      id: template.id,
-      name: template.name,
-      shortcutIds: [...template.shortcutIds],
-      customKeys: []
-    });
-  }
-  return { ...documentValue, profiles };
-}
-
-
-function saveKeyProfilesDocument(value) {
-  const cleaned = sanitizeKeyProfilesDocument(value);
-  keyProfilesDocument = cleaned;
+function saveKeySet(value) {
+  const cleaned = sanitizeKeySet(value);
+  keySetDocument = cleaned;
   if (!qaShellMode) {
     try {
-      window.localStorage.setItem(
-        keyProfilesStorageKey,
-        JSON.stringify(cleaned)
-      );
+      window.localStorage.setItem(keySetStorageKey, JSON.stringify(cleaned));
     } catch {
-      // Continue with the in-memory profile document.
+      // Continue with the in-memory key set.
     }
   }
   noteDurablePreferencesChange();
   return cleaned;
 }
 
-function loadKeyProfilesDocument() {
-  if (keyProfilesDocument) {
-    return keyProfilesDocument;
+function loadKeySet() {
+  if (keySetDocument) {
+    return keySetDocument;
   }
   try {
-    const raw = window.localStorage.getItem(keyProfilesStorageKey);
+    const raw = window.localStorage.getItem(keySetStorageKey);
     if (raw) {
-      return saveKeyProfilesDocument(
-        withStarterKeyProfiles(
-          sanitizeKeyProfilesDocument(JSON.parse(raw))
-        )
-      );
+      return saveKeySet(JSON.parse(raw));
     }
   } catch {
-    // Migrate from legacy Keys storage below.
+    // Fall through to the defaults.
   }
   markPreferencesBootstrapGenerated();
-  return saveKeyProfilesDocument(
-    withStarterKeyProfiles({
-      defaultProfileId: 'shell',
-      profiles: [defaultShellKeyProfile()]
+  return saveKeySet(defaultKeySet());
+}
+
+function updateKeySet(updater) {
+  const current = loadKeySet();
+  return saveKeySet(
+    updater({
+      shortcutIds: [...current.shortcutIds],
+      customKeys: current.customKeys.map((entry) => ({ ...entry }))
     })
   );
 }
 
-function keyProfileById(id) {
-  return (
-    loadKeyProfilesDocument().profiles.find((profile) => profile.id === id) ||
-    null
-  );
-}
-
-function defaultKeyProfile() {
-  const documentValue = loadKeyProfilesDocument();
-  return (
-    keyProfileById(documentValue.defaultProfileId) ||
-    documentValue.profiles[0]
-  );
-}
-
-function loadSessionKeyProfileAssignments() {
-  if (sessionKeyProfileAssignments) {
-    return { ...sessionKeyProfileAssignments };
-  }
-  try {
-    const raw = window.localStorage.getItem(sessionKeyProfilesStorageKey);
-    if (!raw) {
-      sessionKeyProfileAssignments = {};
-      return {};
-    }
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      sessionKeyProfileAssignments = {};
-      return {};
-    }
-    const cleaned = {};
-    for (const [sessionName, profileId] of Object.entries(parsed)) {
-      if (
-        typeof sessionName === 'string' &&
-        sessionName.length > 0 &&
-        sessionName.length <= 128 &&
-        typeof profileId === 'string' &&
-        keyProfileById(profileId)
-      ) {
-        cleaned[sessionName] = profileId;
-      }
-    }
-    sessionKeyProfileAssignments = cleaned;
-    return { ...cleaned };
-  } catch {
-    sessionKeyProfileAssignments = {};
-    return {};
-  }
-}
-
-function saveSessionKeyProfileAssignments(assignments) {
-  const cleaned = {};
-  for (const [sessionName, profileId] of Object.entries(assignments || {})) {
-    if (
-      typeof sessionName === 'string' &&
-      sessionName.length > 0 &&
-      sessionName.length <= 128 &&
-      keyProfileById(profileId)
-    ) {
-      cleaned[sessionName] = profileId;
-    }
-  }
-  sessionKeyProfileAssignments = cleaned;
-  if (!qaShellMode) {
-    try {
-      window.localStorage.setItem(
-        sessionKeyProfilesStorageKey,
-        JSON.stringify(cleaned)
-      );
-    } catch {
-      // Continue without persistence.
-    }
-  }
-  noteDurablePreferencesChange();
-  return { ...cleaned };
-}
-
-function keyProfileForSession(sessionName) {
-  const assignments = loadSessionKeyProfileAssignments();
-  return keyProfileById(assignments[sessionName]) || defaultKeyProfile();
-}
-
-function activeKeyProfile() {
-  return activeSession
-    ? keyProfileForSession(activeSession)
-    : defaultKeyProfile();
-}
-
-function editorKeyProfile() {
-  return keyProfileById(keyProfileEditorId) || activeKeyProfile();
-}
-
-function updateKeyProfile(profileId, updater) {
-  const documentValue = loadKeyProfilesDocument();
-  const nextProfiles = documentValue.profiles.map((profile) => {
-    if (profile.id !== profileId) {
-      return profile;
-    }
-    return updater({
-      ...profile,
-      shortcutIds: [...profile.shortcutIds],
-      customKeys: profile.customKeys.map((entry) => ({ ...entry }))
-    });
-  });
-  return saveKeyProfilesDocument({
-    ...documentValue,
-    profiles: nextProfiles
-  });
-}
-
-function getShortcutDef(id, profile = activeKeyProfile()) {
+function getShortcutDef(id) {
   if (typeof id !== 'string') {
     return null;
   }
   if (Object.hasOwn(builtinShortcutCatalog, id)) {
     return builtinShortcutCatalog[id];
   }
-  return profile?.customKeys?.find((entry) => entry.id === id) || null;
+  return loadKeySet().customKeys.find((entry) => entry.id === id) || null;
 }
 
-function isKnownShortcutId(id, profile = activeKeyProfile()) {
-  return getShortcutDef(id, profile) !== null;
+function isKnownShortcutId(id) {
+  return getShortcutDef(id) !== null;
 }
 
-function loadCustomKeyDefs(profile = editorKeyProfile()) {
-  return profile?.customKeys?.map((entry) => ({ ...entry })) || [];
+function loadCustomKeyDefs() {
+  return loadKeySet().customKeys.map((entry) => ({ ...entry }));
 }
 
-function saveCustomKeyDefs(defs, profileId = editorKeyProfile().id) {
+function saveCustomKeyDefs(defs) {
   const cleaned = sanitizeCustomKeyDefs(defs);
-  updateKeyProfile(profileId, (profile) => ({
-    ...profile,
+  updateKeySet((keySet) => ({
     customKeys: cleaned,
-    shortcutIds: sanitizeShortcutIdsForProfile(
-      profile.shortcutIds,
-      cleaned
-    )
+    shortcutIds: sanitizeShortcutIds(keySet.shortcutIds, cleaned)
   }));
   return cleaned;
 }
 
-function loadShortcutIds(profile = activeKeyProfile()) {
-  return [...(profile?.shortcutIds || defaultShortcutIds)];
+function loadShortcutIds() {
+  return [...loadKeySet().shortcutIds];
 }
 
-function saveShortcutIds(ids, profileId = editorKeyProfile().id) {
-  const profile = keyProfileById(profileId) || editorKeyProfile();
-  const cleaned = sanitizeShortcutIdsForProfile(ids, profile.customKeys);
-  updateKeyProfile(profile.id, (entry) => ({
-    ...entry,
-    shortcutIds: cleaned
-  }));
+function saveShortcutIds(ids) {
+  let cleaned = [];
+  updateKeySet((keySet) => {
+    cleaned = sanitizeShortcutIds(ids, keySet.customKeys);
+    return { ...keySet, shortcutIds: cleaned };
+  });
   return cleaned;
 }
-
 function activateShortcut(id) {
   const def = getShortcutDef(id);
   if (!def) {
@@ -1988,7 +1737,7 @@ function modifierChordKeys(modifier) {
 /**
  * Deliberately does not re-render. Rebuilding the rail on the tap that is being
  * handled would swap the DOM out from under the finger that pressed it; the new
- * order lands on the next natural rebuild (session, profile, or command change).
+ * order lands on the next natural rebuild (session, key, or command change).
  */
 
 /** The foreground command of the active session, or null when unknown. */
@@ -2019,7 +1768,7 @@ function activeSessionCommand() {
 /**
  * Row 2 exists only while a modifier picker is up.
  *
- * Row 1 carries the whole profile now, so row 2 has no resting content to show.
+ * Row 1 carries the whole key set now, so row 2 has no resting content to show.
  * Appearing and disappearing costs a terminal reflow, which is the price of
  * keeping the secondaries on their own line rather than swapping row 1.
  */
@@ -2076,8 +1825,20 @@ function createKeyChipButton(id, options = {}) {
       button.classList.add('active');
     }
   }
-  installChipLongPress(button, { onTap: () => activateShortcut(id) });
+  // Held, a chip opens the panel on the grid it belongs to, already editing.
+  // The same gesture does the same thing there.
+  installChipLongPress(button, {
+    onTap: () => activateShortcut(id),
+    onHold: () => openKeyEditor()
+  });
   return button;
+}
+
+/** The panel's Keys tab, in edit mode. The only way in, from anywhere. */
+function openKeyEditor() {
+  setKeyPanelOpen(true);
+  setKeyPanelTab('keys');
+  setKeyPanelKeysMode('edit');
 }
 
 
@@ -2104,7 +1865,7 @@ function appendDrawerEmptyHint(text) {
  * Tapping a modifier holds it and shows its keys.
  *
  * Both, because the swap is free now that row 2 is already there. Tapping the
- * same modifier again puts the row back to the profile's keys; tapping a
+ * same modifier again puts the row back to the key set; tapping a
  * different one replaces the picker rather than stacking.
  */
 function toggleModifierChord(modifier) {
@@ -2181,6 +1942,9 @@ const keyPanelTabs = ['keys', 'snippets', 'paste', 'appearance', 'app'];
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
 let keyPanelTab = 'keys';
+// What the Keys tab is doing: sending keys, editing them, or picking a new one.
+// Never persisted — an edit mode that survived a reload would be a surprise.
+let keyPanelKeysMode = 'list';
 
 /**
  * Anywhere, in Term.
@@ -2289,8 +2053,16 @@ function loadKeyPanelTab() {
   return 'keys';
 }
 
+function setKeyPanelKeysMode(mode) {
+  keyPanelKeysMode = ['list', 'edit', 'add'].includes(mode) ? mode : 'list';
+  renderKeyPanel();
+}
+
 function setKeyPanelTab(tab) {
   keyPanelTab = keyPanelTabs.includes(tab) ? tab : 'keys';
+  if (keyPanelTab !== 'keys') {
+    keyPanelKeysMode = 'list';
+  }
   try {
     window.localStorage.setItem(keyPanelTabStorageKey, keyPanelTab);
   } catch {
@@ -2324,6 +2096,7 @@ function setKeyPanelOpen(open) {
     return;
   }
   keyPanelOpen = next;
+  keyPanelKeysMode = 'list';
   if (next) {
     // Measured before the class hides the strip: the footer is pinned to this
     // plus the keyboard height, so the terminal keeps the rows it had.
@@ -2402,93 +2175,280 @@ function renderKeyPanelPlaceholder(page, text) {
 }
 
 /**
- * The Library, as somewhere you can actually run one.
+ * Every key you have, laid out where there is room for all of them.
  *
- * runSnippet lost its only caller when the Snips drawer went, so until now you
- * could edit snippets and never send one. There is no search field: the list is
- * short, and a text input in here would summon the keyboard over the panel that
- * is standing in the keyboard's place.
- */
-/**
- * The active profile's keys, laid out where there is room for all of them.
- *
- * The strip along the bottom carries the same keys but shows five at a time; the
- * grid shows every one. A dropdown picks which profile the bar carries, and Edit
- * goes through to the full editor.
+ * The strip along the bottom carries the same keys and shows about five at a
+ * time; the grid shows all of them. Holding one turns the grid into its own
+ * editor — drag to reorder, × to remove, Add key for the rest — so there is no
+ * separate editor to open.
  */
 function renderKeyPanelKeys(page) {
-  const header = document.createElement('div');
-  header.className = 'key-panel-header';
-
-  const select = document.createElement('select');
-  select.className = 'key-panel-profile-select';
-  select.setAttribute('aria-label', 'Key profile for this session');
-  const assigned = activeSession
-    ? loadSessionKeyProfileAssignments()[activeSession] || ''
-    : '';
-  const options = [
-    { id: '', label: `Default — ${defaultKeyProfile().name}` },
-    ...loadKeyProfilesDocument().profiles.map((entry) => ({
-      id: entry.id,
-      label: entry.name
-    }))
-  ];
-  for (const option of options) {
-    const element = document.createElement('option');
-    element.value = option.id;
-    element.textContent = option.label;
-    select.append(element);
+  // A held modifier owns the grid: its secondaries are what row 2 would carry,
+  // and row 2 is behind the panel. Editing waits until it is released.
+  if (footerChordModifier) {
+    keyPanelKeysMode = 'list';
+    page.replaceChildren(createKeyPanelChordGrid());
+    return;
   }
-  select.value = assigned;
-  select.disabled = !activeSession;
-  select.addEventListener('change', () => {
-    assignActiveSessionKeyProfile(select.value);
-    renderKeyPanel();
-  });
+  if (keyPanelKeysMode === 'add') {
+    renderKeyPanelKeyPicker(page);
+    return;
+  }
+  const editing = keyPanelKeysMode === 'edit';
+  const grid = document.createElement('div');
+  grid.className = editing ? 'key-panel-keys editing' : 'key-panel-keys';
+  if (editing) {
+    grid.setAttribute('role', 'list');
+    grid.setAttribute('aria-label', 'Keys, editing');
+  }
+  for (const id of loadShortcutIds()) {
+    const def = getShortcutDef(id);
+    if (!def) {
+      continue;
+    }
+    grid.append(createKeyPanelKeyTile(id, def, editing));
+  }
+  if (!editing) {
+    page.replaceChildren(grid);
+    return;
+  }
+  installKeyTileReorder(grid);
+  page.replaceChildren(createKeyPanelEditHeader(), grid);
+}
 
-  const edit = document.createElement('button');
-  edit.type = 'button';
-  edit.className = 'key-panel-header-action';
-  edit.textContent = 'Edit';
-  edit.title = 'Edit keys and profiles';
-  edit.addEventListener('click', () => {
-    setKeyPanelOpen(false);
-    openSettingsDialog();
-    setSettingsTab('profiles');
-  });
-  header.append(select, edit);
-
+/** The secondaries of a held modifier, where the grid usually is. */
+function createKeyPanelChordGrid() {
   const grid = document.createElement('div');
   grid.className = 'key-panel-keys';
-
-  // A modifier's secondaries normally open in row 2, which is not on screen
-  // while the panel is up — so the grid shows them in place instead.
-  if (footerChordModifier) {
-    const definition = modifierChordDefinitions[footerChordModifier];
-    const lead = document.createElement('button');
-    lead.type = 'button';
-    lead.className = 'key-panel-key key-panel-key-lead';
-    lead.textContent = `${definition.label}+`;
-    lead.title = `${definition.label} held — tap a key, or tap here to cancel`;
-    lead.addEventListener('click', () => {
-      closeFooterDrawer();
+  const definition = modifierChordDefinitions[footerChordModifier];
+  const lead = document.createElement('button');
+  lead.type = 'button';
+  lead.className = 'key-panel-key key-panel-key-lead';
+  lead.textContent = `${definition.label}+`;
+  lead.title = `${definition.label} held — tap a key, or tap here to cancel`;
+  lead.addEventListener('click', () => {
+    closeFooterDrawer();
+    renderKeyPanel();
+  });
+  grid.append(lead);
+  for (const key of modifierChordKeys(footerChordModifier)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'key-panel-key';
+    button.textContent = key.label;
+    button.title = key.title;
+    button.addEventListener('click', () => {
+      sendModifierChord(key);
       renderKeyPanel();
     });
-    grid.append(lead);
-    for (const key of modifierChordKeys(footerChordModifier)) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'key-panel-key';
-      button.textContent = key.label;
-      button.title = key.title;
-      button.addEventListener('click', () => {
-        sendModifierChord(key);
-        renderKeyPanel();
-      });
-      grid.append(button);
+    grid.append(button);
+  }
+  return grid;
+}
+
+/**
+ * One key.
+ *
+ * A plain button while the grid sends keys, and a draggable row item while it
+ * edits them: a button carrying a second button is not something a screen
+ * reader can describe, and the remove control has to be a real button.
+ */
+function createKeyPanelKeyTile(id, def, editing) {
+  if (!editing) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'key-panel-key';
+    button.dataset.keyId = id;
+    button.textContent = def.label;
+    button.title = def.label;
+    if (def.kind === 'modifier' && modifierChipIsHeld(def.modifier)) {
+      button.classList.add('active');
     }
-  } else {
-    for (const id of loadShortcutIds()) {
+    installChipLongPress(button, {
+      onTap: () => {
+        activateShortcut(id);
+        // A modifier swaps the grid for its secondaries; everything else just
+        // sends, and the panel stays put so you can send another.
+        renderKeyPanel();
+      },
+      onHold: () => setKeyPanelKeysMode('edit')
+    });
+    return button;
+  }
+
+  const tile = document.createElement('div');
+  tile.className = 'key-panel-key';
+  tile.dataset.keyId = id;
+  tile.setAttribute('role', 'listitem');
+  tile.tabIndex = 0;
+  tile.title = `Drag to move ${def.label}`;
+  const label = document.createElement('span');
+  label.className = 'key-panel-key-label';
+  label.textContent = def.label;
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'key-panel-key-remove';
+  remove.textContent = '×';
+  remove.title = isCustomKeyId(id)
+    ? `Remove ${def.label} and delete the custom key`
+    : `Remove ${def.label}`;
+  remove.setAttribute('aria-label', `Remove ${def.label}`);
+  remove.addEventListener('click', () => {
+    removeShortcut(id);
+    setStatus(`Removed: ${def.label}`);
+  });
+  // Dragging is pointer-only, so the arrows are the whole keyboard route to an
+  // order. They were Move up and Move down in the settings dialog.
+  tile.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') {
+      return;
+    }
+    event.preventDefault();
+    moveShortcut(id, event.key === 'ArrowLeft' ? -1 : 1);
+    keyPanelBodyElement
+      ?.querySelector(`.key-panel-key[data-key-id="${CSS.escape(id)}"]`)
+      ?.focus();
+  });
+  tile.append(label, remove);
+  return tile;
+}
+
+function createKeyPanelEditHeader() {
+  const header = document.createElement('div');
+  header.className = 'key-panel-header';
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'key-panel-header-action';
+  add.textContent = 'Add key';
+  add.addEventListener('click', () => setKeyPanelKeysMode('add'));
+  const reset = document.createElement('button');
+  reset.type = 'button';
+  reset.className = 'key-panel-header-action';
+  reset.textContent = 'Reset';
+  reset.title = 'Reset the keys to their defaults';
+  reset.addEventListener('click', resetShortcuts);
+  const done = document.createElement('button');
+  done.type = 'button';
+  done.className = 'key-panel-header-action key-panel-header-done';
+  done.textContent = 'Done';
+  done.addEventListener('click', () => setKeyPanelKeysMode('list'));
+  header.append(add, reset, done);
+  return header;
+}
+
+/**
+ * Drag to reorder, the way icons move on a home screen.
+ *
+ * Pointer events rather than HTML5 drag, which never fires on touch. The tile
+ * under the finger is found with elementFromPoint, with the dragged tile taken
+ * out of hit testing for the call, so tiles swap as you cross them rather than
+ * on release.
+ */
+function installKeyTileReorder(grid) {
+  let dragging = null;
+  let dragPointerId = null;
+  let grabX = 0;
+  let grabY = 0;
+  const tiles = () => [...grid.querySelectorAll('.key-panel-key[data-key-id]')];
+
+  grid.addEventListener('pointerdown', (event) => {
+    const tile = event.target.closest?.('.key-panel-key[data-key-id]');
+    if (
+      !tile ||
+      event.button !== 0 ||
+      event.target.closest?.('.key-panel-key-remove')
+    ) {
+      return;
+    }
+    const box = tile.getBoundingClientRect();
+    dragging = tile;
+    dragPointerId = event.pointerId;
+    grabX = event.clientX - box.left;
+    grabY = event.clientY - box.top;
+    tile.classList.add('dragging');
+    tile.setPointerCapture(event.pointerId);
+  });
+
+  grid.addEventListener('pointermove', (event) => {
+    if (!dragging || event.pointerId !== dragPointerId) {
+      return;
+    }
+    event.preventDefault();
+    dragging.style.pointerEvents = 'none';
+    const under = document
+      .elementFromPoint(event.clientX, event.clientY)
+      ?.closest?.('.key-panel-key[data-key-id]');
+    dragging.style.pointerEvents = '';
+    if (under && under !== dragging && grid.contains(under)) {
+      const order = tiles();
+      const forward = order.indexOf(under) > order.indexOf(dragging);
+      grid.insertBefore(dragging, forward ? under.nextSibling : under);
+    }
+    // Measured after any swap, so the offset is against where the tile now
+    // sits rather than where the drag started.
+    dragging.style.transform = '';
+    const box = dragging.getBoundingClientRect();
+    dragging.style.transform =
+      `translate(${Math.round(event.clientX - grabX - box.left)}px, ` +
+      `${Math.round(event.clientY - grabY - box.top)}px)`;
+  });
+
+  const drop = () => {
+    if (!dragging) {
+      return;
+    }
+    dragging.classList.remove('dragging');
+    dragging.style.transform = '';
+    dragging = null;
+    dragPointerId = null;
+    saveShortcutIds(tiles().map((tile) => tile.dataset.keyId));
+    refreshKeysUi();
+  };
+  grid.addEventListener('pointerup', drop);
+  grid.addEventListener('pointercancel', drop);
+}
+
+/**
+ * Add key: everything the bar does not carry yet, and a way to make one.
+ *
+ * The custom key form stays closed until it is asked for. Its inputs raise the
+ * keyboard, which lands on top of the panel standing in the keyboard's place.
+ */
+function renderKeyPanelKeyPicker(page) {
+  const header = document.createElement('div');
+  header.className = 'key-panel-header';
+  const back = document.createElement('button');
+  back.type = 'button';
+  back.className = 'key-panel-header-action';
+  back.textContent = '‹ Back';
+  back.addEventListener('click', () => setKeyPanelKeysMode('edit'));
+  header.append(back);
+
+  const active = new Set(loadShortcutIds());
+  const groups = [
+    ...builtinShortcutGroups.map((group) => ({
+      label: group.label,
+      ids: group.ids.filter(
+        (id) => !active.has(id) && Object.hasOwn(builtinShortcutCatalog, id)
+      )
+    })),
+    {
+      label: 'Custom',
+      ids: loadCustomKeyDefs()
+        .filter((entry) => !active.has(entry.id))
+        .map((entry) => entry.id)
+    }
+  ].filter((group) => group.ids.length > 0);
+
+  const body = document.createElement('div');
+  body.className = 'key-panel-groups';
+  for (const group of groups) {
+    const heading = document.createElement('p');
+    heading.className = 'key-panel-group-label';
+    heading.textContent = group.label;
+    const grid = document.createElement('div');
+    grid.className = 'key-panel-keys';
+    for (const id of group.ids) {
       const def = getShortcutDef(id);
       if (!def) {
         continue;
@@ -2497,22 +2457,117 @@ function renderKeyPanelKeys(page) {
       button.type = 'button';
       button.className = 'key-panel-key';
       button.textContent = def.label;
-      button.title = def.label;
-      if (def.kind === 'modifier' && modifierChipIsHeld(def.modifier)) {
-        button.classList.add('active');
-      }
+      button.title = `Add ${def.label}`;
       button.addEventListener('click', () => {
-        activateShortcut(id);
-        // A modifier swaps the grid for its secondaries; everything else just
-        // sends, and the panel stays put so you can send another.
-        renderKeyPanel();
+        addShortcut(id);
+        setStatus(`Added: ${def.label}`);
       });
       grid.append(button);
     }
+    body.append(heading, grid);
   }
-  page.replaceChildren(header, grid);
+  if (groups.length === 0) {
+    const note = document.createElement('p');
+    note.className = 'key-panel-empty';
+    note.textContent = 'Every built-in key is already on the bar.';
+    body.append(note);
+  }
+  page.replaceChildren(header, body, createCustomKeyForm());
 }
 
+function createCustomKeyForm() {
+  const details = document.createElement('details');
+  details.className = 'key-panel-custom-key';
+  const summary = document.createElement('summary');
+  summary.textContent = 'Custom key';
+  const hint = document.createElement('p');
+  hint.className = 'key-panel-empty';
+  hint.textContent =
+    'Ctrl+letter, a scroll action, or a sequence (\\e, \\x1b, \\n).';
+
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.maxLength = maximumCustomKeyLabelLength;
+  label.placeholder = 'Label (optional for Ctrl)';
+  label.autocomplete = 'off';
+  label.enterKeyHint = 'done';
+  label.setAttribute('aria-label', 'Custom key label');
+
+  const type = document.createElement('select');
+  type.setAttribute('aria-label', 'Custom key type');
+  for (const option of [
+    { value: 'ctrl', label: 'Ctrl+letter' },
+    { value: 'scroll', label: 'Scroll' },
+    { value: 'text', label: 'Sequence' }
+  ]) {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = option.label;
+    type.append(element);
+  }
+
+  const value = document.createElement('input');
+  value.type = 'text';
+  value.autocomplete = 'off';
+  value.spellcheck = false;
+
+  const scroll = document.createElement('select');
+  scroll.setAttribute('aria-label', 'Scroll action');
+  for (const option of [
+    { value: 'up', label: 'Page up' },
+    { value: 'down', label: 'Page down' },
+    { value: 'bottom', label: 'Bottom' }
+  ]) {
+    const element = document.createElement('option');
+    element.value = option.value;
+    element.textContent = option.label;
+    scroll.append(element);
+  }
+
+  const syncFields = () => {
+    value.hidden = type.value !== 'ctrl' && type.value !== 'text';
+    scroll.hidden = type.value !== 'scroll';
+    if (type.value === 'ctrl') {
+      value.placeholder = 'letter (a–z)';
+      value.maxLength = 1;
+      value.setAttribute('aria-label', 'Ctrl letter');
+    } else if (type.value === 'text') {
+      value.placeholder = 'text or \\e \\x1b \\n';
+      value.maxLength = 64;
+      value.setAttribute('aria-label', 'Sequence');
+    }
+  };
+  type.addEventListener('change', syncFields);
+  syncFields();
+
+  const add = document.createElement('button');
+  add.type = 'button';
+  add.className = 'key-panel-action';
+  add.textContent = 'Add custom key';
+  add.addEventListener('click', () => {
+    addCustomKey({
+      type: type.value,
+      label: label.value,
+      value: value.value,
+      scroll: scroll.value
+    });
+  });
+
+  const row = document.createElement('div');
+  row.className = 'key-panel-custom-key-row';
+  row.append(type, value, scroll);
+  details.append(summary, hint, label, row, add);
+  return details;
+}
+
+/**
+ * The Library, as somewhere you can actually run one.
+ *
+ * runSnippet lost its only caller when the Snips drawer went, so until now you
+ * could edit snippets and never send one. There is no search field: the list is
+ * short, and a text input in here would summon the keyboard over the panel that
+ * is standing in the keyboard's place.
+ */
 function renderKeyPanelSnippets(page) {
   if (snippetsList.length === 0) {
     renderKeyPanelPlaceholder(page, 'No snippets yet — add them in Settings.');
@@ -2561,7 +2616,6 @@ function renderKeyPanelSnippets(page) {
   edit.addEventListener('click', () => {
     setKeyPanelOpen(false);
     openSettingsDialog();
-    setSettingsTab('library');
   });
   page.replaceChildren(list, edit);
 }
@@ -2839,9 +2893,9 @@ function stepTerminalFontSize(direction) {
  * keys, after every key.
  *
  * Search is a fixed chip rather than a configurable shortcut id on purpose.
- * `find` is excluded from profiles in sanitizeShortcutIdsForProfile, and
+ * `find` is excluded from the key set in sanitizeShortcutIds, and
  * builtinShortcutCatalog says so in its header — rendering it here leaves both
- * true, so a profile can never end up carrying two spellings of find.
+ * true, so the bar can never end up carrying two spellings of find.
  */
 function createFooterFindChip() {
   const button = document.createElement('button');
@@ -2872,23 +2926,21 @@ function createFooterEditChip() {
   button.id = 'footer-edit-keys';
   button.className = 'chip-edit';
   button.textContent = 'Edit';
-  button.title = 'Edit shortcuts';
+  button.title = 'Edit keys';
   button.addEventListener('click', () => {
     closeFooterDrawer();
-    // openSettingsDialog restores the last tab, so the override comes after it.
-    openSettingsDialog();
-    setSettingsTab('profiles');
+    openKeyEditor();
   });
   return button;
 }
 
 /**
- * Row 1 is the profile: every key it holds, in the order the editor shows them,
+ * Row 1 is the key set: every key it holds, in the order the editor shows them,
  * then Search and Edit at the end of the scroll.
  *
  * There is no choosing which keys get the space any more. Pinning, the
  * contextual set and the recent ordering all existed to pick ten chips out of
- * the profile; a scroller that carries all of them needs none of it.
+ * the set; a scroller that carries all of them needs none of it.
  */
 function renderFooterPins() {
   if (!footerPinsElement) {
@@ -2964,54 +3016,6 @@ function installChipLongPress(button, { onTap, onHold }) {
   });
 }
 
-function setSettingsTab(tabId) {
-  const allowed = new Set(['profiles', 'library']);
-  const active = allowed.has(tabId) ? tabId : 'profiles';
-  try {
-    window.localStorage.setItem(settingsLastTabStorageKey, active);
-  } catch {
-    // ignore
-  }
-  document.querySelectorAll('.settings-tab').forEach((tab) => {
-    const selected = tab.dataset.settingsTab === active;
-    tab.setAttribute('aria-selected', String(selected));
-  });
-  document.querySelectorAll('.settings-panel').forEach((panel) => {
-    panel.hidden = panel.dataset.settingsPanel !== active;
-  });
-  // The Theme tab's only job is showing what a theme does to the terminal, so on
-  // that tab the sheet drops to a bottom strip and stops blurring what is behind
-  // it. Keyed off the sheet so the ::backdrop can be restyled too.
-  settingsDialogElement?.classList.toggle('theme-preview', active === 'theme');
-  if (active === 'profiles') {
-    renderKeyProfileControls();
-    renderShortcutEditor();
-  }
-  if (active === 'library') {
-    void loadSnippetsFromServer();
-  }
-}
-
-function loadLastSettingsTab() {
-  try {
-    const tab = window.localStorage.getItem(settingsLastTabStorageKey);
-    if (tab === 'keys') {
-      return 'profiles';
-    }
-    if (tab === 'snips') {
-      return 'library';
-    }
-    // 'theme', 'app' and 'debug' are stored values from before those moved to
-    // the panel; they fall through to the default rather than opening nothing.
-    if (tab === 'profiles' || tab === 'library') {
-      return tab;
-    }
-  } catch {
-    // ignore
-  }
-  return 'profiles';
-}
-
 function updateAppHelpPanel() {
   const help = document.querySelector('#app-help-text');
   if (!help) {
@@ -3019,8 +3023,9 @@ function updateAppHelpPanel() {
   }
   help.textContent = [
     `${appDisplayName}.`,
-    'The key bar carries every key in the active profile; Search and Edit are at the end of it.',
-    'The gear opens the panel — snippets, paste and appearance — where the keyboard would be.',
+    'The key bar carries every key you have; Search is at the end of it.',
+    'The gear opens the panel — keys, snippets, paste and appearance — where the keyboard would be.',
+    'Hold a key in the panel to reorder, remove, or add one.',
     'Swipe the terminal sideways to change session; tap the connection dot to reconnect a dropped one.',
     'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
   ].join(' ');
@@ -3313,29 +3318,6 @@ function refreshKeysUi() {
   renderFooterPins();
   renderKeyPanel();
   renderHeaderSummary();
-  renderKeyProfileControls();
-  renderShortcutEditor();
-  syncCustomKeyFormFields();
-}
-
-function syncCustomKeyFormFields() {
-  const type = customKeyTypeSelect?.value || 'ctrl';
-  if (customKeyValueInput) {
-    const showValue = type === 'ctrl' || type === 'text';
-    customKeyValueInput.hidden = !showValue;
-    if (type === 'ctrl') {
-      customKeyValueInput.placeholder = 'letter (a–z)';
-      customKeyValueInput.maxLength = 1;
-      customKeyValueInput.setAttribute('aria-label', 'Ctrl letter');
-    } else if (type === 'text') {
-      customKeyValueInput.placeholder = 'text or \\e \\x1b \\n';
-      customKeyValueInput.maxLength = 64;
-      customKeyValueInput.setAttribute('aria-label', 'Sequence');
-    }
-  }
-  if (customKeyScrollSelect) {
-    customKeyScrollSelect.hidden = type !== 'scroll';
-  }
 }
 
 function createCustomKeyId() {
@@ -3346,457 +3328,79 @@ function createCustomKeyId() {
   return `custom-${random}`;
 }
 
-function createKeyProfileId() {
-  const random =
-    typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
-      ? crypto.randomUUID().replace(/-/g, '').slice(0, 16)
-      : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
-  return `profile-${random}`;
-}
-
-function keyProfileNameExists(name, exceptId = '') {
-  const normalized = sanitizeKeyProfileName(name).toLocaleLowerCase();
-  return loadKeyProfilesDocument().profiles.some(
-    (profile) =>
-      profile.id !== exceptId &&
-      profile.name.toLocaleLowerCase() === normalized
-  );
-}
-
-function appendKeyProfileOptions(select) {
-  if (!select) {
-    return;
-  }
-  const documentValue = loadKeyProfilesDocument();
-  select.replaceChildren();
-  for (const profile of documentValue.profiles) {
-    const option = document.createElement('option');
-    option.value = profile.id;
-    option.textContent = profile.name;
-    select.append(option);
-  }
-}
-
-function renderKeyProfileControls() {
-  if (!keyProfileSelect) {
-    return;
-  }
-  const documentValue = loadKeyProfilesDocument();
-  if (!keyProfileById(keyProfileEditorId)) {
-    keyProfileEditorId = activeKeyProfile().id;
-  }
-  appendKeyProfileOptions(keyProfileSelect);
-  keyProfileSelect.value = keyProfileEditorId;
-
-  appendKeyProfileOptions(keyProfileDefaultSelect);
-  if (keyProfileDefaultSelect) {
-    keyProfileDefaultSelect.value = documentValue.defaultProfileId;
-  }
-
-  if (keyProfileNewButton) {
-    keyProfileNewButton.disabled =
-      documentValue.profiles.length >= maximumKeyProfiles;
-  }
-  if (keyProfileDuplicateButton) {
-    keyProfileDuplicateButton.disabled =
-      documentValue.profiles.length >= maximumKeyProfiles;
-  }
-  if (keyProfileDeleteButton) {
-    keyProfileDeleteButton.disabled = documentValue.profiles.length <= 1;
-  }
-  const profile = editorKeyProfile();
-  // Keys only. A profile no longer decides which snippets you see, so counting
-  // them here would report the same number under every profile.
-  if (keyProfileSummary) {
-    keyProfileSummary.textContent = `${profile.shortcutIds.length} keys`;
-  }
-  if (profileKeyCount) {
-    profileKeyCount.textContent = String(profile.shortcutIds.length);
-  }
-}
-
-
-function createKeyProfile() {
-  if (loadKeyProfilesDocument().profiles.length >= maximumKeyProfiles) {
-    setStatus(`Profile limit ${maximumKeyProfiles}`);
-    return;
-  }
-  const proposed = window.prompt('New profile name:', 'New profile');
-  if (proposed === null) {
-    return;
-  }
-  const name = sanitizeKeyProfileName(proposed);
-  if (!name) {
-    setStatus('Profile name required');
-    return;
-  }
-  if (keyProfileNameExists(name)) {
-    setStatus('Profile name already exists');
-    return;
-  }
-  const profile = {
-    id: createKeyProfileId(),
-    name,
-    shortcutIds: [...defaultShortcutIds],
-    customKeys: []
-  };
-  const documentValue = loadKeyProfilesDocument();
-  saveKeyProfilesDocument({
-    ...documentValue,
-    profiles: [...documentValue.profiles, profile]
-  });
-  keyProfileEditorId = profile.id;
-  setStatus(`Created profile: ${name}`);
-  refreshKeysUi();
-}
-
-function duplicateKeyProfile() {
-  const source = editorKeyProfile();
-  const documentValue = loadKeyProfilesDocument();
-  if (documentValue.profiles.length >= maximumKeyProfiles) {
-    setStatus(`Profile limit ${maximumKeyProfiles}`);
-    return;
-  }
-  const proposed = window.prompt(
-    'Duplicate profile as:',
-    `${source.name} copy`
-  );
-  if (proposed === null) {
-    return;
-  }
-  const name = sanitizeKeyProfileName(proposed);
-  if (!name || keyProfileNameExists(name)) {
-    setStatus(name ? 'Profile name already exists' : 'Profile name required');
-    return;
-  }
-  const idMap = new Map();
-  const customKeys = source.customKeys.map((entry) => {
-    const id = createCustomKeyId();
-    idMap.set(entry.id, id);
-    return { ...entry, id };
-  });
-  const profile = {
-    id: createKeyProfileId(),
-    name,
-    shortcutIds: source.shortcutIds.map((id) => idMap.get(id) || id),
-    customKeys
-  };
-  saveKeyProfilesDocument({
-    ...documentValue,
-    profiles: [...documentValue.profiles, profile]
-  });
-  keyProfileEditorId = profile.id;
-  setStatus(`Duplicated profile: ${name}`);
-  refreshKeysUi();
-}
-
-function renameKeyProfile() {
-  const profile = editorKeyProfile();
-  const proposed = window.prompt('Rename profile:', profile.name);
-  if (proposed === null) {
-    return;
-  }
-  const name = sanitizeKeyProfileName(proposed);
-  if (!name) {
-    setStatus('Profile name required');
-    return;
-  }
-  if (keyProfileNameExists(name, profile.id)) {
-    setStatus('Profile name already exists');
-    return;
-  }
-  updateKeyProfile(profile.id, (entry) => ({ ...entry, name }));
-  renderSessions();
-  setStatus(`Renamed profile: ${name}`);
-  refreshKeysUi();
-}
-
-function deleteKeyProfile() {
-  const profile = editorKeyProfile();
-  const documentValue = loadKeyProfilesDocument();
-  if (
-    documentValue.profiles.length <= 1 ||
-    !window.confirm(
-      `Delete profile “${profile.name}”? Sessions using it will fall back to the default profile.`
-    )
-  ) {
-    return;
-  }
-  const profiles = documentValue.profiles.filter(
-    (entry) => entry.id !== profile.id
-  );
-  const defaultProfileId =
-    documentValue.defaultProfileId === profile.id
-      ? profiles.find((entry) => entry.id === 'shell')?.id || profiles[0].id
-      : documentValue.defaultProfileId;
-  saveKeyProfilesDocument(
-    withStarterKeyProfiles({
-      ...documentValue,
-      defaultProfileId,
-      profiles
-    })
-  );
-  const assignments = loadSessionKeyProfileAssignments();
-  for (const [sessionName, profileId] of Object.entries(assignments)) {
-    if (profileId === profile.id) {
-      delete assignments[sessionName];
-    }
-  }
-  saveSessionKeyProfileAssignments(assignments);
-  keyProfileEditorId = defaultProfileId;
-  setArmedModifier(null);
-  renderSessions();
-  setStatus(`Deleted profile: ${profile.name}`);
-  refreshKeysUi();
-}
-
-function selectKeyProfileForEditor(profileId) {
-  if (!keyProfileById(profileId)) {
-    return;
-  }
-  keyProfileEditorId = profileId;
-  renderKeyProfileControls();
-  renderShortcutEditor();
-}
-
-function setDefaultKeyProfile(profileId) {
-  if (!keyProfileById(profileId)) {
-    return;
-  }
-  const documentValue = loadKeyProfilesDocument();
-  saveKeyProfilesDocument({
-    ...documentValue,
-    defaultProfileId: profileId
-  });
-  renderSessions();
-  setStatus(`Default profile: ${keyProfileById(profileId).name}`);
-  refreshKeysUi();
-}
-
-function assignActiveSessionKeyProfile(profileId) {
-  if (!activeSession) {
-    return;
-  }
-  const assignments = loadSessionKeyProfileAssignments();
-  if (profileId && keyProfileById(profileId)) {
-    assignments[activeSession] = profileId;
-  } else {
-    delete assignments[activeSession];
-  }
-  saveSessionKeyProfileAssignments(assignments);
-  keyProfileEditorId = activeKeyProfile().id;
-  setArmedModifier(null);
-  renderSessions();
-  setStatus(`${activeSession}: ${activeKeyProfile().name} profile`);
-  refreshKeysUi();
-}
-
-function syncActiveKeyProfileUi() {
-  keyProfileEditorId = activeKeyProfile().id;
+/**
+ * A session change no longer changes which keys the bar carries — there is one
+ * set — but it still has to drop a held modifier and redraw what is live.
+ */
+function resetKeyStateForSession() {
   setArmedModifier(null);
   refreshKeysUi();
 }
 
-function renameSessionKeyProfileAssignment(fromName, toName) {
-  const assignments = loadSessionKeyProfileAssignments();
-  if (!assignments[fromName]) {
-    return;
-  }
-  assignments[toName] = assignments[fromName];
-  delete assignments[fromName];
-  saveSessionKeyProfileAssignments(assignments);
-}
-
-function renderShortcutEditor() {
-  if (!shortcutEditorList || !shortcutAddSelect) {
-    return;
-  }
-  const profile = editorKeyProfile();
-  const ids = loadShortcutIds(profile);
-  shortcutEditorList.replaceChildren();
-  ids.forEach((id, index) => {
-    const def = getShortcutDef(id, profile);
-    if (!def) {
-      return;
-    }
-    const item = document.createElement('li');
-    item.className = 'shortcut-editor-item';
-    item.dataset.shortcutId = id;
-
-    const label = document.createElement('span');
-    label.className = 'shortcut-editor-label';
-    label.textContent = isCustomKeyId(id) ? `${def.label} · custom` : def.label;
-
-    const actions = document.createElement('div');
-    actions.className = 'shortcut-editor-actions';
-
-    const more = document.createElement('details');
-    more.className = 'shortcut-editor-more';
-    const moreSummary = document.createElement('summary');
-    moreSummary.title = `Manage ${def.label}`;
-    moreSummary.setAttribute('aria-label', `Manage ${def.label}`);
-    moreSummary.textContent = '•••';
-    const moreActions = document.createElement('div');
-    moreActions.className = 'shortcut-editor-more-actions';
-
-    const up = document.createElement('button');
-    up.type = 'button';
-    up.dataset.action = 'up';
-    up.title = 'Move up';
-    up.setAttribute('aria-label', `Move ${def.label} up`);
-    up.textContent = 'Move up';
-    up.disabled = index === 0;
-
-    const down = document.createElement('button');
-    down.type = 'button';
-    down.dataset.action = 'down';
-    down.title = 'Move down';
-    down.setAttribute('aria-label', `Move ${def.label} down`);
-    down.textContent = 'Move down';
-    down.disabled = index === ids.length - 1;
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.dataset.action = 'remove';
-    remove.title = isCustomKeyId(id)
-      ? 'Remove from Keys and delete custom key'
-      : 'Remove from Keys';
-    remove.setAttribute('aria-label', `Remove ${def.label}`);
-    remove.textContent = 'Remove';
-
-    moreActions.append(up, down, remove);
-    more.append(moreSummary, moreActions);
-    actions.append(more);
-    item.append(label, actions);
-    shortcutEditorList.append(item);
-  });
-
-  shortcutAddSelect.replaceChildren();
-  let availableCount = 0;
-  const active = new Set(ids);
-
-  for (const group of builtinShortcutGroups) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = group.label;
-    for (const id of group.ids) {
-      if (active.has(id) || !Object.hasOwn(builtinShortcutCatalog, id)) {
-        continue;
-      }
-      const option = document.createElement('option');
-      option.value = id;
-      option.textContent = builtinShortcutCatalog[id].label;
-      optgroup.append(option);
-      availableCount += 1;
-    }
-    if (optgroup.childElementCount > 0) {
-      shortcutAddSelect.append(optgroup);
-    }
-  }
-
-  const customDefs = loadCustomKeyDefs(profile).filter(
-    (entry) => !active.has(entry.id)
-  );
-  if (customDefs.length > 0) {
-    const optgroup = document.createElement('optgroup');
-    optgroup.label = 'Custom';
-    for (const def of customDefs) {
-      const option = document.createElement('option');
-      option.value = def.id;
-      option.textContent = def.label;
-      optgroup.append(option);
-      availableCount += 1;
-    }
-    shortcutAddSelect.append(optgroup);
-  }
-
-  if (availableCount === 0) {
-    const option = document.createElement('option');
-    option.value = '';
-    option.textContent = 'All built-in keys added';
-    shortcutAddSelect.append(option);
-    shortcutAddSelect.disabled = true;
-    if (shortcutAddButton) {
-      shortcutAddButton.disabled = true;
-    }
-  } else {
-    shortcutAddSelect.disabled = false;
-    if (shortcutAddButton) {
-      shortcutAddButton.disabled = false;
-    }
-  }
-  syncCustomKeyFormFields();
-}
-
+/** One place along the bar. The drag saves a whole order; this is the arrows. */
 function moveShortcut(id, delta) {
-  const profile = editorKeyProfile();
-  const ids = loadShortcutIds(profile);
+  const ids = loadShortcutIds();
   const index = ids.indexOf(id);
-  if (index < 0) {
-    return;
-  }
   const next = index + delta;
-  if (next < 0 || next >= ids.length) {
+  if (index < 0 || next < 0 || next >= ids.length) {
     return;
   }
   const copy = [...ids];
-  const [item] = copy.splice(index, 1);
-  copy.splice(next, 0, item);
-  saveShortcutIds(copy, profile.id);
+  const [moved] = copy.splice(index, 1);
+  copy.splice(next, 0, moved);
+  saveShortcutIds(copy);
   refreshKeysUi();
 }
 
 function removeShortcut(id) {
-  const profile = editorKeyProfile();
-  const ids = loadShortcutIds(profile).filter((entry) => entry !== id);
-  saveShortcutIds(ids, profile.id);
+  saveShortcutIds(loadShortcutIds().filter((entry) => entry !== id));
   // Removing the chip that opens a chord row has to take the row with it.
-  if (getShortcutDef(id)?.kind === 'modifier') {
-    if (footerChordModifier === getShortcutDef(id).modifier) {
+  const def = getShortcutDef(id);
+  if (def?.kind === 'modifier') {
+    if (footerChordModifier === def.modifier) {
       closeFooterDrawer();
     }
     armedModifier = null;
   }
   // Removing a custom key also deletes its definition (re-create if needed).
   if (isCustomKeyId(id)) {
-    saveCustomKeyDefs(
-      loadCustomKeyDefs(profile).filter((entry) => entry.id !== id),
-      profile.id
-    );
+    saveCustomKeyDefs(loadCustomKeyDefs().filter((entry) => entry.id !== id));
   }
   refreshKeysUi();
 }
 
 function addShortcut(id) {
-  const profile = editorKeyProfile();
-  if (!isKnownShortcutId(id, profile)) {
+  if (!isKnownShortcutId(id)) {
     return;
   }
-  const ids = loadShortcutIds(profile);
+  const ids = loadShortcutIds();
   if (ids.includes(id)) {
     return;
   }
   ids.push(id);
-  saveShortcutIds(ids, profile.id);
+  saveShortcutIds(ids);
   refreshKeysUi();
 }
 
-function addCustomKeyFromForm() {
-  const profile = editorKeyProfile();
-  if (loadCustomKeyDefs(profile).length >= maximumCustomKeys) {
+/**
+ * Build a custom key from what the Add key form is holding.
+ *
+ * Returns whether it took, so the caller can leave the form alone when it did
+ * not — setStatus has already said why.
+ */
+function addCustomKey({ type, label: requestedLabel, value, scroll }) {
+  if (loadCustomKeyDefs().length >= maximumCustomKeys) {
     setStatus(`Custom key limit ${maximumCustomKeys}`);
-    return;
+    return false;
   }
-  const type = customKeyTypeSelect?.value || 'ctrl';
-  let label = sanitizeCustomKeyLabel(customKeyLabelInput?.value || '');
+  let label = sanitizeCustomKeyLabel(requestedLabel || '');
   let def = null;
 
   if (type === 'ctrl') {
-    const letter = String(customKeyValueInput?.value || '')
-      .trim()
-      .toLowerCase();
+    const letter = String(value || '').trim().toLowerCase();
     if (!/^[a-z]$/.test(letter)) {
       setStatus('Enter a letter a–z for Ctrl+…');
-      return;
+      return false;
     }
     if (!label) {
       label = `Ctrl+${letter.toUpperCase()}`;
@@ -3808,75 +3412,54 @@ function addCustomKeyFromForm() {
       sequence: String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64)
     };
   } else if (type === 'scroll') {
-    const scroll = customKeyScrollSelect?.value || 'bottom';
     if (scroll !== 'up' && scroll !== 'down' && scroll !== 'bottom') {
       setStatus('Pick a scroll action');
-      return;
+      return false;
     }
     if (!label) {
-      label =
-        scroll === 'up' ? 'PgUp' : scroll === 'down' ? 'PgDn' : 'Bottom';
+      label = scroll === 'up' ? 'PgUp' : scroll === 'down' ? 'PgDn' : 'Bottom';
     }
-    def = {
-      id: createCustomKeyId(),
-      label,
-      kind: 'scroll',
-      scroll
-    };
+    def = { id: createCustomKeyId(), label, kind: 'scroll', scroll };
   } else if (type === 'text') {
-    const sequence = parseSequenceSpec(customKeyValueInput?.value || '');
+    const sequence = parseSequenceSpec(value || '');
     if (!sequence) {
       setStatus('Invalid sequence (try \\e, \\x1b, text)');
-      return;
+      return false;
     }
     if (!label) {
       setStatus('Label required for custom sequence');
-      return;
+      return false;
     }
-    def = {
-      id: createCustomKeyId(),
-      label,
-      kind: 'sequence',
-      sequence
-    };
+    def = { id: createCustomKeyId(), label, kind: 'sequence', sequence };
   } else {
     setStatus('Unknown key type');
-    return;
+    return false;
   }
 
   const cleaned = sanitizeCustomKeyDef(def);
   if (!cleaned) {
     setStatus('Could not save custom key');
-    return;
+    return false;
   }
-  const nextDefs = [...loadCustomKeyDefs(profile), cleaned];
-  saveCustomKeyDefs(nextDefs, profile.id);
-  const ids = loadShortcutIds(keyProfileById(profile.id));
+  saveCustomKeyDefs([...loadCustomKeyDefs(), cleaned]);
+  const ids = loadShortcutIds();
   if (!ids.includes(cleaned.id)) {
     ids.push(cleaned.id);
-    saveShortcutIds(ids, profile.id);
-  }
-  if (customKeyLabelInput) {
-    customKeyLabelInput.value = '';
-  }
-  if (customKeyValueInput) {
-    customKeyValueInput.value = '';
+    saveShortcutIds(ids);
   }
   setStatus(`Added: ${cleaned.label}`);
   refreshKeysUi();
+  return true;
 }
 
 function resetShortcuts() {
-  const profile = editorKeyProfile();
-  const starter = starterKeyProfileTemplates.find(
-    (template) => template.id === profile.id
-  );
-  saveShortcutIds(
-    [...(starter?.shortcutIds || defaultShortcutIds)],
-    profile.id
-  );
-  // Keep custom key definitions; only reset which chips are active to defaults.
+  if (!window.confirm('Reset the keys to their defaults?')) {
+    return;
+  }
+  saveShortcutIds([...defaultShortcutIds]);
+  // Keep custom key definitions; only reset which keys the bar carries.
   armedModifier = null;
+  setStatus('Keys reset');
   refreshKeysUi();
 }
 
@@ -5076,7 +4659,7 @@ function commandPaletteCommands() {
     {
       id: 'settings.open',
       label: 'Open Settings',
-      keywords: 'preferences theme profiles library',
+      keywords: 'preferences snippets library',
       run: () => openSettingsDialog()
     }
   ];
@@ -6824,11 +6407,7 @@ function hasDurableBrowserPreferences() {
   if (qaShellMode) {
     return false;
   }
-  const durableKeys = [
-    terminalThemeStorageKey,
-    sessionThemeStorageKey,
-    sessionKeyProfilesStorageKey
-  ];
+  const durableKeys = [terminalThemeStorageKey, sessionThemeStorageKey];
   try {
     const generatedBootstrap =
       window.localStorage.getItem(preferencesBootstrapStorageKey) === '1';
@@ -6837,7 +6416,7 @@ function hasDurableBrowserPreferences() {
         (storageKey) => window.localStorage.getItem(storageKey) !== null
       ) ||
       (!generatedBootstrap &&
-        window.localStorage.getItem(keyProfilesStorageKey) !== null)
+        window.localStorage.getItem(keySetStorageKey) !== null)
     );
   } catch {
     return false;
@@ -7166,8 +6745,10 @@ function resolvePreferencesLoadAction(options) {
 
 function durablePreferencesSnapshot() {
   return {
-    keyProfiles: loadKeyProfilesDocument(),
-    sessionProfiles: loadSessionKeyProfileAssignments(),
+    keyProfiles: keySetToPreferences(loadKeySet()),
+    // Nothing assigns keys per session any more. The field stays because the
+    // server sanitizes it and older browsers still read it.
+    sessionProfiles: {},
     theme: rememberedTerminalThemeName(),
     sessionThemes: loadSessionThemes()
   };
@@ -7175,17 +6756,7 @@ function durablePreferencesSnapshot() {
 
 function freshPreferencesSnapshot() {
   return {
-    keyProfiles: withStarterKeyProfiles({
-      defaultProfileId: 'shell',
-      profiles: [
-        {
-          id: 'shell',
-          name: 'Terminal',
-          shortcutIds: [...defaultShortcutIds],
-          customKeys: []
-        }
-      ]
-    }),
+    keyProfiles: keySetToPreferences(defaultKeySet()),
     sessionProfiles: {},
     theme: 'matrix',
     sessionThemes: {}
@@ -7264,8 +6835,8 @@ function updatePreferencesSyncUi() {
     local: {
       label: 'Not enabled',
       help:
-        'This browser is local-only. Enable to sync profiles, ' +
-        'sessions, and themes to your login.'
+        'This browser is local-only. Enable to sync your keys and ' +
+        'themes to your login.'
     },
     saving: {
       label: 'Saving…',
@@ -7274,8 +6845,8 @@ function updatePreferencesSyncUi() {
     synced: {
       label: 'Synced',
       help:
-        'Profiles, sessions, and themes follow your login; view, path, ' +
-        'font size, and layout stay on this device.'
+        'Keys and themes follow your login; view, path, font size, and ' +
+        'layout stay on this device.'
     },
     offline: {
       label: 'Local fallback',
@@ -7316,12 +6887,7 @@ function applySharedPreferences(preferences) {
   }
   preferencesApplying = true;
   try {
-    const profiles = withStarterKeyProfiles(
-      sanitizeKeyProfilesDocument(preferences.keyProfiles)
-    );
-    saveKeyProfilesDocument(profiles);
-    sessionKeyProfileAssignments = null;
-    saveSessionKeyProfileAssignments(preferences.sessionProfiles);
+    saveKeySet(keySetFromPreferences(preferences.keyProfiles));
     const globalTheme = resolveThemeName(preferences.theme);
     const cleanGlobalTheme = Object.hasOwn(terminalThemes, globalTheme)
       ? globalTheme
@@ -7340,7 +6906,6 @@ function applySharedPreferences(preferences) {
       (activeSession && cleanSessionThemes[activeSession]) ||
       cleanGlobalTheme;
     applyTerminalTheme(nextTheme, { persist: false });
-    keyProfileEditorId = activeKeyProfile().id;
   } finally {
     preferencesApplying = false;
   }
@@ -9297,7 +8862,7 @@ function installDialogBackdropDismiss(dialog, dismiss) {
 function openSettingsDialog() {
   renderAppBuildId();
   renderKeybindingReference();
-  setSettingsTab(loadLastSettingsTab());
+  void loadSnippetsFromServer();
   // A modal over a raised keyboard leaves both up, with the dialog squeezed into
   // whatever the keyboard did not take. Hand the space back before showing it.
   if (terminalInputIsFocused()) {
@@ -9379,19 +8944,12 @@ function renderSessions() {
     const isActive = session.name === activeSession;
     item.classList.toggle('active', isActive);
     button.className = isActive ? 'session active' : 'session';
-    const profile = keyProfileForSession(session.name);
     const sessionName = document.createElement('span');
     sessionName.className = 'session-name';
     sessionName.textContent = session.name;
-    const profileBadge = document.createElement('span');
-    profileBadge.className = 'session-profile-label';
-    profileBadge.textContent = profile.name;
-    profileBadge.dataset.shortLabel = shortProfileLabel(profile);
-    profileBadge.title = `Profile: ${profile.name}`;
-    button.append(sessionName, profileBadge);
+    button.append(sessionName);
     button.title =
       `${session.windows} window(s), ${session.attached} client(s). ` +
-      `Profile: ${profile.name}. ` +
       'Long-press to rename.';
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
@@ -11045,7 +10603,7 @@ function disconnect() {
   lastSentTerminalCols = null;
   lastSentTerminalRows = null;
   activeSession = null;
-  syncActiveKeyProfileUi();
+  resetKeyStateForSession();
   clearConnectionWatch();
   setConnectionState('idle');
   setHeaderCollapsed(false);
@@ -11098,7 +10656,7 @@ async function openSessionSocket(name) {
     retiredSocket.close();
   }
   activeSession = name;
-  syncActiveKeyProfileUi();
+  resetKeyStateForSession();
   setConnectionState('connecting', `Connecting to ${name}…`);
   setStatus(`Connecting to ${name}…`, { sticky: true });
   armConnectionWatch(name);
@@ -11261,11 +10819,10 @@ async function renameSession(name) {
     // tmux keeps the same session attached after rename; only client labels
     // and remembered state need to update.
     renameSessionTheme(name, renamed);
-    renameSessionKeyProfileAssignment(name, renamed);
     if (activeSession === name) {
       activeSession = renamed;
       rememberSession(renamed);
-      syncActiveKeyProfileUi();
+      resetKeyStateForSession();
       renderHeaderSummary();
     }
     await refreshSessions(false, true);
@@ -13279,13 +12836,6 @@ document.addEventListener('pointerdown', (event) => {
   }
   setHeaderCollapsed(true);
 });
-settingsTabsElement?.addEventListener('click', (event) => {
-  const tab = event.target.closest('[data-settings-tab]');
-  if (!tab || !settingsTabsElement.contains(tab)) {
-    return;
-  }
-  setSettingsTab(tab.dataset.settingsTab);
-});
 /**
  * The gear opens the panel where the panel exists, and the settings dialog where
  * it does not. Landscape, desktop and Files have no keyboard area for a panel to
@@ -13315,59 +12865,6 @@ keyPanelCustomizeButton?.addEventListener('click', () => {
 installDialogBackdropDismiss(settingsDialogElement, () => {
   settingsDialogElement.close();
 });
-shortcutEditorList?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-action]');
-  const item = event.target.closest('.shortcut-editor-item');
-  if (!button || !item || !shortcutEditorList.contains(item)) {
-    return;
-  }
-  const id = item.dataset.shortcutId;
-  const action = button.dataset.action;
-  if (action === 'up') {
-    moveShortcut(id, -1);
-  } else if (action === 'down') {
-    moveShortcut(id, 1);
-  } else if (action === 'remove') {
-    removeShortcut(id);
-  }
-  button.closest('details')?.removeAttribute('open');
-});
-shortcutAddButton?.addEventListener('click', () => {
-  const id = shortcutAddSelect?.value;
-  if (id) {
-    addShortcut(id);
-  }
-});
-shortcutResetButton?.addEventListener('click', () => {
-  resetShortcuts();
-});
-keyProfileSelect?.addEventListener('change', () => {
-  selectKeyProfileForEditor(keyProfileSelect.value);
-});
-keyProfileDefaultSelect?.addEventListener('change', () => {
-  setDefaultKeyProfile(keyProfileDefaultSelect.value);
-});
-keyProfileNewButton?.addEventListener('click', createKeyProfile);
-keyProfileDuplicateButton?.addEventListener('click', duplicateKeyProfile);
-keyProfileRenameButton?.addEventListener('click', renameKeyProfile);
-keyProfileDeleteButton?.addEventListener('click', deleteKeyProfile);
-for (const button of [
-  keyProfileNewButton,
-  keyProfileDuplicateButton,
-  keyProfileRenameButton,
-  keyProfileDeleteButton
-]) {
-  button?.addEventListener('click', () => {
-    button.closest('details')?.removeAttribute('open');
-  });
-}
-customKeyTypeSelect?.addEventListener('change', () => {
-  syncCustomKeyFormFields();
-});
-customKeyAddButton?.addEventListener('click', () => {
-  addCustomKeyFromForm();
-});
-syncCustomKeyFormFields();
 snippetEditorList?.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-action]');
   const item = event.target.closest('.shortcut-editor-item');
@@ -13416,9 +12913,7 @@ preferencesSyncRetryButton?.addEventListener('click', () => {
 });
 applyTerminalTheme(terminalThemeName, { persist: false });
 resetPreferencesIfSchemaChanged();
-loadKeyProfilesDocument();
-keyProfileEditorId = activeKeyProfile().id;
-renderKeyProfileControls();
+loadKeySet();
 keyPanelTab = loadKeyPanelTab();
 renderFooterPins();
 closeFooterDrawer();

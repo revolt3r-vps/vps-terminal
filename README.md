@@ -92,10 +92,9 @@ See [docs/auth-google.md](docs/auth-google.md) and
 
 - tmux session list, create, rename, kill
 - xterm.js terminal, reconnect, scrollback find
-- Mobile footer: keys, snippets, pins, paste helpers
-- Terminal/Codex/Claude/Grok profiles with per-session keys, shared-snippet
-  selection, visible assignment, adaptive pin layouts, and optional per-login
-  setup sync across browsers
+- Mobile footer: a scrolling key bar, snippets, paste helpers
+- One editable key set: hold a key to reorder or remove it, add built-in or
+  custom keys, with optional per-login setup sync across browsers
 - App-wide adaptive terminal themes
 - Hardware keyboard support when focus is on chrome
 - Files workspace with jailed Locations, preview, rename, new folders, and

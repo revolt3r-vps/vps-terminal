@@ -1376,20 +1376,6 @@ body.files-view #terminal-link-chip {
   outline: 0;
 }
 
-/* Settings menus stay the small contextual card everywhere, including touch —
- * see the rule above. Only their close-button touch target grows here. */
-@media (pointer: coarse) {
-}
-
-/* Short viewports: scroll the profile list, never the sheet's own actions. */
-@media (max-height: 700px) {
-}
-
-/* Short landscape: pair the actions and shorten the profile list so the whole
- * sheet still fits without scrolling. */
-@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
-}
-
 body.files-view #empty,
 body.files-view #terminal,
 body.files-view #scroll-catcher,
@@ -1487,24 +1473,6 @@ header.collapsed #connection-dot {
   white-space: nowrap;
 }
 
-.active-profile-label,
-.session-profile-label {
-  flex: 0 0 auto;
-  max-width: 84px;
-  padding: 2px 6px;
-  overflow: hidden;
-  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--control-border));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--accent-surface) 72%, transparent);
-  color: var(--accent-text);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: 0.03em;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .connection-state-label {
   flex: 0 0 auto;
   color: #7f8b99;
@@ -1589,6 +1557,7 @@ button {
 
 button:focus-visible,
 label[tabindex='0']:focus-visible,
+.key-panel-key[tabindex='0']:focus-visible,
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible,
@@ -2173,52 +2142,6 @@ body:has(#files-options-dialog[open]) footer {
   font-size: 16px;
 }
 
-.settings-tabs {
-  display: flex;
-  /* Content-sized, not equal fifths. Five equal columns gave every tab 59px on a
-     390px sheet, which "Appearance" overflows by 9px — it clipped into "App".
-     Sized to their labels the five need 291px of the 322 available, and the
-     leftover is shared out. */
-  gap: var(--control-gap);
-  margin-bottom: 12px;
-  padding: 3px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-}
-
-.settings-tab {
-  flex: 1 1 auto;
-  /* A floor, not zero: sizing purely to content shrank "App" to a 26px-wide tap
-     target. With this, short labels stay tappable and long ones still take what
-     they need — the five need 295px of the 322 available. */
-  min-width: var(--control-size);
-  min-height: var(--control-size);
-  padding: 0 3px;
-  /* A backstop, so a label longer than its share degrades to an ellipsis instead
-     of spilling over the tab beside it. */
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--control-font);
-  font-weight: 700;
-  box-shadow: none;
-}
-
-.settings-tab[aria-selected="true"] {
-  background: var(--accent-surface);
-  color: var(--accent-text);
-  box-shadow: inset 0 0 0 1px var(--accent);
-}
-
-.settings-tab:active {
-  transform: none;
-}
-
 .settings-panels {
   max-height: min(62dvh, 520px);
   overflow: auto;
@@ -2234,136 +2157,11 @@ body:has(#files-options-dialog[open]) footer {
   display: none !important;
 }
 
-.settings-field {
-  display: grid;
-  gap: 7px;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.settings-field select {
-  width: 100%;
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--control-font-label);
-}
-
 .settings-hint {
   margin: 0;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.4;
-}
-
-.settings-key-profiles {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-deep);
-}
-
-.settings-profile-picker {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: var(--control-gap);
-}
-
-.settings-key-profile-menu {
-  position: relative;
-}
-
-.settings-key-profile-menu > summary {
-  display: grid;
-  place-items: center;
-  min-width: 76px;
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: var(--control-font-label);
-  font-weight: 650;
-  list-style: none;
-}
-
-.settings-key-profile-menu > summary::-webkit-details-marker {
-  display: none;
-}
-
-.settings-key-profile-menu[open] > summary {
-  border-color: var(--accent);
-  color: var(--text);
-}
-
-.settings-key-profile-actions {
-  position: absolute;
-  top: calc(100% + 5px);
-  right: 0;
-  z-index: 4;
-  display: grid;
-  width: min(248px, calc(100vw - 56px));
-  gap: 3px;
-  padding: 5px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.42);
-}
-
-.settings-profile-default {
-  display: grid;
-  gap: 6px;
-  margin-top: 3px;
-  padding: 9px 5px 4px;
-  border-top: 1px solid var(--control-border);
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.settings-profile-default select {
-  width: 100%;
-  min-height: var(--control-size);
-  padding: 0 8px;
-  border: 1px solid var(--control-border);
-  border-radius: 7px;
-  background: var(--surface-deep);
-  color: var(--text);
-  font: inherit;
-}
-
-.settings-key-profile-actions button {
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border-color: transparent;
-  background: transparent;
-  text-align: left;
-  font-size: var(--control-font-label);
-}
-
-.settings-key-profile-actions button:hover,
-.settings-key-profile-actions button:focus-visible {
-  background: var(--surface-pressed);
-}
-
-#key-profile-delete {
-  color: var(--danger);
-}
-
-.settings-profile-summary {
-  min-height: 18px;
-  margin: 0;
-  color: var(--muted);
-  font-size: 11px;
 }
 
 .settings-sync {
@@ -2463,57 +2261,15 @@ body:has(#files-options-dialog[open]) footer {
   -webkit-overflow-scrolling: touch;
 }
 
-.settings-profile-section {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--control-radius);
-  background: color-mix(in srgb, var(--surface-deep) 72%, transparent);
-}
-
-.settings-profile-section-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.settings-profile-section-heading h3 {
-  margin: 0;
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-}
-
-.settings-count {
-  display: grid;
-  place-items: center;
-  min-width: 24px;
-  min-height: 22px;
-  padding: 0 7px;
-  border-radius: 999px;
-  background: var(--surface-raised);
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 700;
-}
-
-#shortcut-editor-list {
-  display: grid;
-  gap: 6px;
-  max-height: min(36vh, 280px);
-  margin: 0;
-  padding: 0;
-  overflow: auto;
-  list-style: none;
-}
-
 .shortcut-editor-item {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  /* A grid item sizes its column to max-content unless told otherwise, so on a
+     320px screen the four action buttons pushed the row 25px past the list it
+     scrolls inside. With this the label ellipsises instead. */
+  min-width: 0;
   min-height: var(--control-size);
   padding: 4px 6px 4px 10px;
   border: 1px solid var(--control-border);
@@ -2538,8 +2294,7 @@ body:has(#files-options-dialog[open]) footer {
   gap: 4px;
 }
 
-.shortcut-editor-actions > button,
-.shortcut-editor-more > summary {
+.shortcut-editor-actions > button {
   display: grid;
   place-items: center;
   min-width: var(--control-size);
@@ -2554,133 +2309,12 @@ body:has(#files-options-dialog[open]) footer {
   list-style: none;
 }
 
-.shortcut-editor-more > summary::-webkit-details-marker {
-  display: none;
-}
-
-.shortcut-editor-more[open] > summary {
-  border-color: var(--accent);
-  background: var(--accent-surface);
-  color: var(--accent-text);
-}
-
-.shortcut-editor-more-actions {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
-  z-index: 5;
-  display: grid;
-  width: 132px;
-  gap: 3px;
-  padding: 4px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface);
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.42);
-}
-
-.shortcut-editor-more-actions button {
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border-color: transparent;
-  background: transparent;
-  text-align: left;
-  font-size: var(--control-font-label);
-}
-
-.shortcut-editor-more-actions button:hover,
-.shortcut-editor-more-actions button:focus-visible {
-  background: var(--surface-pressed);
-}
-
-.settings-shortcut-add {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: var(--control-gap);
-}
-
-.settings-shortcut-add select {
-  width: 100%;
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--control-font-label);
-}
-
-.settings-shortcut-add button,
-.settings-secondary,
-.settings-custom-key button {
-  min-height: var(--control-size);
-  padding: 0 12px;
-  border-radius: var(--control-radius);
-  font-size: var(--control-font-label);
-}
-
-.settings-custom-key {
-  display: grid;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-}
-
-.settings-custom-key > summary {
-  min-height: var(--control-size);
-  padding: 0 12px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: var(--control-font-label);
-  font-weight: 650;
-  line-height: var(--control-size);
-  list-style-position: inside;
-}
-
-.settings-custom-key[open] > summary {
-  margin-bottom: 2px;
-  color: var(--text);
-}
-
-.settings-hint-tight {
-  margin: 0;
-}
-
-.settings-custom-key-row {
-  display: grid;
-  grid-template-columns: minmax(7rem, 0.9fr) minmax(0, 1.1fr);
-  gap: 6px;
-}
-
-.settings-custom-key input,
-.settings-custom-key select {
-  width: 100%;
-  min-height: var(--control-size);
-  padding: 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--control-font-label);
-}
-
-.settings-custom-key input[hidden],
-.settings-custom-key select[hidden] {
-  display: none;
-}
-
-.settings-custom-key code {
-  font-size: 0.9em;
-  color: var(--muted);
-}
-
 .settings-secondary {
   width: 100%;
+  min-height: var(--control-size);
+  padding: 0 12px;
+  border-radius: var(--control-radius);
+  font-size: var(--control-font-label);
   border-color: var(--control-border);
   background: var(--surface-raised);
   color: var(--muted);
@@ -2937,9 +2571,9 @@ body.files-view #key-panel {
   display: none !important;
 }
 
-/* No header row. The panel opens straight onto its content: which profile is
- * active belongs in the header and the dialog, not repeated on a surface whose
- * whole point is the space it saves. */
+/* No header row. The panel opens straight onto its content — a title would
+ * repeat what the tab strip already says on a surface whose whole point is the
+ * space it saves. */
 #key-panel-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -3002,26 +2636,12 @@ body.files-view #key-panel {
   color: var(--accent-text);
 }
 
-/* Keys tab: which profile the bar carries, and the way to edit it. */
+/* Keys tab: the row above the grid while it is being edited. */
 .key-panel-header {
   display: flex;
   align-items: center;
   gap: var(--control-gap);
   margin-bottom: 8px;
-}
-
-.key-panel-profile-select {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 38px;
-  padding: 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
-  color: var(--text);
-  font: inherit;
-  font-size: var(--control-font-label);
-  font-weight: 650;
 }
 
 .key-panel-header-action {
@@ -3039,7 +2659,7 @@ body.files-view #key-panel {
 }
 
 /*
- * Every key in the profile at once. The strip along the bottom carries the same
+ * Every key at once. The strip along the bottom carries the same
  * set but shows about five of them; here they all fit, which is the one thing a
  * surface this size can offer that the strip cannot.
  */
@@ -3076,6 +2696,180 @@ body.files-view #key-panel {
   border-color: var(--accent);
   background: var(--accent-surface);
   color: var(--accent-text);
+}
+
+/* Done sits at the far end, away from the two controls that change things. */
+.key-panel-header-done {
+  margin-left: auto;
+}
+
+/*
+ * Edit mode. The grid keeps its geometry — the same tiles in the same places —
+ * and says it is editable by wobbling, the way a home screen does.
+ *
+ * touch-action: none is what makes a drag a drag: without it the first vertical
+ * movement scrolls the panel and the pointer stream is cancelled.
+ */
+.key-panel-keys.editing {
+  touch-action: none;
+}
+
+.key-panel-keys.editing .key-panel-key {
+  position: relative;
+  display: grid;
+  place-items: center;
+  /* Stated on the tile as well as the grid: the touched element is where the
+     browser starts looking, and a tile is a div here rather than a button. */
+  touch-action: none;
+  border: 1px solid transparent;
+  cursor: grab;
+  animation: key-tile-wobble 0.42s ease-in-out infinite alternate;
+}
+
+/* Second, third and fourth tiles start out of phase, so the grid wobbles as a
+   crowd rather than as one block. */
+.key-panel-keys.editing .key-panel-key:nth-child(2n) {
+  animation-delay: -0.14s;
+}
+
+.key-panel-keys.editing .key-panel-key:nth-child(3n) {
+  animation-delay: -0.28s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .key-panel-keys.editing .key-panel-key {
+    animation: none;
+    outline: 1px dashed var(--control-border);
+    outline-offset: -2px;
+  }
+}
+
+.key-panel-key-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The badge overhangs its tile, so the tile cannot clip it. */
+.key-panel-keys.editing .key-panel-key {
+  overflow: visible;
+}
+
+.key-panel-key-remove {
+  position: absolute;
+  top: -7px;
+  left: -7px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  min-width: 20px;
+  height: 20px;
+  min-height: 20px;
+  padding: 0;
+  border: 1px solid var(--surface-deep);
+  border-radius: 999px;
+  background: var(--danger);
+  box-shadow: none;
+  color: #10141c;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+/* Lifted, and out of the animation so it does not wobble under the finger. */
+.key-panel-key.dragging {
+  z-index: 2;
+  animation: none;
+  cursor: grabbing;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
+  opacity: 0.92;
+}
+
+@keyframes key-tile-wobble {
+  from {
+    transform: rotate(-0.9deg);
+  }
+  to {
+    transform: rotate(0.9deg);
+  }
+}
+
+/* Add key: one labelled grid per catalog group, then the custom key form. */
+.key-panel-groups {
+  display: grid;
+  gap: 10px;
+}
+
+.key-panel-group-label {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.key-panel-custom-key {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-deep);
+}
+
+.key-panel-custom-key:not([open]) {
+  gap: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.key-panel-custom-key > summary {
+  display: grid;
+  place-items: center;
+  min-height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: var(--control-font);
+  font-weight: 650;
+  list-style: none;
+}
+
+.key-panel-custom-key > summary::-webkit-details-marker {
+  display: none;
+}
+
+.key-panel-custom-key input,
+.key-panel-custom-key select {
+  min-height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--control-font-label);
+}
+
+.key-panel-custom-key-row {
+  display: flex;
+  gap: var(--control-gap);
+}
+
+.key-panel-custom-key-row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.key-panel-custom-key-row > [hidden] {
+  display: none;
 }
 
 /* One tappable row per item, across every tab that lists things. */
@@ -3676,19 +3470,6 @@ footer button {
     font-size: 10px;
     font-weight: 600;
     letter-spacing: 0.04em;
-  }
-
-  header.collapsed .active-profile-label,
-  #header-expanded .session-profile-label {
-    max-width: 34px;
-    padding: 3px 5px;
-    font-size: 0;
-  }
-
-  header.collapsed .active-profile-label::after,
-  #header-expanded .session-profile-label::after {
-    content: attr(data-short-label);
-    font-size: 8px;
   }
 
   header.collapsed .connection-state-label {

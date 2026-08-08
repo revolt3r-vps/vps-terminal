@@ -69,7 +69,7 @@ commands.
 |------|---------|
 | `~/.local/share/vps-terminal/run/terminal.sock` | Listen socket (when configured) |
 | `~/.local/share/vps-terminal/snippets.json` | User snippets |
-| `~/.local/share/vps-terminal/preferences/*.json` | Opt-in per-login profile, pin, assignment, and theme setup (hashed identity filenames, 0600) |
+| `~/.local/share/vps-terminal/preferences/*.json` | Opt-in per-login key and theme setup (hashed identity filenames, 0600) |
 | `~/.local/share/vps-terminal/client-debug.log` | Opt-in metadata-only client debug (0600, bounded to 256 KiB) |
 | `~/paste/*` | Temporary paste images (pruned) |
 
@@ -92,9 +92,9 @@ exposing the email. A browser must explicitly seed the first shared setup;
 after that, browsers using the same authenticated login load it automatically.
 Revision checks prevent a stale browser from silently replacing a newer setup.
 
-Shared setup includes profiles, keys, selected snippets, pins, tmux-session
-profile assignments, and themes. Active session, Terminal/Files view, current
-Files location, font size, open Settings tab, and dismissed hints remain
+Shared setup includes the key set — which keys the bar carries, in which order,
+plus any custom ones — and themes. Active session, Terminal/Files view, current
+Files location, font size, open panel tab, and dismissed hints remain
 device-local because they describe the current device or moment rather than
 durable configuration.
 

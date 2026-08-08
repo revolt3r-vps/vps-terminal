@@ -44,7 +44,6 @@
           title="Show sessions"
         >
           <span id="current-session">No session</span>
-          <span id="active-profile" class="active-profile-label" hidden></span>
           <span
             id="connection-state-label"
             class="connection-state-label"
@@ -422,111 +421,16 @@
 
     <div id="status" role="status" aria-live="polite"></div>
 
-    <!-- No heading row. The tab strip says where you are, and a title plus a
-         close button cost ~110px of a 844px screen to repeat it. Dismissal is
-         the backdrop tap installDialogBackdropDismiss wires up, plus Escape. -->
-    <dialog id="settings-dialog" aria-label="Terminal settings">
-      <div class="settings-tabs" role="tablist" aria-label="Settings sections">
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Snippets</button>
-      </div>
+    <!-- Snippets only, since keys moved into the panel. No heading row: a title
+         plus a close button cost ~110px of a 844px screen to say what the one
+         section already says. Dismissal is the backdrop tap
+         installDialogBackdropDismiss wires up, plus Escape. -->
+    <dialog id="settings-dialog" aria-label="Snippets">
       <div class="settings-panels">
-        <section
-          class="settings-panel"
-          data-settings-panel="profiles"
-          role="tabpanel"
-          aria-label="Profiles"
-        >
-          <div class="settings-key-profiles" aria-label="Profiles">
-            <div class="settings-profile-picker">
-              <label class="settings-field" for="key-profile-select">
-                <span>Edit profile</span>
-                <select id="key-profile-select"></select>
-              </label>
-              <details class="settings-key-profile-menu">
-                <summary title="Manage profiles" aria-label="Manage profiles">
-                  Manage
-                </summary>
-                <div class="settings-key-profile-actions">
-                  <button id="key-profile-new" type="button">New profile</button>
-                  <button id="key-profile-duplicate" type="button">Duplicate</button>
-                  <button id="key-profile-rename" type="button">Rename</button>
-                  <button id="key-profile-delete" type="button">Delete</button>
-                  <label class="settings-profile-default" for="key-profile-default-select">
-                    <span>Default for unassigned sessions</span>
-                    <select id="key-profile-default-select"></select>
-                  </label>
-                </div>
-              </details>
-            </div>
-            <p id="key-profile-summary" class="settings-profile-summary"></p>
-          </div>
+        <section class="settings-panel" aria-label="Snippet Library">
           <p class="settings-hint">
-            This edits a profile. Which one a session uses is the dropdown on the
-            panel's Keys tab. Snippets are one shared list, the same under every
-            profile.
-          </p>
-          <section class="settings-profile-section" aria-labelledby="profile-keys-heading">
-            <div class="settings-profile-section-heading">
-              <h3 id="profile-keys-heading">Keys</h3>
-              <span id="profile-key-count" class="settings-count"></span>
-            </div>
-            <ul id="shortcut-editor-list"></ul>
-            <div class="settings-shortcut-add">
-              <select id="shortcut-add-select" aria-label="Shortcut to add"></select>
-              <button id="shortcut-add" type="button">Add</button>
-            </div>
-            <details class="settings-custom-key" aria-label="Custom key">
-              <summary>Add custom key</summary>
-              <p class="settings-hint settings-hint-tight">
-                Ctrl+letter, scroll, or a sequence
-                (<code>\e</code> <code>\x1b</code> <code>\n</code>).
-              </p>
-              <input
-                id="custom-key-label"
-                type="text"
-                maxlength="16"
-                placeholder="Label (optional for Ctrl)"
-                autocomplete="off"
-                enterkeyhint="done"
-              />
-              <div class="settings-custom-key-row">
-                <select id="custom-key-type" aria-label="Custom key type">
-                  <option value="ctrl">Ctrl+letter</option>
-                  <option value="scroll">Scroll</option>
-                  <option value="text">Sequence</option>
-                </select>
-                <input
-                  id="custom-key-value"
-                  type="text"
-                  maxlength="64"
-                  placeholder="letter (a–z)"
-                  autocomplete="off"
-                  spellcheck="false"
-                  aria-label="Ctrl letter"
-                />
-                <select id="custom-key-scroll" aria-label="Scroll action" hidden>
-                  <option value="up">Page up</option>
-                  <option value="down">Page down</option>
-                  <option value="bottom">Bottom</option>
-                </select>
-              </div>
-              <button id="custom-key-add" type="button">Add custom key</button>
-            </details>
-            <button id="shortcut-reset" type="button" class="settings-secondary">
-              Reset key defaults
-            </button>
-          </section>
-        </section>
-        <section
-          class="settings-panel"
-          data-settings-panel="library"
-          role="tabpanel"
-          aria-label="Snippet Library"
-          hidden
-        >
-          <p class="settings-hint">
-            One list, shared across devices and the same under every profile.
+            One list, shared across devices. Keys are edited in the panel: hold
+            one to reorder, remove, or add.
             <strong>Run</strong> = execute, off = insert only.
           </p>
           <ul id="snippet-editor-list"></ul>
@@ -556,33 +460,6 @@
           <button id="snippet-reset" type="button" class="settings-secondary">
             Reset snippet defaults
           </button>
-        </section>
-          <p id="app-help-text" class="settings-hint"></p>
-          <!-- Built at runtime from the keybinding table, so it cannot describe a
-               chord that no longer exists. Hidden where no fine pointer is present:
-               none of these are reachable on a touch-only device. -->
-          <section
-            id="keybinding-reference-section"
-            class="settings-keys"
-            aria-labelledby="keybinding-reference-title"
-            hidden
-          >
-            <strong id="keybinding-reference-title">Keyboard shortcuts</strong>
-            <dl id="keybinding-reference"></dl>
-          </section>
-          <div class="settings-install">
-            <button id="install-app" type="button">Install web app</button>
-            <p id="install-help"></p>
-          </div>
-          <!-- Which build this page is actually running. A page loaded before a
-               deploy keeps serving the old bundle, which is indistinguishable from
-               a deploy that never landed unless it says so. -->
-          <p id="app-build-id" class="settings-hint"></p>
-        </section>
-        <!-- Keyboard geometry is derived from six interacting flags whose release
-             needs all six false at once. The failure is intermittent and only
-             reproduces on a phone, where there is no devtools console to read, so
-             the transitions have to be dumpable from inside the app. -->
         </section>
       </div>
     </dialog>
@@ -767,29 +644,51 @@
             aria-label="App"
             hidden
           >
-          <section class="settings-sync" aria-labelledby="preferences-sync-title">
-            <div class="settings-sync-heading">
-              <strong id="preferences-sync-title">Shared setup</strong>
-              <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
+            <section class="settings-sync" aria-labelledby="preferences-sync-title">
+              <div class="settings-sync-heading">
+                <strong id="preferences-sync-title">Shared setup</strong>
+                <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
+              </div>
+              <p id="preferences-sync-help" class="settings-hint">
+                Your keys and themes can follow your login across browsers.
+                Device layout stays local.
+              </p>
+              <div class="settings-sync-actions">
+                <button id="preferences-sync-enable" type="button" hidden>
+                  Use this browser as shared setup
+                </button>
+                <button id="preferences-sync-load" type="button" hidden>
+                  Load latest
+                </button>
+                <button id="preferences-sync-replace" type="button" class="settings-secondary" hidden>
+                  Keep this browser
+                </button>
+                <button id="preferences-sync-retry" type="button" class="settings-secondary" hidden>
+                  Retry sync
+                </button>
+              </div>
+            </section>
+            <p id="app-help-text" class="settings-hint"></p>
+            <!-- Built at runtime from the keybinding table, so it cannot describe
+                 a chord that no longer exists. Hidden where no fine pointer is
+                 present: none of these are reachable on a touch-only device. -->
+            <section
+              id="keybinding-reference-section"
+              class="settings-keys"
+              aria-labelledby="keybinding-reference-title"
+              hidden
+            >
+              <strong id="keybinding-reference-title">Keyboard shortcuts</strong>
+              <dl id="keybinding-reference"></dl>
+            </section>
+            <div class="settings-install">
+              <button id="install-app" type="button">Install web app</button>
+              <p id="install-help"></p>
             </div>
-            <p id="preferences-sync-help" class="settings-hint">
-              Profiles, session assignments, and themes can follow your
-              login across browsers. Device layout stays local.
-            </p>
-            <div class="settings-sync-actions">
-              <button id="preferences-sync-enable" type="button" hidden>
-                Use this browser as shared setup
-              </button>
-              <button id="preferences-sync-load" type="button" hidden>
-                Load latest
-              </button>
-              <button id="preferences-sync-replace" type="button" class="settings-secondary" hidden>
-                Keep this browser
-              </button>
-              <button id="preferences-sync-retry" type="button" class="settings-secondary" hidden>
-                Retry sync
-              </button>
-            </div>
+            <!-- Which build this page is actually running. A page loaded before a
+                 deploy keeps serving the old bundle, which is indistinguishable
+                 from a deploy that never landed unless it says so. -->
+            <p id="app-build-id" class="settings-hint"></p>
           </div>
         </div>
         <div id="key-panel-tabs" role="tablist" aria-label="Panel sections">
