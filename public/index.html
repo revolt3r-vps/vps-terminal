@@ -787,18 +787,18 @@
               <path d="M6 10h1.5M10 10h1.5M14 10h1.5M18 10h.5M6 13h1.5M10 13h4M16 13h2M8 16h8" />
             </svg>
           </button>
-          <!-- Keys/Snips chips only; rare actions live in the Menu sheet. -->
-          <div id="footer-drawer" hidden aria-label="Terminal tools drawer"></div>
+          <!-- Row 2. Present while the soft keyboard is up, and while a modifier
+               picker is open. Holds the profile's keys, or the picker. -->
+          <div id="footer-drawer" hidden aria-label="Shortcut keys"></div>
           <div id="footer-scroll">
             <button id="paste" class="footer-fixed shortcut-icon" type="button" title="Paste" aria-label="Paste" aria-haspopup="menu" aria-expanded="false">
               <svg viewBox="0 0 24 24" aria-hidden="true">
                 <path d="M9 5h6M9 3h6v4H9zM7 5H5v16h14V5h-2M8 11h8M8 15h8" />
               </svg>
             </button>
-            <button id="drawer-keys" class="footer-fixed" type="button" aria-pressed="false" title="Keys">Keys</button>
-            <button id="drawer-snips" class="footer-fixed" type="button" aria-pressed="false" title="Snips">Snips</button>
-            <!-- The one scrolling thing in the footer. Paste/Keys/Snips stay put
-                 either side of it; only the chips move. -->
+            <!-- The one scrolling thing in row 1. Paste and Menu stay put either
+                 side of it; only the chips move. Keys and Snips used to sit here
+                 and cost 88px; row 2 replaced Keys, and Snips lives in Settings. -->
             <div id="footer-pins" aria-label="Shortcut chips"></div>
           </div>
           <button id="settings" class="footer-fixed shortcut-icon" type="button" title="Menu" aria-label="Open menu">

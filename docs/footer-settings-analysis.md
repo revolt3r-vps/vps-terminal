@@ -445,44 +445,52 @@ here that adapts to which hand is holding the phone.
 
 ---
 
-## Update — the chord row, 2026-08-08
+## Update — the two-row key surface, 2026-08-08
 
-**Shipped ahead of the D+E work above, and it changes §2's arithmetic.**
-
-Ctrl and Shift are no longer keys on the strip. Each is a chip that swaps the
-second row for its own list of secondaries:
+**This is §"The architecture question, answered" built, and it changes §2's
+arithmetic.** Row 2 is no longer a drawer you open. It is present whenever the
+soft keyboard is up, holding the profile's keys, and a modifier chip swaps its
+contents for that modifier's keys.
 
 ```
-row 1:  [⌨][📋][Keys][Snips] │ Esc  Ctrl  Shift  Tab  Enter  ↑ │ [⚙]
-                                     └── tap ──┘
-row 2:  [Ctrl+] A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ␣ [ \ ] _
+row 1:  [⌨][📋] │ Esc  Ctrl  Shift  Alt  Tab  Enter  ↑ … │ [⚙]
+row 2:  Esc  Ctrl  Shift  Alt  Tab  Enter  ←  ↑  ↓  →  …  [Edit]
+
+tap Ctrl ↓
+
+row 2:  [Ctrl+] C A B D E G K L N P R U W Z
         └ cancels
 ```
 
-The lead names what is held and sticks to the left edge while the rest scrolls,
-so the pending modifier stays on screen. Tapping it cancels, as does tapping the
-modifier chip again, as does opening Keys or Snips.
+**Why the row stands open rather than opening on demand.** `#footer-drawer` used
+to be `display: none` when closed, so opening it grew the footer ~50px, shrank
+`#terminal` and tripped the `ResizeObserver` into `scheduleFit()` — xterm
+reflowing every row, about three text rows jumping, twice per use. Standing open
+costs that once, when the keyboard arrives, instead of on every modifier tap.
+Measured after the change: footer 93px and row 2 44px, unchanged across Ctrl →
+Shift → Alt → resting.
 
-**What it buys, against §2.3's measurements.** The old bar spent 222px on
-`Ctrl+C 55`, `Ctrl+D 57`, `Ctrl+Z 55` and `Ctrl+L 55` and still reached only 21
-of 26 letters — `ctrl-i`, `ctrl-j`, `ctrl-m`, `ctrl-q` and `ctrl-s` had no chip
-at all, and none of `Ctrl+Space`, `Ctrl+[`, `Ctrl+\`, `Ctrl+]` or `Ctrl+_` were
-reachable by any means. The chord row reaches all 31 for one 44px chip and one
-extra tap. Shift adds 23 combinations that no soft keyboard can produce: the four
-arrows, Tab, Home, End, Insert, Delete, PgUp, PgDn and F1–F12.
+**Portrait only.** The 85.5%-against-75% headroom this document measured is a
+portrait number. Landscape has no such room, so there row 2 appears for a picker
+and otherwise stays away.
 
-**The Settings picker shrank with it**, from 21 Ctrl entries to the six worth a
-dedicated one-tap chip: `ctrl-c`, `ctrl-d`, `ctrl-z`, `ctrl-l`, `ctrl-r`,
-`ctrl-b`. The other definitions stay in `builtinShortcutCatalog` so profiles
-saved before this still load.
+**Row 1 gave back 88px.** Keys and Snips are gone from it — row 2 replaced Keys,
+and snippets live in Settings. Against §2's measurement of 65% of the bar going
+to fixed controls, that is the largest single reduction available without
+removing a feature.
 
-**Ctrl keeps its latch.** Tapping Ctrl arms it as well as opening the row, so
-typing a letter on either keyboard still folds to a control code. The row is the
-addition, not the replacement. Shift has no latch — it only opens a row.
+**Tapping a modifier holds it and shows its keys, both.** The hold folds the next
+thing typed on either keyboard: Ctrl+letter to a control code, Alt+key to the ESC
+prefix, Shift+letter to a capital. Picking from the row sends that combination
+directly. Either spends the hold. `Ctrl+C` lost its own chip, so `C` leads the
+Ctrl row out of alphabetical order — the interrupt is in the same place every
+time and one tap after Ctrl.
 
-**Where this leaves D+E.** §"Order of work" step 3 said the fixed two-row block
-would have to decide what happens to T21's contextual chips. It now also has to
-decide how the chord row and that block share row two, since both want it. The
-chord row is transient and the block is permanent, so the likely answer is that
-the chord row temporarily replaces the block — but that is a decision for the
-spike, not an assumption to build on.
+**Edit closes the row.** It sits after every shortcut, so scrolling to the end of
+your keys lands on the way to change them, and it costs no row 1 width.
+
+**No migrations.** Nothing is distributed, so stored preferences are never worth
+carrying forward. The legacy readers, the starter-profile version gates and the
+snippet-selection one-shot are all gone, replaced by a single schema stamp: if
+what is stored was written against a different shape, key and profile
+preferences reset to defaults. Themes and paste history are left alone.

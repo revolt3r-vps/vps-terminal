@@ -113,8 +113,7 @@ const scrollThumbElement = document.querySelector('#scroll-thumb');
 const footerDrawerElement = document.querySelector('#footer-drawer');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
-const drawerKeysButton = document.querySelector('#drawer-keys');
-const drawerSnipsButton = document.querySelector('#drawer-snips');
+
 const settingsDialogElement = document.querySelector('#settings-dialog');
 const terminalThemeElement = document.querySelector('#terminal-theme');
 const shortcutEditorList = document.querySelector('#shortcut-editor-list');
@@ -201,8 +200,6 @@ const terminalThemePaintTokens = [
 ];
 const sessionThemeStorageKey = 'vps-terminal-session-themes';
 // Legacy keys are read once when creating the initial Shell profile.
-const shortcutsStorageKey = 'vps-terminal-shortcuts';
-const customKeysStorageKey = 'vps-terminal-custom-keys';
 const keyProfilesStorageKey = 'vps-terminal-key-profiles-v1';
 const sessionKeyProfilesStorageKey = 'vps-terminal-session-key-profiles-v1';
 const preferencesSyncStorageKey = 'vps-terminal-preferences-sync-v1';
@@ -213,7 +210,6 @@ const preferencesPendingCacheStorageKey =
   'vps-terminal-preferences-pending-cache-v1';
 const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
-const footerPinsStorageKey = 'vps-terminal-footer-pins';
 const footerRecentChipsStorageKey = 'vps-terminal-footer-recent';
 const pasteHistoryStorageKey = 'vps-terminal-paste-history';
 const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
@@ -246,6 +242,11 @@ function reconnectDelayForAttempt(attempt) {
   return Math.min(reconnectBaseDelayMs * 2 ** steps, reconnectMaxDelayMs);
 }
 const pinHintStorageKey = 'vps-terminal-pin-hint-seen';
+// Bump when the stored key/profile shape changes. There are no migrations: the
+// app is not distributed, so stored preferences are never worth carrying
+// forward, and one reset is cheaper to reason about than a chain of one-shots.
+const preferencesSchemaVersion = 1;
+const preferencesSchemaStorageKey = 'vps-terminal-preferences-schema';
 const maximumPasteLength = 16384;
 const chipLongPressMilliseconds = 480;
 const chipLongPressMoveTolerance = 10;
@@ -257,8 +258,6 @@ const maximumCustomKeySequenceLength = 32;
 const maximumKeyProfiles = 12;
 const maximumKeyProfileNameLength = 24;
 const maximumProfileSnippetIds = 50;
-const starterKeyProfilesVersion = 1;
-const starterProfileSnippetSelectionsVersion = 1;
 const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
@@ -325,6 +324,7 @@ const builtinShortcutCatalog = {
   esc: { label: 'Esc', kind: 'sequence', sequence: '\u001b' },
   ctrl: { label: 'Ctrl', kind: 'modifier', modifier: 'ctrl' },
   shift: { label: 'Shift', kind: 'modifier', modifier: 'shift' },
+  alt: { label: 'Alt', kind: 'modifier', modifier: 'alt' },
   'ctrl-a': { label: 'Ctrl+A', kind: 'sequence', sequence: '\u0001' },
   'ctrl-b': { label: 'Ctrl+B', kind: 'sequence', sequence: '\u0002' },
   'ctrl-c': { label: 'Ctrl+C', kind: 'sequence', sequence: '\u0003' },
@@ -386,6 +386,7 @@ const builtinShortcutGroups = [
       'esc',
       'ctrl',
       'shift',
+      'alt',
       'tab',
       'shift-tab',
       'enter',
@@ -433,6 +434,7 @@ const defaultShortcutIds = [
   'esc',
   'ctrl',
   'shift',
+  'alt',
   'tab',
   'enter',
   'ctrl-c',
@@ -456,12 +458,14 @@ const starterKeyProfileTemplates = [
     name: 'Codex',
     shortcutIds: [
       'esc',
+      'ctrl',
+      'shift',
+      'alt',
       'shift-tab',
       'ctrl-c',
       'ctrl-o',
       'tab',
       'enter',
-      'ctrl',
       'left',
       'up',
       'down',
@@ -481,12 +485,14 @@ const starterKeyProfileTemplates = [
     name: 'Claude',
     shortcutIds: [
       'esc',
+      'ctrl',
+      'shift',
+      'alt',
       'shift-tab',
       'ctrl-c',
       'ctrl-d',
       'tab',
       'enter',
-      'ctrl',
       'left',
       'up',
       'down',
@@ -506,6 +512,9 @@ const starterKeyProfileTemplates = [
     name: 'Grok',
     shortcutIds: [
       'esc',
+      'ctrl',
+      'shift',
+      'alt',
       'shift-tab',
       'ctrl-p',
       'ctrl-x',
@@ -528,10 +537,6 @@ const starterKeyProfileTemplates = [
       { kind: 'key', id: 'shift-tab' }
     ]
   }
-];
-const starterProfileSnippetCandidateGroups = [
-  ['git-st', 'proj-git'],
-  ['pastes', 'paste-ls']
 ];
 // Display labels for the settings picker (order is picker order).
 // The picker's contents. populateThemeSelect() calls replaceChildren(), so the
@@ -915,7 +920,9 @@ let terminalThemeName = rememberedTerminalThemeName();
 globalTerminalThemeName = terminalThemeName;
 let fontResizeFrame = null;
 let fontSizeChangedDuringPinch = false;
-let ctrlArmed = false;
+// Which modifier is held, if any: 'ctrl' | 'shift' | 'alt' | null. One variable
+// rather than a boolean each, because only one can ever be held.
+let armedModifier = null;
 let scrollPositionTimer = null;
 let statusTimer = null;
 let headerCollapseTimer = null;
@@ -972,8 +979,8 @@ let lastSelectionApplyLogAt = 0;
 let lastTouchClientX = 0;
 let lastTouchClientY = 0;
 let deferredInstallPrompt = null;
-let footerDrawer = null; // 'keys' | 'snips' | 'mod' | null
-// Which modifier the chord row is showing, when footerDrawer is 'mod'.
+// Which modifier row 2 is showing. Null means it shows the profile's keys, which
+// is its resting state — row 2 is a surface, not a drawer that opens.
 let footerChordModifier = null;
 let viewMode = 'term'; // 'term' | 'files'
 let filesRootId = 'home';
@@ -1492,10 +1499,10 @@ function setHeaderCollapsed(collapsed) {
  * Shift has no latch — it only ever opens a row.
  */
 function modifierChipIsHeld(modifier) {
-  if (footerDrawer === 'mod' && footerChordModifier === modifier) {
+  if (footerChordModifier === modifier) {
     return true;
   }
-  return modifier === 'ctrl' && ctrlArmed;
+  return armedModifier === modifier;
 }
 
 function syncModifierChips() {
@@ -1510,8 +1517,9 @@ function syncModifierChips() {
   });
 }
 
-function setCtrlArmed(value) {
-  ctrlArmed = value;
+/** Arm exactly one modifier, or none. */
+function setArmedModifier(modifier) {
+  armedModifier = modifierChordDefinitions[modifier] ? modifier : null;
   syncModifierChips();
 }
 
@@ -1642,17 +1650,6 @@ function sanitizeCustomKeyDefs(defs) {
   return cleaned;
 }
 
-function loadLegacyCustomKeyDefs() {
-  try {
-    const raw = window.localStorage.getItem(customKeysStorageKey);
-    if (!raw) {
-      return [];
-    }
-    return sanitizeCustomKeyDefs(JSON.parse(raw));
-  } catch {
-    return [];
-  }
-}
 
 function sanitizeKeyProfileName(value) {
   if (typeof value !== 'string') {
@@ -1757,16 +1754,6 @@ function sanitizeProfilePins(pins, customKeys = []) {
   return cleaned;
 }
 
-function loadLegacyFooterPins(customKeys) {
-  try {
-    const raw = window.localStorage.getItem(footerPinsStorageKey);
-    return raw
-      ? sanitizeProfilePins(JSON.parse(raw), customKeys)
-      : [];
-  } catch {
-    return [];
-  }
-}
 
 function sanitizeKeyProfile(entry, usedIds = new Set()) {
   if (
@@ -1783,11 +1770,7 @@ function sanitizeKeyProfile(entry, usedIds = new Set()) {
   }
   const customKeys = sanitizeCustomKeyDefs(entry.customKeys);
   const pins = sanitizeProfilePins(
-    Array.isArray(entry.pins)
-      ? entry.pins
-      : entry.id === 'shell'
-        ? loadLegacyFooterPins(customKeys)
-        : [],
+    Array.isArray(entry.pins) ? entry.pins : [],
     customKeys
   );
   return {
@@ -1803,27 +1786,45 @@ function sanitizeKeyProfile(entry, usedIds = new Set()) {
   };
 }
 
-function loadLegacyShortcutIds(customKeys) {
+
+/**
+ * Reset key and profile preferences when the stored schema is not this one.
+ *
+ * Themes, paste history and file navigation are left alone — they do not depend
+ * on the key schema, and wiping them would be collateral damage.
+ */
+function resetPreferencesIfSchemaChanged() {
   try {
-    const raw = window.localStorage.getItem(shortcutsStorageKey);
-    if (!raw) {
-      return [...defaultShortcutIds];
+    const stored = window.localStorage.getItem(preferencesSchemaStorageKey);
+    if (stored === String(preferencesSchemaVersion)) {
+      return;
     }
-    return sanitizeShortcutIdsForProfile(JSON.parse(raw), customKeys);
+    for (const key of [
+      keyProfilesStorageKey,
+      sessionKeyProfilesStorageKey,
+      footerRecentChipsStorageKey,
+      pinHintStorageKey
+    ]) {
+      window.localStorage.removeItem(key);
+    }
+    window.localStorage.setItem(
+      preferencesSchemaStorageKey,
+      String(preferencesSchemaVersion)
+    );
   } catch {
-    return [...defaultShortcutIds];
+    // Without persistence there is nothing stored to reset.
   }
 }
 
-function migratedShellKeyProfile() {
-  const customKeys = loadLegacyCustomKeyDefs();
+/** The profile a fresh install starts with. */
+function defaultShellKeyProfile() {
   return {
     id: 'shell',
     name: 'Terminal',
-    shortcutIds: loadLegacyShortcutIds(customKeys),
-    customKeys,
+    shortcutIds: [...defaultShortcutIds],
+    customKeys: [],
     snippetIds: null,
-    pins: loadLegacyFooterPins(customKeys)
+    pins: []
   };
 }
 
@@ -1844,7 +1845,7 @@ function sanitizeKeyProfilesDocument(value) {
     }
   }
   if (profiles.length === 0) {
-    profiles.push(migratedShellKeyProfile());
+    profiles.push(defaultShellKeyProfile());
   }
   const requestedDefault =
     typeof value?.defaultProfileId === 'string'
@@ -1855,34 +1856,11 @@ function sanitizeKeyProfilesDocument(value) {
   )
     ? requestedDefault
     : profiles.find((profile) => profile.id === 'shell')?.id || profiles[0].id;
-  const starterProfilesVersionValue = Number.isInteger(
-    value?.starterProfilesVersion
-  )
-    ? Math.max(0, value.starterProfilesVersion)
-    : 0;
-  const starterSnippetSelectionsVersionValue = Number.isInteger(
-    value?.starterSnippetSelectionsVersion
-  )
-    ? Math.max(0, value.starterSnippetSelectionsVersion)
-    : 0;
-  return {
-    version: 2,
-    starterProfilesVersion: starterProfilesVersionValue,
-    starterSnippetSelectionsVersion: starterSnippetSelectionsVersionValue,
-    defaultProfileId,
-    profiles
-  };
+  return { defaultProfileId, profiles };
 }
 
 function withStarterKeyProfiles(documentValue) {
-  if (documentValue.starterProfilesVersion >= starterKeyProfilesVersion) {
-    return documentValue;
-  }
-  const profiles = documentValue.profiles.map((profile) =>
-    profile.id === 'shell' && profile.name === 'Shell'
-      ? { ...profile, name: 'Terminal' }
-      : profile
-  );
+  const profiles = [...documentValue.profiles];
   for (const template of starterKeyProfileTemplates) {
     if (profiles.length >= maximumKeyProfiles) {
       break;
@@ -1904,55 +1882,9 @@ function withStarterKeyProfiles(documentValue) {
       pins: template.pins.map((pin) => ({ ...pin }))
     });
   }
-  const allStartersHandled = starterKeyProfileTemplates.every((template) =>
-    profiles.some(
-      (profile) =>
-        profile.id === template.id ||
-        profile.name.toLocaleLowerCase() === template.name.toLocaleLowerCase()
-    )
-  );
-  return {
-    ...documentValue,
-    version: 2,
-    starterProfilesVersion: allStartersHandled
-      ? starterKeyProfilesVersion
-      : documentValue.starterProfilesVersion,
-    profiles
-  };
+  return { ...documentValue, profiles };
 }
 
-function applyStarterProfileSnippetSelections() {
-  const documentValue = loadKeyProfilesDocument();
-  if (
-    documentValue.starterSnippetSelectionsVersion >=
-    starterProfileSnippetSelectionsVersion
-  ) {
-    return;
-  }
-  const availableIds = new Set(snippetsList.map((snippet) => snippet.id));
-  const selectedIds = starterProfileSnippetCandidateGroups
-    .map((candidates) => candidates.find((id) => availableIds.has(id)))
-    .filter(Boolean);
-  const starterIds = new Set(
-    starterKeyProfileTemplates.map((template) => template.id)
-  );
-  const profiles = documentValue.profiles.map((profile) =>
-    starterIds.has(profile.id)
-      ? { ...profile, snippetIds: [...selectedIds] }
-      : profile
-  );
-  preferencesBootstrapMutation = true;
-  try {
-    saveKeyProfilesDocument({
-      ...documentValue,
-      starterSnippetSelectionsVersion:
-        starterProfileSnippetSelectionsVersion,
-      profiles
-    });
-  } finally {
-    preferencesBootstrapMutation = false;
-  }
-}
 
 function saveKeyProfilesDocument(value) {
   const cleaned = sanitizeKeyProfilesDocument(value);
@@ -1990,11 +1922,8 @@ function loadKeyProfilesDocument() {
   markPreferencesBootstrapGenerated();
   return saveKeyProfilesDocument(
     withStarterKeyProfiles({
-      version: 2,
-      starterProfilesVersion: 0,
-      starterSnippetSelectionsVersion: 0,
       defaultProfileId: 'shell',
-      profiles: [migratedShellKeyProfile()]
+      profiles: [defaultShellKeyProfile()]
     })
   );
 }
@@ -2185,46 +2114,6 @@ function saveProfileSnippetIds(ids, profileId = editorKeyProfile().id) {
   return cleaned;
 }
 
-const shiftChordMigrationStorageKey = 'vps-terminal-shift-chord-added';
-
-/**
- * Put Shift next to Ctrl in profiles saved before the chord row existed.
- *
- * New profiles pick it up from defaultShortcutIds. Existing ones would not, and
- * a chip nobody can see has not shipped. This runs once, so a Shift the user
- * removes afterwards stays removed.
- */
-function migrateShiftChordChip() {
-  try {
-    if (window.localStorage.getItem(shiftChordMigrationStorageKey) === '1') {
-      return;
-    }
-    window.localStorage.setItem(shiftChordMigrationStorageKey, '1');
-  } catch {
-    // Without persistence there is no way to run this exactly once, and running
-    // it on every load would fight the user's own edits.
-    return;
-  }
-  const documentValue = loadKeyProfilesDocument();
-  let changed = false;
-  const profiles = documentValue.profiles.map((profile) => {
-    const ids = profile.shortcutIds;
-    if (!Array.isArray(ids) || ids.includes('shift')) {
-      return profile;
-    }
-    const at = ids.indexOf('ctrl');
-    if (at < 0) {
-      return profile;
-    }
-    changed = true;
-    const next = [...ids];
-    next.splice(at + 1, 0, 'shift');
-    return { ...profile, shortcutIds: next };
-  });
-  if (changed) {
-    saveKeyProfilesDocument({ ...documentValue, profiles });
-  }
-}
 
 function reconcileSnippetReferences() {
   const knownIds = new Set(snippetsList.map((snippet) => snippet.id));
@@ -2273,7 +2162,7 @@ function activateShortcut(id) {
   }
   if (def.kind === 'sequence') {
     clearTerminalSelection();
-    setCtrlArmed(false);
+    setArmedModifier(null);
     sendInput(def.sequence);
   }
 }
@@ -2390,24 +2279,22 @@ const modifierChordDefinitions = {
   ctrl: {
     label: 'Ctrl',
     // Ctrl+letter is the letter's position in the alphabet as a control code:
-    // Ctrl+A is 0x01. Generated rather than listed, so no letter can go missing.
-    letters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
-    // The non-letter chords a shell actually uses. None of these can be typed on
-    // a soft keyboard at all, so the row is the only way to reach them.
-    extras: [
-      { key: 'space', label: '␣', sequence: '\u0000', name: 'Space (NUL)' },
-      { key: '[', label: '[', sequence: '\u001b', name: '[ (Esc)' },
-      { key: '\\', label: '\\', sequence: '\u001c', name: '\\ (quit)' },
-      { key: ']', label: ']', sequence: '\u001d', name: ']' },
-      { key: '_', label: '_', sequence: '\u001f', name: '_ (undo)' }
-    ]
+    // Ctrl+A is 0x01, so these are generated rather than transcribed.
+    //
+    // Not the whole alphabet: a row of 26 is a row nobody scans. These are the
+    // readline and job-control chords plus B for the tmux prefix. C leads out of
+    // alphabetical order because it is the interrupt — it has no chip of its own
+    // any more, so it has to be in the same place every time and one tap away.
+    letters: 'CABDEGKLNPRUWZ',
+    extras: []
   },
   shift: {
     label: 'Shift',
-    // No letters: the soft keyboard already types capitals, so a Shift+letter
-    // row would be 26 chips that duplicate the keyboard sitting under it. What
-    // it cannot type is this list.
+    // No letters: the keyboard underneath already types capitals, and the latch
+    // covers a capital without leaving the row.
     letters: '',
+    // Navigation and editing only. F1-F12 were here and went; nothing in a shell
+    // asks for them and twelve chips is most of a row.
     extras: [
       { key: 'left', label: '←', sequence: '\u001b[1;2D', name: 'Left' },
       { key: 'up', label: '↑', sequence: '\u001b[1;2A', name: 'Up' },
@@ -2416,25 +2303,55 @@ const modifierChordDefinitions = {
       { key: 'tab', label: 'Tab', sequence: '\u001b[Z', name: 'Tab' },
       { key: 'home', label: 'Home', sequence: '\u001b[1;2H', name: 'Home' },
       { key: 'end', label: 'End', sequence: '\u001b[1;2F', name: 'End' },
-      { key: 'insert', label: 'Ins', sequence: '\u001b[2;2~', name: 'Insert' },
-      { key: 'delete', label: 'Del', sequence: '\u001b[3;2~', name: 'Delete' },
       { key: 'pgup', label: 'PgUp', sequence: '\u001b[5;2~', name: 'PgUp' },
       { key: 'pgdn', label: 'PgDn', sequence: '\u001b[6;2~', name: 'PgDn' },
-      { key: 'f1', label: 'F1', sequence: '\u001b[1;2P', name: 'F1' },
-      { key: 'f2', label: 'F2', sequence: '\u001b[1;2Q', name: 'F2' },
-      { key: 'f3', label: 'F3', sequence: '\u001b[1;2R', name: 'F3' },
-      { key: 'f4', label: 'F4', sequence: '\u001b[1;2S', name: 'F4' },
-      { key: 'f5', label: 'F5', sequence: '\u001b[15;2~', name: 'F5' },
-      { key: 'f6', label: 'F6', sequence: '\u001b[17;2~', name: 'F6' },
-      { key: 'f7', label: 'F7', sequence: '\u001b[18;2~', name: 'F7' },
-      { key: 'f8', label: 'F8', sequence: '\u001b[19;2~', name: 'F8' },
-      { key: 'f9', label: 'F9', sequence: '\u001b[20;2~', name: 'F9' },
-      { key: 'f10', label: 'F10', sequence: '\u001b[21;2~', name: 'F10' },
-      { key: 'f11', label: 'F11', sequence: '\u001b[23;2~', name: 'F11' },
-      { key: 'f12', label: 'F12', sequence: '\u001b[24;2~', name: 'F12' }
+      { key: 'insert', label: 'Ins', sequence: '\u001b[2;2~', name: 'Insert' },
+      { key: 'delete', label: 'Del', sequence: '\u001b[3;2~', name: 'Delete' }
+    ]
+  },
+  alt: {
+    label: 'Alt',
+    // Alt+key is the key prefixed with ESC, which is what a terminal sends for
+    // Meta. Spelled out rather than generated because only a handful of Alt
+    // chords are used, and two of them are arrows rather than letters.
+    letters: '',
+    extras: [
+      { key: 'b', label: 'B', sequence: '\u001bb', name: 'B (back word)' },
+      { key: 'f', label: 'F', sequence: '\u001bf', name: 'F (forward word)' },
+      { key: 'd', label: 'D', sequence: '\u001bd', name: 'D (kill word)' },
+      { key: '.', label: '.', sequence: '\u001b.', name: '. (last argument)' },
+      { key: 'left', label: '←', sequence: '\u001b[1;3D', name: 'Left' },
+      { key: 'right', label: '→', sequence: '\u001b[1;3C', name: 'Right' },
+      { key: 'backspace', label: 'Bksp', sequence: '\u001b\u007f', name: 'Backspace (kill word back)' }
     ]
   }
 };
+
+/**
+ * What a held modifier does to the next thing typed.
+ *
+ * Only single characters fold. Anything longer is already a sequence the keyboard
+ * or a chip produced, and prefixing or upper-casing it would corrupt it.
+ */
+function foldModifierInput(modifier, data) {
+  if (typeof data !== 'string' || data.length !== 1) {
+    return data;
+  }
+  if (modifier === 'ctrl') {
+    // Ctrl+letter is the letter's alphabet position as a control code. Anything
+    // else passes through, because a pty has no control code for it.
+    return /^[A-Za-z]$/.test(data)
+      ? String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64)
+      : data;
+  }
+  if (modifier === 'alt') {
+    return `\u001b${data}`;
+  }
+  if (modifier === 'shift') {
+    return data.toUpperCase();
+  }
+  return data;
+}
 
 /** Every secondary the modifier can take, in row order. */
 function modifierChordKeys(modifier) {
@@ -2722,53 +2639,58 @@ function toggleFooterPin(kind, id) {
   toggleProfilePin(activeKeyProfile().id, kind, id);
 }
 
-function setFooterDrawer(mode) {
-  const next =
-    mode === 'keys' || mode === 'snips' || mode === 'mod' ? mode : null;
-  footerDrawer = footerDrawer === next ? null : next;
-  if (footerDrawer !== 'mod') {
-    footerChordModifier = null;
-    setCtrlArmed(false);
+/**
+ * Row 2 is visible while the keyboard is up, or while a picker is open.
+ *
+ * With the keyboard up the terminal is already short and the row costs keyboard
+ * space rather than terminal space, which is the trade docs/footer-settings-
+ * analysis.md argues for. With the keyboard down the row would cost three text
+ * rows for keys that row 1 already carries, so it goes away — unless a picker
+ * needs it, in which case it is worth the reflow for the moment it is up.
+ */
+function footerRowTwoShouldShow() {
+  if (footerChordModifier) {
+    return true;
   }
-  if (drawerKeysButton) {
-    drawerKeysButton.classList.toggle('active', footerDrawer === 'keys');
-    drawerKeysButton.setAttribute(
-      'aria-pressed',
-      String(footerDrawer === 'keys')
-    );
+  // Portrait only. The analysis measured 85.5% of portrait height going to the
+  // terminal against a 75% target, which is what makes the second row
+  // affordable. Landscape has no such headroom — the terminal is short and the
+  // footer already competes with it — so there the row appears for a picker and
+  // otherwise stays away.
+  return (
+    keyboardViewportIsReduced() &&
+    Boolean(
+      window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
+    )
+  );
+}
+
+function updateFooterRowTwo() {
+  if (!footerDrawerElement) {
+    return;
   }
-  if (drawerSnipsButton) {
-    drawerSnipsButton.classList.toggle('active', footerDrawer === 'snips');
-    drawerSnipsButton.setAttribute(
-      'aria-pressed',
-      String(footerDrawer === 'snips')
-    );
+  const show = footerRowTwoShouldShow();
+  const wasHidden = footerDrawerElement.hidden;
+  footerDrawerElement.hidden = !show;
+  if (show) {
+    renderFooterDrawer();
+  } else {
+    footerDrawerElement.replaceChildren();
   }
-  if (footerDrawer === 'snips' && snippetsList.length === 0) {
-    void loadSnippetsFromServer();
+  // Only a visibility change moves the footer, so only that needs the menu
+  // resized and the layout logged.
+  if (wasHidden !== footerDrawerElement.hidden) {
+    scheduleLayoutDebug('drawer');
   }
-  renderFooterDrawer();
-  scheduleLayoutDebug('drawer');
 }
 
 function closeFooterDrawer() {
-  if (!footerDrawer) {
+  if (!footerChordModifier) {
     return;
   }
-  if (footerDrawer === 'mod') {
-    footerChordModifier = null;
-    setCtrlArmed(false);
-  }
-  footerDrawer = null;
-  drawerKeysButton?.classList.remove('active');
-  drawerKeysButton?.setAttribute('aria-pressed', 'false');
-  drawerSnipsButton?.classList.remove('active');
-  drawerSnipsButton?.setAttribute('aria-pressed', 'false');
-  if (footerDrawerElement) {
-    footerDrawerElement.hidden = true;
-    footerDrawerElement.replaceChildren();
-  }
-  scheduleLayoutDebug('drawer');
+  footerChordModifier = null;
+  setArmedModifier(null);
+  updateFooterRowTwo();
 }
 
 function createKeyChipButton(id, options = {}) {
@@ -2846,26 +2768,27 @@ function appendDrawerEmptyHint(text) {
  * pending state visible and what makes every chord reachable with no keyboard at
  * all.
  */
+/**
+ * Tapping a modifier holds it and shows its keys.
+ *
+ * Both, because the swap is free now that row 2 is already there. Tapping the
+ * same modifier again puts the row back to the profile's keys; tapping a
+ * different one replaces the picker rather than stacking.
+ */
 function toggleModifierChord(modifier) {
-  // Close first, always. setFooterDrawer toggles, so asking it for 'mod' while a
-  // row is already up would shut the row instead of swapping which modifier it
-  // shows — Shift then Ctrl would leave no row at all.
-  if (footerDrawer === 'mod') {
-    const sameModifier = footerChordModifier === modifier;
+  if (footerChordModifier === modifier) {
     closeFooterDrawer();
-    if (sameModifier) {
-      return;
-    }
+    return;
   }
   footerChordModifier = modifier;
-  setFooterDrawer('mod');
-  setCtrlArmed(modifier === 'ctrl');
+  setArmedModifier(modifier);
+  updateFooterRowTwo();
 }
 
 function sendModifierChord(key) {
   clearTerminalSelection();
   // The sequence is already the chord, so the latch must not fold it again.
-  setCtrlArmed(false);
+  setArmedModifier(null);
   sendInput(key.sequence);
   // Only the chords that exist as chips can come back as a recent chip.
   if (isKnownShortcutId(key.id)) {
@@ -2909,40 +2832,44 @@ function renderFooterDrawer() {
     return;
   }
   footerDrawerElement.replaceChildren();
-  if (!footerDrawer) {
-    footerDrawerElement.hidden = true;
-    return;
-  }
-  footerDrawerElement.hidden = false;
-  if (footerDrawer === 'mod') {
+  if (footerChordModifier) {
     renderModifierChordRow();
     return;
   }
-  if (footerDrawer === 'keys') {
-    for (const id of loadShortcutIds()) {
-      const button = createKeyChipButton(id, { pinned: isPinned('key', id) });
-      if (button) {
-        if (isPinned('key', id)) {
-          button.classList.add('active');
-        }
-        footerDrawerElement.append(button);
-      }
-    }
-    appendDrawerEmptyHint('No keys in this profile');
-    return;
-  }
-  for (const snippet of snippetsForProfile()) {
-    const button = createSnipChipButton(snippet, {
-      pinned: isPinned('snip', snippet.id)
-    });
+  for (const id of loadShortcutIds()) {
+    const button = createKeyChipButton(id, { pinned: isPinned('key', id) });
     if (button) {
-      if (isPinned('snip', snippet.id)) {
+      if (isPinned('key', id)) {
         button.classList.add('active');
       }
       footerDrawerElement.append(button);
     }
   }
-  appendDrawerEmptyHint('No snippets in this profile');
+  appendFooterEditChip();
+}
+
+/**
+ * Edit sits after every shortcut, so scrolling to the end of your keys lands on
+ * the way to change them. In row 2 rather than row 1, where it would cost bar
+ * width that the removed Keys and Snips buttons just gave back.
+ */
+function appendFooterEditChip() {
+  if (!footerDrawerElement) {
+    return;
+  }
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = 'footer-edit-keys';
+  button.className = 'chip-edit';
+  button.textContent = 'Edit';
+  button.title = 'Edit shortcuts';
+  button.addEventListener('click', () => {
+    closeFooterDrawer();
+    // openSettingsDialog restores the last tab, so the override comes after it.
+    openSettingsDialog();
+    setSettingsTab('profiles');
+  });
+  footerDrawerElement.append(button);
 }
 
 // What the rail was last built for, so a poll that changed nothing does not
@@ -3053,10 +2980,8 @@ function installChipLongPress(button, { onTap, onHold }) {
 }
 
 function setSettingsTab(tabId) {
-  const migrated =
-    tabId === 'keys' ? 'profiles' : tabId === 'snips' ? 'library' : tabId;
   const allowed = new Set(['profiles', 'library', 'theme', 'app', 'debug']);
-  const active = allowed.has(migrated) ? migrated : 'profiles';
+  const active = allowed.has(tabId) ? tabId : 'profiles';
   try {
     window.localStorage.setItem(settingsLastTabStorageKey, active);
   } catch {
@@ -3163,7 +3088,7 @@ function runSnippet(id, options = {}) {
   }
   noteChipUsed('snip', id);
   clearTerminalSelection();
-  setCtrlArmed(false);
+  setArmedModifier(null);
   let body = snippet.body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
   // Default from snippet.run; options.invert flips for long-press on pin.
   let shouldRun = snippet.run !== false;
@@ -3202,16 +3127,12 @@ async function loadSnippetsFromServer() {
       snippetsList = Array.isArray(documentValue.snippets)
         ? documentValue.snippets
         : [];
-      applyStarterProfileSnippetSelections();
       reconcileSnippetReferences();
     } catch (error) {
       snippetsList = [];
       setStatus(error.message || 'Could not load snippets');
     } finally {
       snippetsLoadPromise = null;
-    }
-    if (footerDrawer === 'snips') {
-      renderFooterDrawer();
     }
     renderFooterPins();
     renderSnippetEditor();
@@ -3229,9 +3150,6 @@ async function saveSnippetsToServer(nextList) {
   });
   snippetsList = Array.isArray(saved.snippets) ? saved.snippets : nextList;
   reconcileSnippetReferences();
-  if (footerDrawer === 'snips') {
-    renderFooterDrawer();
-  }
   renderFooterPins();
   renderSnippetEditor();
   renderProfileSnippetSelector();
@@ -3421,9 +3339,7 @@ async function resetSnippetsToPresets() {
 }
 
 function refreshKeysUi() {
-  if (footerDrawer === 'keys' || footerDrawer === 'snips') {
-    renderFooterDrawer();
-  }
+  updateFooterRowTwo();
   renderFooterPins();
   renderHeaderSummary();
   renderKeyProfileControls();
@@ -3749,7 +3665,7 @@ function deleteKeyProfile() {
   }
   saveSessionKeyProfileAssignments(assignments);
   keyProfileEditorId = defaultProfileId;
-  setCtrlArmed(false);
+  setArmedModifier(null);
   renderSessions();
   setStatus(`Deleted profile: ${profile.name}`);
   refreshKeysUi();
@@ -3791,7 +3707,7 @@ function assignActiveSessionKeyProfile(profileId) {
   }
   saveSessionKeyProfileAssignments(assignments);
   keyProfileEditorId = activeKeyProfile().id;
-  setCtrlArmed(false);
+  setArmedModifier(null);
   renderSessions();
   setStatus(`${activeSession}: ${activeKeyProfile().name} profile`);
   refreshKeysUi();
@@ -3799,7 +3715,7 @@ function assignActiveSessionKeyProfile(profileId) {
 
 function syncActiveKeyProfileUi() {
   keyProfileEditorId = activeKeyProfile().id;
-  setCtrlArmed(false);
+  setArmedModifier(null);
   refreshKeysUi();
 }
 
@@ -3962,7 +3878,7 @@ function removeShortcut(id) {
     if (footerChordModifier === getShortcutDef(id).modifier) {
       closeFooterDrawer();
     }
-    ctrlArmed = false;
+    armedModifier = null;
   }
   // Removing a custom key also deletes its definition (re-create if needed).
   if (isCustomKeyId(id)) {
@@ -4088,24 +4004,20 @@ function resetShortcuts() {
     profile.id
   );
   // Keep custom key definitions; only reset which chips are active to defaults.
-  ctrlArmed = false;
+  armedModifier = null;
   refreshKeysUi();
 }
 
 function transformedInput(data) {
-  if (!ctrlArmed) {
+  if (!armedModifier) {
     return data;
   }
-  // A keypress spends the same latch the chord row is showing, so the row must
-  // not stay up claiming Ctrl is still held.
-  if (footerDrawer === 'mod') {
-    closeFooterDrawer();
-  }
-  setCtrlArmed(false);
-  if (data.length === 1 && /^[A-Za-z]$/.test(data)) {
-    return String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64);
-  }
-  return data;
+  const held = armedModifier;
+  // A keypress spends the same modifier the picker row is showing, so the row
+  // must not stay up claiming it is still held.
+  closeFooterDrawer();
+  setArmedModifier(null);
+  return foldModifierInput(held, data);
 }
 
 function sendInput(data) {
@@ -4363,7 +4275,7 @@ function layoutDebugSnapshot(reason) {
     displayMode: root.dataset.displayMode || 'browser',
     viewMode,
     keyboardOpen: root.classList.contains('keyboard-open'),
-    drawerOpen: !footerDrawerElement?.hidden,
+    rowTwoOpen: !footerDrawerElement?.hidden,
     safeTop: cssPixels('--safe-top'),
     safeRight: cssPixels('--safe-right'),
     safeBottom: cssPixels('--safe-bottom'),
@@ -7071,10 +6983,7 @@ function hasDurableBrowserPreferences() {
   const durableKeys = [
     terminalThemeStorageKey,
     sessionThemeStorageKey,
-    shortcutsStorageKey,
-    customKeysStorageKey,
-    sessionKeyProfilesStorageKey,
-    footerPinsStorageKey
+    sessionKeyProfilesStorageKey
   ];
   try {
     const generatedBootstrap =
@@ -7423,9 +7332,6 @@ function durablePreferencesSnapshot() {
 function freshPreferencesSnapshot() {
   return {
     keyProfiles: withStarterKeyProfiles({
-      version: 2,
-      starterProfilesVersion: 0,
-      starterSnippetSelectionsVersion: 0,
       defaultProfileId: 'shell',
       profiles: [
         {
@@ -9381,7 +9287,7 @@ function insertFilesPath(target) {
     return;
   }
   clearTerminalSelection();
-  setCtrlArmed(false);
+  setArmedModifier(null);
   const sent = sendInput(display);
   setStatus(sent ? `Inserted ${display}` : `Could not insert ${display}`);
   closeFilesActions();
@@ -10069,6 +9975,8 @@ function captureKeyboardLayoutLock() {
   document.documentElement.classList.add('keyboard-open');
   document.documentElement.classList.remove('standalone-reserved-bottom');
   updateEffectiveSafeAreaInsets();
+  // Row 2 exists while the keyboard is up; this is where it starts existing.
+  updateFooterRowTwo();
   document.documentElement.style.setProperty(
     '--app-height',
     `${keyboardLayoutLock.height}px`
@@ -10125,6 +10033,8 @@ function clearLockedAppGeometry(options = {}) {
   lastAppliedViewportHeight = null;
   lastAppliedViewportTop = null;
   document.documentElement.classList.remove('keyboard-open');
+  // ...and this is where it stops, unless a picker is holding it open.
+  updateFooterRowTwo();
   // Prefer an explicit resting height over bare 100dvh (standalone hit-test).
   applyRestingAppHeight(options);
   updateEffectiveSafeAreaInsets();
@@ -11293,7 +11203,7 @@ function disconnect() {
   setHeaderCollapsed(false);
   terminal?.blur();
   setKeyboardButtonState(false);
-  setCtrlArmed(false);
+  setArmedModifier(null);
   clearTerminalSelection();
   hideScrollPosition();
   terminalElement.hidden = true;
@@ -11412,7 +11322,7 @@ async function openSessionSocket(name) {
       return;
     }
     socket = null;
-    setCtrlArmed(false);
+    setArmedModifier(null);
     // A socket that opened and then dropped starts the count again; one that never
     // opened was refused, and repeated refusals back off.
     reconnectAttempts = socketDidOpen ? 1 : reconnectAttempts + 1;
@@ -12725,7 +12635,7 @@ async function pasteImageBlob(blob) {
     const saved = await uploadPasteImage(blob);
     const pathText = pasteTextForImage(saved);
     clearTerminalSelection();
-    setCtrlArmed(false);
+    setArmedModifier(null);
     if (!sendInput(pathText)) {
       terminal.paste?.(pathText);
     }
@@ -12808,7 +12718,7 @@ function handleTerminalPasteEvent(event) {
 function insertPastedText(text) {
   const pasted = text.slice(0, maximumPasteLength);
   clearTerminalSelection();
-  setCtrlArmed(false);
+  setArmedModifier(null);
   // Prefer xterm's paste: it wraps the text in bracketed-paste markers when the
   // running application asked for them, which is what keeps a multi-line paste
   // one block instead of a line-by-line submission. Its output reaches the
@@ -13547,12 +13457,6 @@ selectionCopyChip?.addEventListener(
   },
   { passive: false }
 );
-drawerKeysButton?.addEventListener('click', () => {
-  setFooterDrawer('keys');
-});
-drawerSnipsButton?.addEventListener('click', () => {
-  setFooterDrawer('snips');
-});
 quickMenuProfileList?.addEventListener('click', (event) => {
   const button = event.target.closest('button[data-profile-id]');
   if (!button || !quickMenuProfileList.contains(button)) {
@@ -13843,8 +13747,8 @@ preferencesSyncRetryButton?.addEventListener('click', () => {
 });
 populateThemeSelect();
 applyTerminalTheme(terminalThemeName, { persist: false });
+resetPreferencesIfSchemaChanged();
 loadKeyProfilesDocument();
-migrateShiftChordChip();
 keyProfileEditorId = activeKeyProfile().id;
 renderKeyProfileControls();
 renderFooterPins();

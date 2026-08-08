@@ -3141,20 +3141,19 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   stroke-width: var(--icon-stroke-width);
 }
 
-#drawer-keys,
-#drawer-snips {
+/*
+ * Edit closes row 2. It is an action, not a key, so it does not borrow the key
+ * styling — muted and outlined, so scanning the row for a key skips over it.
+ */
+#footer-edit-keys {
   min-width: var(--control-size);
   min-height: var(--control-size);
   padding: 0 10px;
+  border-style: dashed;
+  background: transparent;
+  color: var(--muted);
   font-size: var(--control-font);
-  font-weight: 700;
-}
-
-#drawer-keys.active,
-#drawer-snips.active {
-  border-color: var(--accent);
-  background: var(--accent-surface);
-  color: var(--accent-text);
+  font-weight: 600;
 }
 
 #footer-drawer::-webkit-scrollbar {
@@ -3638,9 +3637,9 @@ footer button {
   }
 
   /*
-   * Keys/Snips open → chips fill the middle rail.
-   * Hide paste/pins so the strip stays dense (Keys + Snips remain to
-   * close/switch). Portrait keeps the full main strip (see base rules).
+   * Landscape shows row 2 only for a modifier picker, never for the keyboard —
+   * there is no headroom for a standing second row here. While that picker is
+   * up, paste and the chips step aside so the keys get the whole rail.
    */
   #footer-main:has(#footer-drawer:not([hidden])) #footer-scroll {
     flex: 0 0 auto;
@@ -3650,12 +3649,6 @@ footer button {
   #footer-main:has(#footer-drawer:not([hidden])) #paste,
   #footer-main:has(#footer-drawer:not([hidden])) #footer-pins {
     display: none !important;
-  }
-
-  #footer-main:has(#footer-drawer:not([hidden])) #drawer-keys,
-  #footer-main:has(#footer-drawer:not([hidden])) #drawer-snips {
-    width: 100%;
-    max-width: none;
   }
 
   #settings {
