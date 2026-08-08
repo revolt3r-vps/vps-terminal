@@ -429,8 +429,6 @@
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Snippets</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="debug" aria-selected="false">Debug</button>
       </div>
       <div class="settings-panels">
         <section
@@ -559,37 +557,6 @@
             Reset snippet defaults
           </button>
         </section>
-        <section
-          class="settings-panel"
-          data-settings-panel="app"
-          role="tabpanel"
-          aria-label="App"
-          hidden
-        >
-          <section class="settings-sync" aria-labelledby="preferences-sync-title">
-            <div class="settings-sync-heading">
-              <strong id="preferences-sync-title">Shared setup</strong>
-              <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
-            </div>
-            <p id="preferences-sync-help" class="settings-hint">
-              Profiles, session assignments, and themes can follow your
-              login across browsers. Device layout stays local.
-            </p>
-            <div class="settings-sync-actions">
-              <button id="preferences-sync-enable" type="button" hidden>
-                Use this browser as shared setup
-              </button>
-              <button id="preferences-sync-load" type="button" hidden>
-                Load latest
-              </button>
-              <button id="preferences-sync-replace" type="button" class="settings-secondary" hidden>
-                Keep this browser
-              </button>
-              <button id="preferences-sync-retry" type="button" class="settings-secondary" hidden>
-                Retry sync
-              </button>
-            </div>
-          </section>
           <p id="app-help-text" class="settings-hint"></p>
           <!-- Built at runtime from the keybinding table, so it cannot describe a
                chord that no longer exists. Hidden where no fine pointer is present:
@@ -616,39 +583,6 @@
              needs all six false at once. The failure is intermittent and only
              reproduces on a phone, where there is no devtools console to read, so
              the transitions have to be dumpable from inside the app. -->
-        <section
-          class="settings-panel"
-          data-settings-panel="debug"
-          role="tabpanel"
-          aria-label="Debug"
-          hidden
-        >
-          <section class="settings-debug" aria-labelledby="keyboard-debug-title">
-            <div class="settings-debug-heading">
-              <strong id="keyboard-debug-title">Keyboard transitions</strong>
-              <span id="keyboard-debug-count" class="settings-sync-status"></span>
-            </div>
-            <p class="settings-hint">
-              The last 50 changes to the six flags that decide keyboard layout.
-              <code>blockedBy</code> names the flags holding the frozen height —
-              when the UI stops reacting to the keyboard, that is the stuck one.
-              Repeats of the same event and flag state fold into one line with a
-              count.
-            </p>
-            <p id="keyboard-debug-state" class="settings-hint"></p>
-            <div class="settings-debug-actions">
-              <button id="keyboard-debug-refresh" type="button">Refresh</button>
-              <button id="keyboard-debug-copy" type="button">Copy dump</button>
-              <button
-                id="keyboard-debug-clear"
-                type="button"
-                class="settings-secondary"
-              >
-                Clear
-              </button>
-            </div>
-            <pre id="keyboard-debug-dump" class="settings-debug-dump" tabindex="0"></pre>
-          </section>
         </section>
       </div>
     </dialog>
@@ -826,6 +760,37 @@
             aria-label="Appearance"
             hidden
           ></div>
+          <div
+            class="key-panel-page"
+            data-panel-page="app"
+            role="tabpanel"
+            aria-label="App"
+            hidden
+          >
+          <section class="settings-sync" aria-labelledby="preferences-sync-title">
+            <div class="settings-sync-heading">
+              <strong id="preferences-sync-title">Shared setup</strong>
+              <span id="preferences-sync-status" class="settings-sync-status">Checking…</span>
+            </div>
+            <p id="preferences-sync-help" class="settings-hint">
+              Profiles, session assignments, and themes can follow your
+              login across browsers. Device layout stays local.
+            </p>
+            <div class="settings-sync-actions">
+              <button id="preferences-sync-enable" type="button" hidden>
+                Use this browser as shared setup
+              </button>
+              <button id="preferences-sync-load" type="button" hidden>
+                Load latest
+              </button>
+              <button id="preferences-sync-replace" type="button" class="settings-secondary" hidden>
+                Keep this browser
+              </button>
+              <button id="preferences-sync-retry" type="button" class="settings-secondary" hidden>
+                Retry sync
+              </button>
+            </div>
+          </div>
         </div>
         <div id="key-panel-tabs" role="tablist" aria-label="Panel sections">
           <button
@@ -884,6 +849,20 @@
               <circle cx="6.5" cy="8" r="1" />
               <circle cx="10" cy="6" r="1" />
               <circle cx="13.5" cy="8" r="1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="app"
+            role="tab"
+            aria-selected="false"
+            title="App"
+            aria-label="App"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <circle cx="10" cy="10" r="7.5" />
+              <path d="M10 6.5v4M10 13.2v.3" />
             </svg>
           </button>
           <!-- A sliders glyph, not a second gear: the footer gear means "panel",

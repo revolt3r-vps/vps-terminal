@@ -2176,7 +2176,7 @@ function renderFooterDrawer() {
  * this covers the keyboard, which you were not using anyway.
  */
 
-const keyPanelTabs = ['keys', 'snippets', 'paste', 'appearance'];
+const keyPanelTabs = ['keys', 'snippets', 'paste', 'appearance', 'app'];
 // Non-zero once a keyboard has actually been seen this session.
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
@@ -2206,11 +2206,21 @@ function rememberKeyboardHeight() {
   if (!viewport || !keyboardViewportIsReduced()) {
     return;
   }
+  // A reduced viewport is not proof of a keyboard on its own: iOS shrinks it
+  // while chrome collapses and during our own layout changes, and a measurement
+  // taken then is far too big. The class is only set once a keyboard is
+  // genuinely up, so it is what decides whether this reading counts.
+  if (!document.documentElement.classList.contains('keyboard-open')) {
+    return;
+  }
   const layoutHeight = Math.round(
     document.documentElement.clientHeight || window.innerHeight
   );
   const height = layoutHeight - Math.round(viewport.height);
-  if (height <= 120) {
+  // No keyboard is more than about half the screen. A larger reading is some
+  // other viewport change caught mid-flight, and storing it makes every later
+  // panel open too tall — which is the "terminal squeezed to the top" report.
+  if (height <= 120 || height > layoutHeight * 0.55) {
     return;
   }
   lastKeyboardHeight = height;
@@ -2235,7 +2245,15 @@ function keyPanelHeight() {
       window.localStorage.getItem(keyPanelHeightStorageKey) || '',
       10
     );
-    if (Number.isFinite(stored) && stored > 120) {
+    // Same ceiling as the recorder, applied on the way out too: a bad value
+    // stored before that guard existed would otherwise outlive it.
+    const layoutHeight =
+      document.documentElement.clientHeight || window.innerHeight || 700;
+    if (
+      Number.isFinite(stored) &&
+      stored > 120 &&
+      stored <= layoutHeight * 0.55
+    ) {
       return stored;
     }
   } catch {
@@ -2362,8 +2380,16 @@ function renderKeyPanel() {
     renderKeyPanelSnippets(page);
   } else if (keyPanelTab === 'paste') {
     renderKeyPanelPaste(page);
-  } else {
+  } else if (keyPanelTab === 'appearance') {
     renderKeyPanelAppearance(page);
+  } else {
+    // The App page is static markup rather than something built each time, so
+    // it only needs its live parts refreshed.
+    renderAppBuildId();
+    renderKeybindingReference();
+    updateInstallSettings();
+    updateAppHelpPanel();
+    updatePreferencesSyncUi();
   }
 }
 
@@ -2939,7 +2965,7 @@ function installChipLongPress(button, { onTap, onHold }) {
 }
 
 function setSettingsTab(tabId) {
-  const allowed = new Set(['profiles', 'library', 'theme', 'app', 'debug']);
+  const allowed = new Set(['profiles', 'library']);
   const active = allowed.has(tabId) ? tabId : 'profiles';
   try {
     window.localStorage.setItem(settingsLastTabStorageKey, active);
@@ -2964,14 +2990,6 @@ function setSettingsTab(tabId) {
   if (active === 'library') {
     void loadSnippetsFromServer();
   }
-  if (active === 'app') {
-    updateInstallSettings();
-    updateAppHelpPanel();
-    updatePreferencesSyncUi();
-  }
-  if (active === 'debug') {
-    renderKeyboardTransitionDump();
-  }
 }
 
 function loadLastSettingsTab() {
@@ -2983,8 +3001,9 @@ function loadLastSettingsTab() {
     if (tab === 'snips') {
       return 'library';
     }
-    // 'theme' is a stored value from before Appearance moved to the panel.
-    if (tab === 'profiles' || tab === 'library' || tab === 'app') {
+    // 'theme', 'app' and 'debug' are stored values from before those moved to
+    // the panel; they fall through to the default rather than opening nothing.
+    if (tab === 'profiles' || tab === 'library') {
       return tab;
     }
   } catch {
@@ -9224,60 +9243,6 @@ function renderAppBuildId() {
 let lastKeyboardTransitionDumpText = '';
 
 /**
- * Render the keyboard transition ring buffer into Settings → Debug.
- *
- * iOS Safari has no reachable console, so a dump that cannot be read and copied
- * from inside the app is no use on the one device that reproduces the bug.
- */
-function renderKeyboardTransitionDump() {
-  const dumpElement = document.querySelector('#keyboard-debug-dump');
-  if (!dumpElement) {
-    return;
-  }
-  const stateElement = document.querySelector('#keyboard-debug-state');
-  const countElement = document.querySelector('#keyboard-debug-count');
-  const entries = keyboardTransitionLog.entries();
-  const dropped = keyboardTransitionLog.dropped();
-  const headCount = keyboardTransitionLog.headCount();
-  const body = formatKeyboardTransitions(entries, { dropped, headCount });
-  dumpElement.textContent = body;
-  if (countElement) {
-    const total = maximumKeyboardTransitions + maximumKeyboardTransitionsHead;
-    countElement.textContent = `${entries.length}/${total}${
-      dropped > 0 ? ` (+${dropped} dropped)` : ''
-    }`;
-  }
-  // Reading the panel must not record a transition, so this snapshots the flags
-  // without going through recordKeyboardTransition().
-  const flags = keyboardTransitionFlags();
-  const blockers = keyboardReleaseBlockers(flags);
-  if (stateElement) {
-    stateElement.textContent =
-      blockers.length > 0
-        ? `Holding now: ${blockers.join(', ')}`
-        : 'Holding now: nothing.';
-  }
-  const build =
-    document
-      .querySelector('meta[name="vps-build-id"]')
-      ?.getAttribute('content') || 'unknown';
-  lastKeyboardTransitionDumpText = [
-    'vps-terminal keyboard transitions',
-    `build=${build}`,
-    `ua=${navigator.userAgent}`,
-    `displayMode=${document.documentElement.dataset.displayMode || 'browser'}`,
-    `orientation=${
-      window.matchMedia('(orientation: landscape)').matches
-        ? 'landscape'
-        : 'portrait'
-    }`,
-    `now blockedBy=${blockers.join(',') || '-'} ${formatKeyboardTransitionFlags(flags)}`,
-    '',
-    body
-  ].join('\n');
-}
-
-/**
  * Close a modal `<dialog>` on a tap that both starts and ends outside its box.
  *
  * A native modal dialog closes on Escape but not on a backdrop tap, and the
@@ -13321,39 +13286,6 @@ settingsTabsElement?.addEventListener('click', (event) => {
   }
   setSettingsTab(tab.dataset.settingsTab);
 });
-document
-  .querySelector('#keyboard-debug-refresh')
-  ?.addEventListener('click', () => {
-    renderKeyboardTransitionDump();
-  });
-document.querySelector('#keyboard-debug-copy')?.addEventListener('click', () => {
-  // Copies the text built at render time. Re-rendering first would fold this
-  // gesture's own focus changes into what gets copied.
-  const text = lastKeyboardTransitionDumpText;
-  if (!text) {
-    setStatus('Nothing to copy');
-    return;
-  }
-  if (writeTextToClipboardLegacy(text)) {
-    setStatus('Dump copied');
-    return;
-  }
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(text).then(
-      () => setStatus('Dump copied'),
-      () => setStatus('Copy failed — select the dump and copy manually')
-    );
-    return;
-  }
-  setStatus('Copy failed — select the dump and copy manually');
-});
-document
-  .querySelector('#keyboard-debug-clear')
-  ?.addEventListener('click', () => {
-    keyboardTransitionLog.clear();
-    renderKeyboardTransitionDump();
-    setStatus('Transitions cleared');
-  });
 /**
  * The gear opens the panel where the panel exists, and the settings dialog where
  * it does not. Landscape, desktop and Files have no keyboard area for a panel to

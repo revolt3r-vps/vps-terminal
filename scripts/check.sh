@@ -36,16 +36,15 @@ grep -Fq 'if (appClipboardText && error) {' "$client"
 grep -Fq "VPS_TERMINAL_CLIENT_DEBUG === '1'" "$server"
 grep -Fq 'appendBoundedClientDebugEntries' "$server"
 # T19 keyboard transition capture. The failure is intermittent and phone-only, so
-# the ring buffer has to stay sliceable for the unit test and reachable from the
-# Settings sheet — a dump nobody can read on the device is not a diagnosis.
+# the ring buffer has to stay sliceable for the unit test. It is no longer shown
+# in the app — the Debug tab was removed deliberately — so the two greps for its
+# markup went with it rather than pinning a panel that is meant to be gone.
 grep -Fq 'const maximumKeyboardTransitions' "$client"
 grep -Fq '// ---- End of the pure keyboard transition block. ----' "$client"
 grep -Fq 'function recordKeyboardTransition(' "$client"
 # The declined release is the transition the ticket is chasing; losing this call
 # site would leave a stuck conjunction invisible again.
 grep -Fq "recordKeyboardTransition('release-declined')" "$client"
-grep -Fq 'data-settings-panel="debug"' "${root}/public/index.html"
-grep -Fq 'keyboard-debug-dump' "${root}/public/index.html"
 grep -Fq 'VPS_TERMINAL_ORIGIN is required outside LOCAL_DEV' "$server"
 grep -Fq 'Set VPS_TERMINAL_SOCKET (recommended) or VPS_TERMINAL_HOST' "$server"
 
