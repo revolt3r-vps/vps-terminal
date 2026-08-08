@@ -220,6 +220,20 @@
           <aside id="files-sidebar" aria-label="File locations">
             <p class="files-sidebar-heading">Locations</p>
             <div id="files-roots" role="navigation" aria-label="File roots"></div>
+            <button
+              class="files-start-session files-start-session-sidebar"
+              data-files-start-session
+              type="button"
+              aria-haspopup="dialog"
+              aria-controls="files-session-dialog"
+              aria-expanded="false"
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <rect x="2.5" y="4" width="19" height="16" rx="2" />
+                <path d="m6 9 3 3-3 3M12 15h5M17 5v4M15 7h4" />
+              </svg>
+              <span>Start Session</span>
+            </button>
           </aside>
           <section id="files-content" aria-label="Folder contents">
             <div id="files-list-header" aria-hidden="true">
@@ -298,6 +312,31 @@
             <span>Show hidden files</span>
           </label>
           <button id="files-option-settings" type="button">Terminal settings</button>
+        </div>
+      </dialog>
+      <dialog
+        id="files-session-dialog"
+        aria-labelledby="files-session-title"
+        tabindex="-1"
+      >
+        <div class="settings-heading">
+          <strong id="files-session-title">Start Session</strong>
+          <button
+            id="files-session-close"
+            class="icon-button"
+            type="button"
+            title="Close"
+            aria-label="Close"
+          >
+            ×
+          </button>
+        </div>
+        <p id="files-session-path" class="settings-hint"></p>
+        <div class="files-session-options" aria-label="Session type">
+          <button type="button" data-session-launcher="terminal">Terminal</button>
+          <button type="button" data-session-launcher="codex">Codex</button>
+          <button type="button" data-session-launcher="grok">Grok</button>
+          <button type="button" data-session-launcher="claude">Claude</button>
         </div>
       </dialog>
       <dialog id="files-name-dialog" aria-labelledby="files-name-title">
@@ -773,6 +812,20 @@
       <!-- Files mode footer (session/keyboard chrome stays Term-only) -->
       <div id="footer-files" hidden>
         <div id="footer-files-main">
+          <button
+            class="files-start-session files-start-session-footer"
+            data-files-start-session
+            type="button"
+            aria-haspopup="dialog"
+            aria-controls="files-session-dialog"
+            aria-expanded="false"
+          >
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <rect x="2.5" y="4" width="19" height="16" rx="2" />
+              <path d="m6 9 3 3-3 3M12 15h5M17 5v4M15 7h4" />
+            </svg>
+            <span>Start Session</span>
+          </button>
           <button
             id="files-refresh"
             class="shortcut-icon"

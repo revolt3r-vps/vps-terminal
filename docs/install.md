@@ -247,6 +247,8 @@ Confirm you can still `ssh deploy@YOUR_VPS_IP` **before** you close the laptop.
 2. Sign in with the **allowlisted** Google account
 3. You should see the terminal UI
 4. Tap **+** to create a tmux session (or attach an existing one)
+   From Files, **Start Session** can instead launch Terminal, Codex, Grok, or
+   Claude directly in the folder currently open.
 5. Use **Add to Home Screen** / install PWA for app-like use
 
 If login fails, see [Troubleshooting](#troubleshooting) below and

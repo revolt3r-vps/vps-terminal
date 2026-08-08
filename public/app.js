@@ -52,6 +52,15 @@ const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
 const filesOptionHidden = document.querySelector('#files-option-hidden');
 const filesOptionTerminal = document.querySelector('#files-option-terminal');
 const filesOptionSettings = document.querySelector('#files-option-settings');
+const filesStartSessionButtons = document.querySelectorAll(
+  '[data-files-start-session]'
+);
+const filesSessionDialog = document.querySelector('#files-session-dialog');
+const filesSessionClose = document.querySelector('#files-session-close');
+const filesSessionPath = document.querySelector('#files-session-path');
+const filesSessionLauncherButtons = document.querySelectorAll(
+  '[data-session-launcher]'
+);
 const filesNameDialog = document.querySelector('#files-name-dialog');
 const filesNameForm = document.querySelector('#files-name-form');
 const filesNameTitle = document.querySelector('#files-name-title');
@@ -270,6 +279,8 @@ const viewSwipeMinimumCommitDistance = 56;
 // so a swipe starting in this band would fight the browser and lose.
 const viewSwipeEdgeGuard = 24;
 const viewSwipeSettleMilliseconds = 180;
+// Slack on the fallback timer, so it only ever fires when transitionend did not.
+const viewSwipeSettleGraceMilliseconds = 120;
 const nativeScrollDeltaThreshold = 1;
 const nativeInputSentinel = '\u200b';
 const nativeDeleteDeduplicationMilliseconds = 250;
@@ -312,7 +323,8 @@ const terminalFontFamily =
 // permanent footer control or a configurable key chip.
 const builtinShortcutCatalog = {
   esc: { label: 'Esc', kind: 'sequence', sequence: '\u001b' },
-  ctrl: { label: 'Ctrl', kind: 'ctrl' },
+  ctrl: { label: 'Ctrl', kind: 'modifier', modifier: 'ctrl' },
+  shift: { label: 'Shift', kind: 'modifier', modifier: 'shift' },
   'ctrl-a': { label: 'Ctrl+A', kind: 'sequence', sequence: '\u0001' },
   'ctrl-b': { label: 'Ctrl+B', kind: 'sequence', sequence: '\u0002' },
   'ctrl-c': { label: 'Ctrl+C', kind: 'sequence', sequence: '\u0003' },
@@ -373,6 +385,7 @@ const builtinShortcutGroups = [
     ids: [
       'esc',
       'ctrl',
+      'shift',
       'tab',
       'shift-tab',
       'enter',
@@ -383,30 +396,11 @@ const builtinShortcutGroups = [
     ]
   },
   {
-    label: 'Ctrl',
-    ids: [
-      'ctrl-a',
-      'ctrl-b',
-      'ctrl-c',
-      'ctrl-d',
-      'ctrl-e',
-      'ctrl-f',
-      'ctrl-g',
-      'ctrl-h',
-      'ctrl-k',
-      'ctrl-l',
-      'ctrl-n',
-      'ctrl-o',
-      'ctrl-p',
-      'ctrl-r',
-      'ctrl-t',
-      'ctrl-u',
-      'ctrl-v',
-      'ctrl-w',
-      'ctrl-x',
-      'ctrl-y',
-      'ctrl-z'
-    ]
+    // The Ctrl chip reaches all 26 letters through its chord row, so the picker
+    // only carries the handful worth a dedicated one-tap chip. The rest stay in
+    // builtinShortcutCatalog so profiles saved before the chord row still load.
+    label: 'Ctrl (one-tap)',
+    ids: ['ctrl-c', 'ctrl-d', 'ctrl-z', 'ctrl-l', 'ctrl-r', 'ctrl-b']
   },
   {
     label: 'Arrows',
@@ -438,6 +432,7 @@ const builtinShortcutGroups = [
 const defaultShortcutIds = [
   'esc',
   'ctrl',
+  'shift',
   'tab',
   'enter',
   'ctrl-c',
@@ -977,7 +972,9 @@ let lastSelectionApplyLogAt = 0;
 let lastTouchClientX = 0;
 let lastTouchClientY = 0;
 let deferredInstallPrompt = null;
-let footerDrawer = null; // 'keys' | 'snips' | null
+let footerDrawer = null; // 'keys' | 'snips' | 'mod' | null
+// Which modifier the chord row is showing, when footerDrawer is 'mod'.
+let footerChordModifier = null;
 let viewMode = 'term'; // 'term' | 'files'
 let filesRootId = 'home';
 let filesPath = '';
@@ -1488,16 +1485,34 @@ function setHeaderCollapsed(collapsed) {
   syncPickerScrim();
 }
 
+/**
+ * A modifier chip reads as held while its chord row is up.
+ *
+ * Ctrl also reads as held on the latch alone, which is what a keypress spends.
+ * Shift has no latch — it only ever opens a row.
+ */
+function modifierChipIsHeld(modifier) {
+  if (footerDrawer === 'mod' && footerChordModifier === modifier) {
+    return true;
+  }
+  return modifier === 'ctrl' && ctrlArmed;
+}
+
+function syncModifierChips() {
+  document.querySelectorAll('[data-shortcut-id]').forEach((button) => {
+    const def = getShortcutDef(button.dataset.shortcutId);
+    if (def?.kind !== 'modifier') {
+      return;
+    }
+    const held = modifierChipIsHeld(def.modifier);
+    button.classList.toggle('active', held);
+    button.setAttribute('aria-pressed', String(held));
+  });
+}
+
 function setCtrlArmed(value) {
   ctrlArmed = value;
-  document
-    .querySelectorAll(
-      '[data-shortcut-id="ctrl"], [data-pin-kind="key"][data-pin-id="ctrl"]'
-    )
-    .forEach((ctrlButton) => {
-      ctrlButton.classList.toggle('active', value);
-      ctrlButton.setAttribute('aria-pressed', String(value));
-    });
+  syncModifierChips();
 }
 
 function isCustomKeyId(id) {
@@ -2170,6 +2185,47 @@ function saveProfileSnippetIds(ids, profileId = editorKeyProfile().id) {
   return cleaned;
 }
 
+const shiftChordMigrationStorageKey = 'vps-terminal-shift-chord-added';
+
+/**
+ * Put Shift next to Ctrl in profiles saved before the chord row existed.
+ *
+ * New profiles pick it up from defaultShortcutIds. Existing ones would not, and
+ * a chip nobody can see has not shipped. This runs once, so a Shift the user
+ * removes afterwards stays removed.
+ */
+function migrateShiftChordChip() {
+  try {
+    if (window.localStorage.getItem(shiftChordMigrationStorageKey) === '1') {
+      return;
+    }
+    window.localStorage.setItem(shiftChordMigrationStorageKey, '1');
+  } catch {
+    // Without persistence there is no way to run this exactly once, and running
+    // it on every load would fight the user's own edits.
+    return;
+  }
+  const documentValue = loadKeyProfilesDocument();
+  let changed = false;
+  const profiles = documentValue.profiles.map((profile) => {
+    const ids = profile.shortcutIds;
+    if (!Array.isArray(ids) || ids.includes('shift')) {
+      return profile;
+    }
+    const at = ids.indexOf('ctrl');
+    if (at < 0) {
+      return profile;
+    }
+    changed = true;
+    const next = [...ids];
+    next.splice(at + 1, 0, 'shift');
+    return { ...profile, shortcutIds: next };
+  });
+  if (changed) {
+    saveKeyProfilesDocument({ ...documentValue, profiles });
+  }
+}
+
 function reconcileSnippetReferences() {
   const knownIds = new Set(snippetsList.map((snippet) => snippet.id));
   const documentValue = loadKeyProfilesDocument();
@@ -2206,9 +2262,9 @@ function activateShortcut(id) {
     return;
   }
   noteChipUsed('key', id);
-  if (def.kind === 'ctrl') {
+  if (def.kind === 'modifier') {
     clearTerminalSelection();
-    setCtrlArmed(!ctrlArmed);
+    toggleModifierChord(def.modifier);
     return;
   }
   if (def.kind === 'scroll') {
@@ -2318,6 +2374,94 @@ function runFind(direction) {
     return false;
   }
 }
+
+// ---- Start of the pure modifier chord block. ----
+// Written free of DOM and browser globals so it can be sliced out of the shipped
+// source for tests, the same way the keyboard transition block is.
+
+/*
+ * Ctrl is a chord, not a key.
+ *
+ * Twenty-one separate Ctrl+X chips used to compete for the same strip as Esc and
+ * the arrows, and they still only covered 21 of 26 letters. One Ctrl chip that
+ * opens a row of secondaries costs one extra tap and reaches every chord.
+ */
+const modifierChordDefinitions = {
+  ctrl: {
+    label: 'Ctrl',
+    // Ctrl+letter is the letter's position in the alphabet as a control code:
+    // Ctrl+A is 0x01. Generated rather than listed, so no letter can go missing.
+    letters: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ',
+    // The non-letter chords a shell actually uses. None of these can be typed on
+    // a soft keyboard at all, so the row is the only way to reach them.
+    extras: [
+      { key: 'space', label: '␣', sequence: '\u0000', name: 'Space (NUL)' },
+      { key: '[', label: '[', sequence: '\u001b', name: '[ (Esc)' },
+      { key: '\\', label: '\\', sequence: '\u001c', name: '\\ (quit)' },
+      { key: ']', label: ']', sequence: '\u001d', name: ']' },
+      { key: '_', label: '_', sequence: '\u001f', name: '_ (undo)' }
+    ]
+  },
+  shift: {
+    label: 'Shift',
+    // No letters: the soft keyboard already types capitals, so a Shift+letter
+    // row would be 26 chips that duplicate the keyboard sitting under it. What
+    // it cannot type is this list.
+    letters: '',
+    extras: [
+      { key: 'left', label: '←', sequence: '\u001b[1;2D', name: 'Left' },
+      { key: 'up', label: '↑', sequence: '\u001b[1;2A', name: 'Up' },
+      { key: 'down', label: '↓', sequence: '\u001b[1;2B', name: 'Down' },
+      { key: 'right', label: '→', sequence: '\u001b[1;2C', name: 'Right' },
+      { key: 'tab', label: 'Tab', sequence: '\u001b[Z', name: 'Tab' },
+      { key: 'home', label: 'Home', sequence: '\u001b[1;2H', name: 'Home' },
+      { key: 'end', label: 'End', sequence: '\u001b[1;2F', name: 'End' },
+      { key: 'insert', label: 'Ins', sequence: '\u001b[2;2~', name: 'Insert' },
+      { key: 'delete', label: 'Del', sequence: '\u001b[3;2~', name: 'Delete' },
+      { key: 'pgup', label: 'PgUp', sequence: '\u001b[5;2~', name: 'PgUp' },
+      { key: 'pgdn', label: 'PgDn', sequence: '\u001b[6;2~', name: 'PgDn' },
+      { key: 'f1', label: 'F1', sequence: '\u001b[1;2P', name: 'F1' },
+      { key: 'f2', label: 'F2', sequence: '\u001b[1;2Q', name: 'F2' },
+      { key: 'f3', label: 'F3', sequence: '\u001b[1;2R', name: 'F3' },
+      { key: 'f4', label: 'F4', sequence: '\u001b[1;2S', name: 'F4' },
+      { key: 'f5', label: 'F5', sequence: '\u001b[15;2~', name: 'F5' },
+      { key: 'f6', label: 'F6', sequence: '\u001b[17;2~', name: 'F6' },
+      { key: 'f7', label: 'F7', sequence: '\u001b[18;2~', name: 'F7' },
+      { key: 'f8', label: 'F8', sequence: '\u001b[19;2~', name: 'F8' },
+      { key: 'f9', label: 'F9', sequence: '\u001b[20;2~', name: 'F9' },
+      { key: 'f10', label: 'F10', sequence: '\u001b[21;2~', name: 'F10' },
+      { key: 'f11', label: 'F11', sequence: '\u001b[23;2~', name: 'F11' },
+      { key: 'f12', label: 'F12', sequence: '\u001b[24;2~', name: 'F12' }
+    ]
+  }
+};
+
+/** Every secondary the modifier can take, in row order. */
+function modifierChordKeys(modifier) {
+  const definition = modifierChordDefinitions[modifier];
+  if (!definition) {
+    return [];
+  }
+  const keys = [];
+  for (const letter of definition.letters) {
+    keys.push({
+      id: `${modifier}-${letter.toLowerCase()}`,
+      label: letter,
+      title: `${definition.label}+${letter}`,
+      sequence: String.fromCharCode(letter.charCodeAt(0) - 64)
+    });
+  }
+  for (const extra of definition.extras) {
+    keys.push({
+      id: `${modifier}-${extra.key}`,
+      label: extra.label,
+      title: `${definition.label}+${extra.name}`,
+      sequence: extra.sequence
+    });
+  }
+  return keys;
+}
+// ---- End of the pure modifier chord block. ----
 
 // ---- Start of the pure footer rail block. ----
 // Written free of DOM and browser globals so it can be sliced out of the shipped
@@ -2580,8 +2724,12 @@ function toggleFooterPin(kind, id) {
 
 function setFooterDrawer(mode) {
   const next =
-    mode === 'keys' || mode === 'snips' ? mode : null;
+    mode === 'keys' || mode === 'snips' || mode === 'mod' ? mode : null;
   footerDrawer = footerDrawer === next ? null : next;
+  if (footerDrawer !== 'mod') {
+    footerChordModifier = null;
+    setCtrlArmed(false);
+  }
   if (drawerKeysButton) {
     drawerKeysButton.classList.toggle('active', footerDrawer === 'keys');
     drawerKeysButton.setAttribute(
@@ -2607,6 +2755,10 @@ function closeFooterDrawer() {
   if (!footerDrawer) {
     return;
   }
+  if (footerDrawer === 'mod') {
+    footerChordModifier = null;
+    setCtrlArmed(false);
+  }
   footerDrawer = null;
   drawerKeysButton?.classList.remove('active');
   drawerKeysButton?.setAttribute('aria-pressed', 'false');
@@ -2631,9 +2783,10 @@ function createKeyChipButton(id, options = {}) {
   button.title = options.pinned
     ? `${def.label} — hold to unpin`
     : `${def.label} — hold to pin`;
-  if (def.kind === 'ctrl') {
-    button.setAttribute('aria-pressed', String(ctrlArmed));
-    if (ctrlArmed) {
+  if (def.kind === 'modifier') {
+    const held = modifierChipIsHeld(def.modifier);
+    button.setAttribute('aria-pressed', String(held));
+    if (held) {
       button.classList.add('active');
     }
   }
@@ -2685,6 +2838,72 @@ function appendDrawerEmptyHint(text) {
   footerDrawerElement.append(hint);
 }
 
+/**
+ * Ctrl opens a row of secondaries instead of latching invisibly.
+ *
+ * The latch stays armed underneath, so typing a letter on either keyboard still
+ * becomes a control code — that path is unchanged. The row is what makes the
+ * pending state visible and what makes every chord reachable with no keyboard at
+ * all.
+ */
+function toggleModifierChord(modifier) {
+  // Close first, always. setFooterDrawer toggles, so asking it for 'mod' while a
+  // row is already up would shut the row instead of swapping which modifier it
+  // shows — Shift then Ctrl would leave no row at all.
+  if (footerDrawer === 'mod') {
+    const sameModifier = footerChordModifier === modifier;
+    closeFooterDrawer();
+    if (sameModifier) {
+      return;
+    }
+  }
+  footerChordModifier = modifier;
+  setFooterDrawer('mod');
+  setCtrlArmed(modifier === 'ctrl');
+}
+
+function sendModifierChord(key) {
+  clearTerminalSelection();
+  // The sequence is already the chord, so the latch must not fold it again.
+  setCtrlArmed(false);
+  sendInput(key.sequence);
+  // Only the chords that exist as chips can come back as a recent chip.
+  if (isKnownShortcutId(key.id)) {
+    noteChipUsed('key', key.id);
+  }
+  closeFooterDrawer();
+}
+
+/**
+ * The row leads with the modifier that opened it, so the held state is on screen
+ * rather than remembered. Tapping that lead cancels.
+ */
+function renderModifierChordRow() {
+  const definition = modifierChordDefinitions[footerChordModifier];
+  if (!definition) {
+    closeFooterDrawer();
+    return;
+  }
+  const lead = document.createElement('button');
+  lead.type = 'button';
+  lead.className = 'chord-lead active';
+  lead.textContent = `${definition.label}+`;
+  lead.title = `${definition.label} held — tap a key, or tap here to cancel`;
+  lead.setAttribute('aria-pressed', 'true');
+  lead.addEventListener('click', () => closeFooterDrawer());
+  footerDrawerElement.append(lead);
+  for (const key of modifierChordKeys(footerChordModifier)) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'chord-key';
+    button.dataset.chordId = key.id;
+    button.textContent = key.label;
+    button.title = key.title;
+    button.addEventListener('click', () => sendModifierChord(key));
+    footerDrawerElement.append(button);
+  }
+}
+
 function renderFooterDrawer() {
   if (!footerDrawerElement) {
     return;
@@ -2695,6 +2914,10 @@ function renderFooterDrawer() {
     return;
   }
   footerDrawerElement.hidden = false;
+  if (footerDrawer === 'mod') {
+    renderModifierChordRow();
+    return;
+  }
   if (footerDrawer === 'keys') {
     for (const id of loadShortcutIds()) {
       const button = createKeyChipButton(id, { pinned: isPinned('key', id) });
@@ -3734,7 +3957,11 @@ function removeShortcut(id) {
   const profile = editorKeyProfile();
   const ids = loadShortcutIds(profile).filter((entry) => entry !== id);
   saveShortcutIds(ids, profile.id);
-  if (id === 'ctrl') {
+  // Removing the chip that opens a chord row has to take the row with it.
+  if (getShortcutDef(id)?.kind === 'modifier') {
+    if (footerChordModifier === getShortcutDef(id).modifier) {
+      closeFooterDrawer();
+    }
     ctrlArmed = false;
   }
   // Removing a custom key also deletes its definition (re-create if needed).
@@ -3868,6 +4095,11 @@ function resetShortcuts() {
 function transformedInput(data) {
   if (!ctrlArmed) {
     return data;
+  }
+  // A keypress spends the same latch the chord row is showing, so the row must
+  // not stay up claiming Ctrl is still held.
+  if (footerDrawer === 'mod') {
+    closeFooterDrawer();
   }
   setCtrlArmed(false);
   if (data.length === 1 && /^[A-Za-z]$/.test(data)) {
@@ -8086,6 +8318,7 @@ function setViewMode(mode, options = {}) {
   closeFilesActions({ restoreFocus: false });
   closeFilesPreview();
   closeFilesOptions();
+  closeFilesSessionDialog();
   closeFilesNameDialog();
   // Term mode: show empty or terminal based on session.
   if (activeSession) {
@@ -8732,6 +8965,118 @@ function openFilesOptions() {
 function closeFilesOptions() {
   if (filesOptionsDialog?.open) {
     filesOptionsDialog.close();
+  }
+}
+
+// ---- Start of the pure Files session-name block. ----
+const filesSessionLauncherLabels = Object.freeze({
+  terminal: 'Terminal',
+  codex: 'Codex',
+  grok: 'Grok',
+  claude: 'Claude'
+});
+
+function suggestedFilesSessionName(folderName, launcher, existingNames = []) {
+  const safeLauncher = Object.hasOwn(filesSessionLauncherLabels, launcher)
+    ? launcher
+    : 'terminal';
+  let folder = typeof folderName === 'string' ? folderName : '';
+  folder = folder
+    .normalize('NFKD')
+    .replace(/[^A-Za-z0-9._-]+/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/-+$/g, '');
+  if (!folder) {
+    folder = 'session';
+  }
+  const suffix = safeLauncher === 'terminal' ? '' : `-${safeLauncher}`;
+  const base = `${folder.slice(0, Math.max(1, 32 - suffix.length))}${suffix}`;
+  const taken = new Set(existingNames);
+  if (!taken.has(base)) {
+    return base;
+  }
+  for (let sequence = 2; sequence < 1000; sequence += 1) {
+    const numberedSuffix = `-${sequence}`;
+    const candidate = `${base.slice(0, 32 - numberedSuffix.length)}${numberedSuffix}`;
+    if (!taken.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `session-${Date.now()}`.slice(0, 32);
+}
+// ---- End of the pure Files session-name block. ----
+
+function setFilesSessionMenuExpanded(expanded) {
+  filesStartSessionButtons.forEach((button) => {
+    button.setAttribute('aria-expanded', String(expanded));
+  });
+}
+
+function closeFilesSessionDialog() {
+  if (filesSessionDialog?.open) {
+    filesSessionDialog.close();
+  }
+  setFilesSessionMenuExpanded(false);
+}
+
+function openFilesSessionDialog() {
+  if (!filesListing) {
+    setStatus('Open a folder first', { sticky: true });
+    return;
+  }
+  closeFilesActions({ restoreFocus: false });
+  closeFilesPreview({ restoreFocus: false });
+  closeFilesOptions();
+  closeFilesNameDialog({ restoreFocus: false });
+  if (filesSessionPath) {
+    filesSessionPath.textContent = `Start in ${filesDisplayPath(
+      filesListing.root || filesRootId,
+      filesListing.path || ''
+    )}`;
+  }
+  if (filesSessionDialog && !filesSessionDialog.open) {
+    filesSessionDialog.showModal();
+    setFilesSessionMenuExpanded(true);
+    filesSessionLauncherButtons[0]?.focus({ preventScroll: true });
+  }
+}
+
+async function startFilesSession(launcher) {
+  if (!Object.hasOwn(filesSessionLauncherLabels, launcher) || !filesListing) {
+    return;
+  }
+  const root = filesListing.root || filesRootId;
+  const directory = filesListing.path || '';
+  const folderName = directory.split('/').filter(Boolean).at(-1) || root;
+  const suggested = suggestedFilesSessionName(
+    folderName,
+    launcher,
+    sessions.map((session) => session.name)
+  );
+  closeFilesSessionDialog();
+  const proposed = window.prompt(
+    `New ${filesSessionLauncherLabels[launcher]} session name:`,
+    suggested
+  );
+  if (proposed === null) {
+    return;
+  }
+  const name = proposed.trim();
+  try {
+    setStatus(`Starting ${filesSessionLauncherLabels[launcher]}…`, {
+      sticky: true
+    });
+    const result = await api('/api/sessions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, root, path: directory, launcher })
+    });
+    await refreshSessions(false, true);
+    setViewMode('term');
+    connect(result.name || name);
+  } catch (error) {
+    setStatus(error.message || 'Could not start session', { sticky: true });
+    window.alert(error.message);
   }
 }
 
@@ -10117,9 +10462,47 @@ function viewSwipeShouldCommit(dx, viewportWidth, hasTarget) {
 // Non-null only while a horizontal swipe owns the gesture.
 let viewSwipe = null;
 let viewSwipeSettleTimer = null;
+// Set while a slide is settling, so a new swipe can tear the old one down.
+let viewSwipeSettleCleanup = null;
 
 function mainViewElement() {
   return document.querySelector('main');
+}
+
+/**
+ * Clear the inline transform when the slide actually ends, not on a timer set to
+ * the same duration.
+ *
+ * A transition starts a frame or two after the style is set, so a timer of
+ * exactly viewSwipeSettleMilliseconds fires while it is still running. Clearing
+ * the transform then drops the view the last few percent in one step, which is
+ * the bounce at the end of the animation. transitionend fires when the browser
+ * is actually done.
+ */
+function settleViewSwipe(main) {
+  viewSwipeSettleCleanup?.();
+  const done = () => {
+    window.clearTimeout(viewSwipeSettleTimer);
+    viewSwipeSettleTimer = null;
+    viewSwipeSettleCleanup = null;
+    main.removeEventListener('transitionend', handleEnd);
+    main.style.transition = '';
+    main.style.transform = '';
+    document.body.classList.remove('view-settling');
+  };
+  const handleEnd = (event) => {
+    if (event.target === main && event.propertyName === 'transform') {
+      done();
+    }
+  };
+  viewSwipeSettleCleanup = done;
+  main.addEventListener('transitionend', handleEnd);
+  // A transition that never runs — reduced motion, a backgrounded tab — would
+  // otherwise leave the inline transform pinned in place forever.
+  viewSwipeSettleTimer = window.setTimeout(
+    done,
+    viewSwipeSettleMilliseconds + viewSwipeSettleGraceMilliseconds
+  );
 }
 
 function beginViewSwipe(fromMode) {
@@ -10127,8 +10510,7 @@ function beginViewSwipe(fromMode) {
   if (!main) {
     return;
   }
-  window.clearTimeout(viewSwipeSettleTimer);
-  viewSwipeSettleTimer = null;
+  viewSwipeSettleCleanup?.();
   viewSwipe = { from: fromMode, dx: 0, committed: false };
   main.style.transition = 'none';
   document.body.classList.add('view-swiping');
@@ -10154,15 +10536,15 @@ function finishViewSwipe() {
   const target = viewSwipeTarget(from, dx);
   const commit = viewSwipeShouldCommit(dx, window.innerWidth, Boolean(target));
   viewSwipe = null;
+  // The compositor layer has to outlive the drag, or it is torn down and rebuilt
+  // in the middle of the slide. view-settling carries will-change until the end.
   document.body.classList.remove('view-swiping');
+  document.body.classList.add('view-settling');
   if (!commit) {
     // Snap back from wherever the finger left it.
     main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
     main.style.transform = 'translateX(0)';
-    viewSwipeSettleTimer = window.setTimeout(() => {
-      main.style.transition = '';
-      main.style.transform = '';
-    }, viewSwipeSettleMilliseconds);
+    settleViewSwipe(main);
     return false;
   }
   // Switch first, then slide the new view in from the side the finger came from.
@@ -10175,10 +10557,7 @@ function finishViewSwipe() {
   void main.offsetWidth;
   main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
   main.style.transform = 'translateX(0)';
-  viewSwipeSettleTimer = window.setTimeout(() => {
-    main.style.transition = '';
-    main.style.transform = '';
-  }, viewSwipeSettleMilliseconds);
+  settleViewSwipe(main);
   return true;
 }
 
@@ -12892,6 +13271,15 @@ filesSettingsButton?.addEventListener('click', () => {
 filesSettingsDesktopButton?.addEventListener('click', () => {
   openSettingsDialog();
 });
+filesStartSessionButtons.forEach((button) => {
+  button.addEventListener('click', openFilesSessionDialog);
+});
+filesSessionLauncherButtons.forEach((button) => {
+  button.addEventListener('click', () => {
+    void startFilesSession(button.dataset.sessionLauncher);
+  });
+});
+filesSessionClose?.addEventListener('click', closeFilesSessionDialog);
 filesUploadInput?.addEventListener('change', () => {
   void uploadFilesSelected(filesUploadInput.files);
 });
@@ -13006,6 +13394,10 @@ filesPreviewDialog?.addEventListener('cancel', (event) => {
 filesOptionsDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeFilesOptions();
+});
+filesSessionDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeFilesSessionDialog();
 });
 filesNameDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
@@ -13452,6 +13844,7 @@ preferencesSyncRetryButton?.addEventListener('click', () => {
 populateThemeSelect();
 applyTerminalTheme(terminalThemeName, { persist: false });
 loadKeyProfilesDocument();
+migrateShiftChordChip();
 keyProfileEditorId = activeKeyProfile().id;
 renderKeyProfileControls();
 renderFooterPins();

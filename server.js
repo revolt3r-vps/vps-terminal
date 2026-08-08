@@ -265,6 +265,12 @@ const maximumInputLength = 32768;
 const maximumSessionNameLength = 32;
 const websocketLifetimeMs = 60 * 60 * 1000;
 const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const sessionLauncherCommands = Object.freeze({
+  terminal: null,
+  codex: 'codex',
+  grok: 'grok',
+  claude: 'claude'
+});
 const authenticatedEmailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const connections = new Set();
 let pendingConnections = 0;
@@ -1191,18 +1197,90 @@ async function ensureTmuxCapabilities() {
   );
 }
 
-async function createSession(name) {
+function validatedSessionLauncher(value) {
+  const launcher = value === undefined ? 'terminal' : value;
+  return typeof launcher === 'string' &&
+    Object.hasOwn(sessionLauncherCommands, launcher)
+    ? launcher
+    : null;
+}
+
+async function resolvedSessionLauncherCommand(launcher) {
+  const command = sessionLauncherCommands[launcher];
+  if (!command) {
+    return null;
+  }
+  const searchDirectories = String(process.env.PATH || '')
+    .split(path.delimiter)
+    .filter((entry) => path.isAbsolute(entry));
+  for (const directory of searchDirectories) {
+    const candidate = path.join(directory, command);
+    try {
+      const stats = await fs.promises.stat(candidate);
+      if (!stats.isFile()) {
+        continue;
+      }
+      await fs.promises.access(candidate, fs.constants.X_OK);
+      return await fs.promises.realpath(candidate);
+    } catch {
+      // Keep searching. Missing launchers become a safe 503 below.
+    }
+  }
+  const error = new Error(`${launcher} launcher is unavailable`);
+  error.statusCode = 503;
+  throw error;
+}
+
+async function sessionWorkingDirectory(rootId, relativePath) {
+  if (rootId === undefined && relativePath === undefined) {
+    await fs.promises.access(projectRoot, fs.constants.R_OK | fs.constants.X_OK);
+    return projectRoot;
+  }
+  const root = fsRootFromQuery(rootId);
+  const resolved = await resolveJailedPath(root.rootPath, relativePath || '', {
+    mustExist: true
+  });
+  if (!resolved.stats.isDirectory()) {
+    const error = new Error('session path must be a directory');
+    error.statusCode = 400;
+    throw error;
+  }
+  await fs.promises.access(
+    resolved.absolutePath,
+    fs.constants.R_OK | fs.constants.X_OK
+  );
+  return resolved.absolutePath;
+}
+
+async function createSession(name, options = {}) {
+  const launcher = validatedSessionLauncher(options.launcher);
+  if (!launcher) {
+    const error = new Error(
+      'launcher must be terminal, codex, grok or claude'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
   if (await sessionExists(name)) {
     const error = new Error('session already exists');
     error.statusCode = 409;
     throw error;
   }
-  await fs.promises.access(projectRoot, fs.constants.R_OK | fs.constants.X_OK);
+  const workingDirectory = await sessionWorkingDirectory(
+    options.root,
+    options.path
+  );
+  const args = ['new-session', '-d', '-s', name, '-c', workingDirectory];
+  const command = await resolvedSessionLauncherCommand(launcher);
+  if (command) {
+    args.push(command);
+  }
   await execFileAsync(
     'tmux',
-    ['new-session', '-d', '-s', name, '-c', projectRoot],
+    args,
     { timeout: 5000 }
   );
+  return launcher;
 }
 
 async function killSession(name) {
@@ -1662,6 +1740,10 @@ const server = http.createServer(async (request, response) => {
         sendError(response, 400, 'invalid JSON body');
         return;
       }
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        sendError(response, 400, 'JSON body must be an object');
+        return;
+      }
       const name = validatedSessionName(value.name);
       if (!name) {
         sendError(
@@ -1671,8 +1753,12 @@ const server = http.createServer(async (request, response) => {
         );
         return;
       }
-      await createSession(name);
-      sendJson(response, 201, { name });
+      const launcher = await createSession(name, {
+        root: value.root,
+        path: value.path,
+        launcher: value.launcher
+      });
+      sendJson(response, 201, { name, launcher });
       return;
     }
 

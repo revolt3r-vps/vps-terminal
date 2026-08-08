@@ -98,7 +98,8 @@ See [docs/auth-google.md](docs/auth-google.md) and
   setup sync across browsers
 - App-wide adaptive terminal themes
 - Hardware keyboard support when focus is on chrome
-- Files workspace with jailed Locations, preview, rename, and new folders
+- Files workspace with jailed Locations, preview, rename, new folders, and
+  folder-scoped Terminal/Codex/Grok/Claude session launch
 - Installable PWA
 
 ---

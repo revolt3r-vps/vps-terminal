@@ -10,6 +10,7 @@ Environment=VPS_TERMINAL_SOCKET=@STATE_ROOT@/run/terminal.sock
 Environment=VPS_TERMINAL_ORIGIN=@ORIGIN@
 Environment=VPS_TERMINAL_PROJECT_ROOT=@PROJECT_ROOT@
 Environment="VPS_TERMINAL_APP_NAME=@APP_NAME@"
+Environment=PATH=@HOME@/.local/bin:/usr/local/bin:/usr/bin:/bin
 WorkingDirectory=@STATE_ROOT@
 ExecStart=/usr/bin/node @STATE_ROOT@/server.js
 Restart=on-failure

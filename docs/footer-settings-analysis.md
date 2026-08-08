@@ -442,3 +442,47 @@ here that adapts to which hand is holding the phone.
 - `t3@0.0.31` npm package, `dist/client` source maps — 573 first-party sources
   read locally; `ThreadTerminalDrawer.tsx`, `SettingsSidebarNav.tsx`,
   `settingsLayout.tsx`.
+
+---
+
+## Update — the chord row, 2026-08-08
+
+**Shipped ahead of the D+E work above, and it changes §2's arithmetic.**
+
+Ctrl and Shift are no longer keys on the strip. Each is a chip that swaps the
+second row for its own list of secondaries:
+
+```
+row 1:  [⌨][📋][Keys][Snips] │ Esc  Ctrl  Shift  Tab  Enter  ↑ │ [⚙]
+                                     └── tap ──┘
+row 2:  [Ctrl+] A B C D E F G H I J K L M N O P Q R S T U V W X Y Z ␣ [ \ ] _
+        └ cancels
+```
+
+The lead names what is held and sticks to the left edge while the rest scrolls,
+so the pending modifier stays on screen. Tapping it cancels, as does tapping the
+modifier chip again, as does opening Keys or Snips.
+
+**What it buys, against §2.3's measurements.** The old bar spent 222px on
+`Ctrl+C 55`, `Ctrl+D 57`, `Ctrl+Z 55` and `Ctrl+L 55` and still reached only 21
+of 26 letters — `ctrl-i`, `ctrl-j`, `ctrl-m`, `ctrl-q` and `ctrl-s` had no chip
+at all, and none of `Ctrl+Space`, `Ctrl+[`, `Ctrl+\`, `Ctrl+]` or `Ctrl+_` were
+reachable by any means. The chord row reaches all 31 for one 44px chip and one
+extra tap. Shift adds 23 combinations that no soft keyboard can produce: the four
+arrows, Tab, Home, End, Insert, Delete, PgUp, PgDn and F1–F12.
+
+**The Settings picker shrank with it**, from 21 Ctrl entries to the six worth a
+dedicated one-tap chip: `ctrl-c`, `ctrl-d`, `ctrl-z`, `ctrl-l`, `ctrl-r`,
+`ctrl-b`. The other definitions stay in `builtinShortcutCatalog` so profiles
+saved before this still load.
+
+**Ctrl keeps its latch.** Tapping Ctrl arms it as well as opening the row, so
+typing a letter on either keyboard still folds to a control code. The row is the
+addition, not the replacement. Shift has no latch — it only opens a row.
+
+**Where this leaves D+E.** §"Order of work" step 3 said the fixed two-row block
+would have to decide what happens to T21's contextual chips. It now also has to
+decide how the chord row and that block share row two, since both want it. The
+chord row is transient and the block is permanent, so the likely answer is that
+the chord row temporarily replaces the block — but that is a decision for the
+spike, not an assumption to build on.

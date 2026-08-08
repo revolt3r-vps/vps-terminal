@@ -28,7 +28,7 @@ Missing `VPS_TERMINAL_ORIGIN` outside `LOCAL_DEV` causes startup failure.
 |----------|---------|-------------|
 | `VPS_TERMINAL_APP_NAME` | `VPS Terminal` | UI title (`/api/config`) |
 | `VPS_TERMINAL_PORT` | `3001` (prod TCP) / `3099` (LOCAL_DEV) | TCP port when not using a socket |
-| `VPS_TERMINAL_PROJECT_ROOT` | `$HOME/projects` | New tmux session cwd + projects FS root |
+| `VPS_TERMINAL_PROJECT_ROOT` | `$HOME/projects` | Default tmux session cwd + projects FS root |
 | `VPS_TERMINAL_PASTE_ROOT` | `$HOME/paste` | Paste-image store |
 | `VPS_TERMINAL_STATE_DIR` | app directory | Preferences, snippets, client debug log |
 | `VPS_TERMINAL_FS_HOME` | enabled | Set `0` to disable home FS root |
@@ -56,6 +56,12 @@ bookmarks. The UI may navigate and remember paths inside them, but it cannot
 add a root or escape one. Desktop and sufficiently large tablets show
 Locations in a sidebar; phones and short landscape windows use a compact
 native selector.
+
+Files → Start Session resolves the current folder through the same root jail,
+then starts a tmux shell or the fixed `codex`, `grok`, or `claude` executable.
+Those executable names must be available on the service's `PATH`; launcher
+values from the browser are allowlisted and are never interpreted as shell
+commands.
 
 ## On-disk state
 

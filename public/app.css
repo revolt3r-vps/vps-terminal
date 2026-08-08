@@ -481,6 +481,7 @@ header.collapsed #view-mode {
 
 body.files-view #files-actions-dialog,
 body.files-view #files-options-dialog,
+body.files-view #files-session-dialog,
 body.files-view #files-name-dialog {
   -webkit-user-select: none;
   user-select: none;
@@ -665,6 +666,43 @@ body.files-view #files-name-dialog {
   min-width: var(--control-size);
   max-width: var(--control-size);
   min-height: var(--control-size);
+}
+
+.files-start-session {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font-size: 13px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.files-start-session svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.7;
+}
+
+.files-start-session-sidebar {
+  display: none;
+}
+
+#footer-files-main > .files-start-session-footer {
+  flex: 0 1 auto;
+  width: auto;
+  min-width: 124px;
+  max-width: none;
+  padding: 0 13px;
+  margin-right: auto;
+  border-radius: var(--control-radius);
 }
 
 .footer-files-upload {
@@ -938,6 +976,7 @@ body.files-view #files-name-dialog {
 
 #files-actions-dialog,
 #files-options-dialog,
+#files-session-dialog,
 #files-name-dialog,
 #quick-menu-dialog {
   width: min(92vw, 360px);
@@ -1171,6 +1210,7 @@ body.files-view #terminal-link-chip {
 /* Settings menus (Terminal Menu, File options) stay a small contextual card,
  * never a full-screen sheet — so they get a lighter scrim with no blur. */
 #files-options-dialog,
+#files-session-dialog,
 #quick-menu-dialog {
   width: min(90vw, 300px);
 }
@@ -1183,8 +1223,29 @@ body.files-view #terminal-link-chip {
 }
 
 #files-options-dialog::backdrop,
+#files-session-dialog::backdrop,
 #quick-menu-dialog::backdrop {
   background: rgba(4, 7, 11, 0.32);
+}
+
+.files-session-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.files-session-options button {
+  min-height: 48px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.files-session-options button:hover,
+.files-session-options button:focus-visible {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
 }
 
 .files-checkbox-control {
@@ -1299,6 +1360,7 @@ body.files-view #terminal-link-chip {
 }
 
 #files-options-dialog:focus,
+#files-session-dialog:focus,
 #quick-menu-dialog:focus {
   outline: 0;
 }
@@ -1811,7 +1873,8 @@ main {
  * transition are set inline by finishViewSwipe() because both are per-gesture
  * values; this class only carries what is constant.
  */
-body.view-swiping main {
+body.view-swiping main,
+body.view-settling main {
   will-change: transform;
 }
 
@@ -3117,6 +3180,27 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: #252a3d;
 }
 
+/*
+ * The chord row. Its lead names the modifier that opened it and sticks to the
+ * left edge while the secondaries scroll, so what is held stays on screen no
+ * matter how far along the alphabet you have scrolled. Tapping it cancels.
+ */
+#footer-drawer .chord-lead {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  border-color: var(--accent);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+}
+
+/* Single characters, so the 44px target is all the width they need. */
+#footer-drawer .chord-key {
+  min-width: var(--control-size);
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 #footer-drawer [data-snippet-id].snippet-run,
 #footer-pins [data-pin-kind="snip"].snippet-run {
   border-color: #3d5a48;
@@ -3612,6 +3696,18 @@ footer button {
     gap: 4px;
   }
 
+  #footer-files-main > .files-start-session-footer {
+    width: 100%;
+    min-width: 0;
+    max-width: none;
+    padding: 0;
+    margin-right: 0;
+  }
+
+  .files-start-session-footer span {
+    display: none;
+  }
+
   #footer-files-main #files-settings {
     width: 100%;
     max-width: none;
@@ -3890,10 +3986,20 @@ footer button {
   }
 
   #files-sidebar {
-    display: block;
+    display: flex;
+    flex-direction: column;
     grid-row: 1;
     grid-column: 1;
     border-right: 1px solid var(--border);
+  }
+
+  .files-start-session-sidebar {
+    display: inline-flex;
+    flex: 0 0 auto;
+    min-height: 38px;
+    margin: 8px;
+    padding: 0 10px;
+    border-radius: 8px;
   }
 
   #files-content {
@@ -3913,10 +4019,12 @@ footer button {
   }
 
   #files-roots {
+    flex: 1 1 auto;
     flex-direction: column;
     align-items: stretch;
     gap: 2px;
-    height: calc(100% - 38px);
+    height: auto;
+    min-height: 0;
     padding: 2px 8px 10px;
     border-bottom: 0;
     overflow-x: hidden;
