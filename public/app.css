@@ -3266,17 +3266,6 @@ body.files-view #key-panel {
   text-align: center;
 }
 
-/* Session-scoped controls in the dialog, for the layouts with no panel. */
-.settings-session-row {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 12px;
-}
-
-.settings-session-row[hidden] {
-  display: none !important;
-}
-
 /*
  * Landscape: the panel cannot live in the footer's flow, because the footer is a
  * 48px side rail there. It becomes an overlay along the bottom instead.

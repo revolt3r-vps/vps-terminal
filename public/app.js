@@ -108,9 +108,6 @@ const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
-const keyProfileSessionSelect = document.querySelector(
-  '#key-profile-session-select'
-);
 const shortcutEditorList = document.querySelector('#shortcut-editor-list');
 const shortcutAddSelect = document.querySelector('#shortcut-add-select');
 const shortcutAddButton = document.querySelector('#shortcut-add');
@@ -3361,47 +3358,6 @@ function appendKeyProfileOptions(select) {
   }
 }
 
-/**
- * Which profile this session uses, for the surfaces that have no panel.
- *
- * The panel carries this on a phone; landscape, desktop and Files reach it here.
- * A select rather than the menu-radio list the Menu sheet used: the dialog is a
- * form, and the list was shaped for a thumb.
- */
-function renderSessionProfileSelect() {
-  if (!keyProfileSessionSelect) {
-    return;
-  }
-  const row = keyProfileSessionSelect.closest('.settings-session-row');
-  if (row) {
-    row.hidden = !activeSession;
-  }
-  if (!activeSession) {
-    keyProfileSessionSelect.replaceChildren();
-    return;
-  }
-  const label = document.querySelector('#key-profile-session-label');
-  if (label) {
-    label.textContent = `Profile for ${activeSession}`;
-  }
-  const assigned = loadSessionKeyProfileAssignments()[activeSession] || '';
-  const options = [
-    { id: '', label: `Use default — ${defaultKeyProfile().name}` },
-    ...loadKeyProfilesDocument().profiles.map((entry) => ({
-      id: entry.id,
-      label: entry.name
-    }))
-  ];
-  keyProfileSessionSelect.replaceChildren();
-  for (const option of options) {
-    const element = document.createElement('option');
-    element.value = option.id;
-    element.textContent = option.label;
-    keyProfileSessionSelect.append(element);
-  }
-  keyProfileSessionSelect.value = assigned;
-}
-
 function renderKeyProfileControls() {
   if (!keyProfileSelect) {
     return;
@@ -3429,7 +3385,6 @@ function renderKeyProfileControls() {
   if (keyProfileDeleteButton) {
     keyProfileDeleteButton.disabled = documentValue.profiles.length <= 1;
   }
-  renderSessionProfileSelect();
   const profile = editorKeyProfile();
   // Keys only. A profile no longer decides which snippets you see, so counting
   // them here would report the same number under every profile.
@@ -13545,11 +13500,6 @@ setViewMode(loadViewMode(), { persist: false });
 if (viewMode === 'files') {
   void ensureFilesRoots();
 }
-keyProfileSessionSelect?.addEventListener('change', () => {
-  // The Menu sheet's own handler, reused: it also resets the editor target and
-  // the armed modifier, and redraws the session list's profile badges.
-  assignActiveSessionKeyProfile(keyProfileSessionSelect.value);
-});
 installAppButton.addEventListener('click', installWebApp);
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
