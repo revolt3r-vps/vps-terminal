@@ -428,7 +428,7 @@
     <dialog id="settings-dialog" aria-label="Terminal settings">
       <div class="settings-tabs" role="tablist" aria-label="Settings sections">
         <button type="button" class="settings-tab" role="tab" data-settings-tab="profiles" aria-selected="true">Profiles</button>
-        <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Library</button>
+        <button type="button" class="settings-tab" role="tab" data-settings-tab="library" aria-selected="false">Snippets</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="theme" aria-selected="false">Appearance</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="app" aria-selected="false">App</button>
         <button type="button" class="settings-tab" role="tab" data-settings-tab="debug" aria-selected="false">Debug</button>
@@ -472,9 +472,6 @@
               <span id="key-profile-session-label">Profile for this session</span>
               <select id="key-profile-session-select"></select>
             </label>
-            <button id="settings-reconnect" type="button" class="settings-secondary">
-              Reconnect session
-            </button>
           </div>
           <p class="settings-hint">
             Profiles control which keys the bar carries. Snippets are one shared
@@ -540,7 +537,7 @@
           hidden
         >
           <p class="settings-hint">
-            Shared across devices; profiles choose which items to show.
+            One list, shared across devices and the same under every profile.
             <strong>Run</strong> = execute, off = insert only.
           </p>
           <ul id="snippet-editor-list"></ul>
@@ -578,22 +575,15 @@
           aria-label="Appearance"
           hidden
         >
-          <label class="settings-field" for="terminal-theme">
-            <span>Terminal theme</span>
-            <!-- Options are built at runtime from terminalThemeLabels in app.js,
-                 which calls replaceChildren() on this element. Listing them here as
-                 well created a second source of truth that was discarded before it
-                 could be seen. -->
-            <select id="terminal-theme"></select>
-          </label>
-          <p class="settings-hint">Per-session theme is remembered when you change it.</p>
-          <label class="settings-field" for="terminal-font-size">
-            <span>Font size</span>
-            <select id="terminal-font-size"></select>
-          </label>
+          <!-- Filled by renderKeyPanelAppearance, the same function that draws the
+               panel's Appearance tab. One appearance UI in two hosts: a select
+               here and a grid there would be two designs for one job, and the
+               select was the worse of them. This is the only route on landscape,
+               desktop and Files, where there is no panel. -->
+          <div id="settings-appearance"></div>
           <p class="settings-hint">
-            Pinch the terminal to change this too. Font size is per device, so a
-            phone and a laptop keep their own.
+            Theme is remembered per session. Font size is per device, so a phone
+            and a laptop keep their own — pinching the terminal changes it too.
           </p>
         </section>
         <section
@@ -835,19 +825,19 @@
         does not have — all three keep the settings dialog instead.
       -->
       <div id="key-panel" hidden aria-label="Terminal panel">
-        <div id="key-panel-top">
-          <button
-            id="key-panel-profile"
-            type="button"
-            title="Switch key profile"
-          ></button>
-        </div>
         <div id="key-panel-body">
+          <div
+            class="key-panel-page"
+            data-panel-page="keys"
+            role="tabpanel"
+            aria-label="Keys"
+          ></div>
           <div
             class="key-panel-page"
             data-panel-page="snippets"
             role="tabpanel"
             aria-label="Snippets"
+            hidden
           ></div>
           <div
             class="key-panel-page"
@@ -868,9 +858,25 @@
           <button
             type="button"
             class="key-panel-tab"
-            data-panel-tab="snippets"
+            data-panel-tab="keys"
             role="tab"
             aria-selected="true"
+            title="Keys"
+            aria-label="Keys"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="2.5" y="2.5" width="6" height="6" rx="1.5" />
+              <rect x="11.5" y="2.5" width="6" height="6" rx="1.5" />
+              <rect x="2.5" y="11.5" width="6" height="6" rx="1.5" />
+              <rect x="11.5" y="11.5" width="6" height="6" rx="1.5" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="snippets"
+            role="tab"
+            aria-selected="false"
             title="Snippets"
             aria-label="Snippets"
           >

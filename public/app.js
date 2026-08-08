@@ -102,19 +102,16 @@ const footerElement = document.querySelector('footer');
 const keyPanelElement = document.querySelector('#key-panel');
 const keyPanelBodyElement = document.querySelector('#key-panel-body');
 const keyPanelTabsElement = document.querySelector('#key-panel-tabs');
-const keyPanelProfileButton = document.querySelector('#key-panel-profile');
 const keyPanelCustomizeButton = document.querySelector('#key-panel-customize');
 const keyPanelKeyboardButton = document.querySelector('#key-panel-keyboard');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
-const terminalThemeElement = document.querySelector('#terminal-theme');
-const terminalFontSizeElement = document.querySelector('#terminal-font-size');
+const settingsAppearanceElement = document.querySelector('#settings-appearance');
 const keyProfileSessionSelect = document.querySelector(
   '#key-profile-session-select'
 );
-const settingsReconnectButton = document.querySelector('#settings-reconnect');
 const shortcutEditorList = document.querySelector('#shortcut-editor-list');
 const shortcutAddSelect = document.querySelector('#shortcut-add-select');
 const shortcutAddButton = document.querySelector('#shortcut-add');
@@ -424,10 +421,9 @@ const starterKeyProfileTemplates = [
   { id: 'profile-grok0000', name: 'Grok', shortcutIds: [...defaultShortcutIds] }
 ];
 // Display labels for the settings picker (order is picker order).
-// The picker's contents. populateThemeSelect() calls replaceChildren(), so the
-// <option> elements in index.html are discarded before they are ever seen — this map
-// is the only thing that decides what a user can pick. Adding a theme without adding
-// it here leaves it unreachable, which is exactly what happened once.
+// Names for the theme grid, and the list of what can be picked at all: the grid
+// walks this map, not terminalThemes. Adding a theme without adding it here
+// leaves it unreachable, which is exactly what happened once.
 const terminalThemeLabels = {
   matrix: 'Matrix',
   groknight: 'Grok Night',
@@ -2184,10 +2180,11 @@ function renderFooterDrawer() {
  * this covers the keyboard, which you were not using anyway.
  */
 
+const keyPanelTabs = ['keys', 'snippets', 'paste', 'appearance'];
 // Non-zero once a keyboard has actually been seen this session.
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
-let keyPanelTab = 'snippets';
+let keyPanelTab = 'keys';
 
 /** Portrait touch, in Term. Everywhere else the settings dialog does this job. */
 function keyPanelIsAvailable() {
@@ -2252,19 +2249,17 @@ function keyPanelHeight() {
 function loadKeyPanelTab() {
   try {
     const stored = window.localStorage.getItem(keyPanelTabStorageKey);
-    if (stored === 'snippets' || stored === 'paste' || stored === 'appearance') {
+    if (keyPanelTabs.includes(stored)) {
       return stored;
     }
   } catch {
     // Default below.
   }
-  return 'snippets';
+  return 'keys';
 }
 
 function setKeyPanelTab(tab) {
-  keyPanelTab = ['snippets', 'paste', 'appearance'].includes(tab)
-    ? tab
-    : 'snippets';
+  keyPanelTab = keyPanelTabs.includes(tab) ? tab : 'keys';
   try {
     window.localStorage.setItem(keyPanelTabStorageKey, keyPanelTab);
   } catch {
@@ -2342,16 +2337,15 @@ function renderKeyPanel() {
   if (!keyPanelElement || keyPanelElement.hidden) {
     return;
   }
-  if (keyPanelProfileButton) {
-    keyPanelProfileButton.textContent = activeKeyProfile().name;
-  }
   const page = keyPanelBodyElement?.querySelector(
     `.key-panel-page[data-panel-page="${keyPanelTab}"]`
   );
   if (!page) {
     return;
   }
-  if (keyPanelTab === 'snippets') {
+  if (keyPanelTab === 'keys') {
+    renderKeyPanelKeys(page);
+  } else if (keyPanelTab === 'snippets') {
     renderKeyPanelSnippets(page);
   } else if (keyPanelTab === 'paste') {
     renderKeyPanelPaste(page);
@@ -2376,6 +2370,77 @@ function renderKeyPanelPlaceholder(page, text) {
  * short, and a text input in here would summon the keyboard over the panel that
  * is standing in the keyboard's place.
  */
+/**
+ * Which profile the key bar is carrying, and the way to change it.
+ *
+ * The bar itself stays where it is — this picks what it holds. It is the Menu
+ * sheet's profile list, which was the one thing in that sheet with nowhere else
+ * to go on a phone.
+ */
+function renderKeyPanelKeys(page) {
+  const assigned = activeSession
+    ? loadSessionKeyProfileAssignments()[activeSession] || ''
+    : '';
+  const list = document.createElement('div');
+  list.className = 'key-panel-list';
+
+  const options = [
+    { id: '', label: `Use default — ${defaultKeyProfile().name}` },
+    ...loadKeyProfilesDocument().profiles.map((entry) => ({
+      id: entry.id,
+      name: entry.name,
+      label: entry.name,
+      keys: entry.shortcutIds.length
+    }))
+  ];
+  for (const option of options) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'key-panel-item';
+    item.dataset.profileId = option.id;
+    const chosen = option.id === assigned;
+    item.setAttribute('aria-pressed', String(chosen));
+    if (chosen) {
+      item.classList.add('active');
+    }
+
+    const label = document.createElement('span');
+    label.className = 'key-panel-item-label';
+    label.textContent = option.label;
+
+    const detail = document.createElement('span');
+    detail.className = 'key-panel-item-detail';
+    detail.textContent = option.id
+      ? `${option.keys} keys`
+      : `${defaultKeyProfile().shortcutIds.length} keys, follows the default`;
+
+    const mode = document.createElement('span');
+    mode.className = 'key-panel-item-mode';
+    // Only the chosen row, never two. Marking every row that resolves to the
+    // active profile put "In use" on both "Use default" and the profile it
+    // falls through to, which reads as two answers to one question.
+    mode.textContent = chosen ? 'In use' : '';
+
+    item.append(label, detail, mode);
+    item.addEventListener('click', () => {
+      assignActiveSessionKeyProfile(option.id);
+      renderKeyPanel();
+    });
+    list.append(item);
+  }
+
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'key-panel-action';
+  edit.textContent = 'Edit keys and profiles';
+  edit.addEventListener('click', () => {
+    setKeyPanelOpen(false);
+    openSettingsDialog();
+    setSettingsTab('profiles');
+  });
+  page.replaceChildren(list, edit);
+}
+
 function renderKeyPanelSnippets(page) {
   if (snippetsList.length === 0) {
     renderKeyPanelPlaceholder(page, 'No snippets yet — add them in Settings.');
@@ -2846,8 +2911,9 @@ function setSettingsTab(tabId) {
   // that tab the sheet drops to a bottom strip and stops blurring what is behind
   // it. Keyed off the sheet so the ::backdrop can be restyled too.
   settingsDialogElement?.classList.toggle('theme-preview', active === 'theme');
-  if (active === 'theme') {
-    renderFontSizeSelect();
+  if (active === 'theme' && settingsAppearanceElement) {
+    // The same renderer the panel uses, so there is one appearance UI.
+    renderKeyPanelAppearance(settingsAppearanceElement);
   }
   if (active === 'profiles') {
     renderKeyProfileControls();
@@ -2891,8 +2957,9 @@ function updateAppHelpPanel() {
   }
   help.textContent = [
     `${appDisplayName}.`,
-    'The key bar carries every key in the active profile; Edit is at the end of it.',
-    'Menu holds Find, rename, reconnect, and session profile.',
+    'The key bar carries every key in the active profile; Search and Edit are at the end of it.',
+    'The gear opens the panel — snippets, paste and appearance — where the keyboard would be.',
+    'Swipe the terminal sideways to change session; tap the connection dot to reconnect a dropped one.',
     'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
   ].join(' ');
 }
@@ -3287,25 +3354,6 @@ function renderSessionProfileSelect() {
     keyProfileSessionSelect.append(element);
   }
   keyProfileSessionSelect.value = assigned;
-}
-
-/** Font size as a list, since the dialog has no room for a stepper. */
-function renderFontSizeSelect() {
-  if (!terminalFontSizeElement) {
-    return;
-  }
-  terminalFontSizeElement.replaceChildren();
-  for (
-    let size = minimumTerminalFontSize;
-    size <= maximumTerminalFontSize;
-    size += 1
-  ) {
-    const option = document.createElement('option');
-    option.value = String(size);
-    option.textContent = `${size}px`;
-    terminalFontSizeElement.append(option);
-  }
-  terminalFontSizeElement.value = String(Math.round(terminalFontSize));
 }
 
 function renderKeyProfileControls() {
@@ -6302,20 +6350,6 @@ function renameSessionTheme(fromName, toName) {
   saveSessionThemes(map);
 }
 
-function populateThemeSelect() {
-  if (!terminalThemeElement) {
-    return;
-  }
-  terminalThemeElement.replaceChildren();
-  for (const [id, label] of Object.entries(terminalThemeLabels)) {
-    const option = document.createElement('option');
-    option.value = id;
-    option.textContent = label;
-    terminalThemeElement.append(option);
-  }
-  terminalThemeElement.value = terminalThemeName;
-}
-
 const terminalThemeAccentKeys = {
   matrix: 'cursor',
   groknight: 'magenta',
@@ -6535,9 +6569,6 @@ function applyTerminalTheme(name, options = {}) {
     return;
   }
   terminalThemeName = resolved;
-  if (terminalThemeElement) {
-    terminalThemeElement.value = resolved;
-  }
   if (terminal) {
     terminal.options.theme = terminalThemes[resolved];
     terminal.options.minimumContrastRatio =
@@ -13348,11 +13379,6 @@ keyPanelCustomizeButton?.addEventListener('click', () => {
   setKeyPanelOpen(false);
   openSettingsDialog();
 });
-keyPanelProfileButton?.addEventListener('click', () => {
-  setKeyPanelOpen(false);
-  openSettingsDialog();
-  setSettingsTab('profiles');
-});
 installDialogBackdropDismiss(settingsDialogElement, () => {
   settingsDialogElement.close();
 });
@@ -13455,7 +13481,6 @@ preferencesSyncRetryButton?.addEventListener('click', () => {
     void loadPreferencesFromServer();
   }
 });
-populateThemeSelect();
 applyTerminalTheme(terminalThemeName, { persist: false });
 resetPreferencesIfSchemaChanged();
 loadKeyProfilesDocument();
@@ -13478,24 +13503,6 @@ keyProfileSessionSelect?.addEventListener('change', () => {
   // The Menu sheet's own handler, reused: it also resets the editor target and
   // the armed modifier, and redraws the session list's profile badges.
   assignActiveSessionKeyProfile(keyProfileSessionSelect.value);
-});
-settingsReconnectButton?.addEventListener('click', () => {
-  settingsDialogElement?.close();
-  forceReconnectActiveSession();
-});
-terminalFontSizeElement?.addEventListener('change', () => {
-  const next = Number(terminalFontSizeElement.value);
-  if (!Number.isFinite(next) || !terminal) {
-    return;
-  }
-  terminalFontSize = next;
-  terminal.options.fontSize = next;
-  rememberFontSize();
-  scheduleFontResize();
-  renderKeyPanel();
-});
-terminalThemeElement.addEventListener('change', () => {
-  applyTerminalTheme(terminalThemeElement.value, { persist: true });
 });
 installAppButton.addEventListener('click', installWebApp);
 window.addEventListener('beforeinstallprompt', (event) => {

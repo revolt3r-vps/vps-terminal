@@ -2174,10 +2174,11 @@ body:has(#files-options-dialog[open]) footer {
 }
 
 .settings-tabs {
-  display: grid;
-  /* Five tabs since Debug was added. minmax(0, 1fr) lets the labels shrink
-     rather than wrapping Debug onto a second row of its own. */
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  display: flex;
+  /* Content-sized, not equal fifths. Five equal columns gave every tab 59px on a
+     390px sheet, which "Appearance" overflows by 9px — it clipped into "App".
+     Sized to their labels the five need 291px of the 322 available, and the
+     leftover is shared out. */
   gap: var(--control-gap);
   margin-bottom: 12px;
   padding: 3px;
@@ -2187,11 +2188,18 @@ body:has(#files-options-dialog[open]) footer {
 }
 
 .settings-tab {
-  min-width: 0;
+  flex: 1 1 auto;
+  /* A floor, not zero: sizing purely to content shrank "App" to a 26px-wide tap
+     target. With this, short labels stay tappable and long ones still take what
+     they need — the five need 295px of the 322 available. */
+  min-width: var(--control-size);
   min-height: var(--control-size);
-  /* Tighter than the 6px it was: five columns on a 320px sheet leave about 56px
-     each, and "Profiles" needs most of that. */
   padding: 0 3px;
+  /* A backstop, so a label longer than its share degrades to an ellipsis instead
+     of spilling over the tab beside it. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   border: 0;
   border-radius: 7px;
   background: transparent;
@@ -2904,36 +2912,16 @@ body.files-view #key-panel {
   display: none !important;
 }
 
-/* The active profile, readable from every tab. */
-#key-panel-top {
-  display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: var(--control-gap);
-  padding: 6px calc(8px + var(--safe-left)) 6px calc(8px + var(--safe-right));
-}
-
-#key-panel-profile {
-  min-width: 0;
-  /* 38px, matching the tab bar. It is a real tap target — it switches profile —
-   * so it does not get to be smaller than the things around it. */
-  min-height: 38px;
-  padding: 0 12px;
-  border-color: var(--accent);
-  border-radius: 999px;
-  background: var(--accent-surface);
-  color: var(--accent-text);
-  font-size: var(--control-font-label);
-  font-weight: 700;
-}
-
+/* No header row. The panel opens straight onto its content: which profile is
+ * active belongs in the header and the dialog, not repeated on a surface whose
+ * whole point is the space it saves. */
 #key-panel-body {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
-  padding: 0 calc(8px + var(--safe-left)) 8px calc(8px + var(--safe-right));
+  padding: 8px calc(8px + var(--safe-left)) 8px calc(8px + var(--safe-right));
 }
 
 .key-panel-page[hidden] {
@@ -3012,6 +3000,16 @@ body.files-view #key-panel {
   background: var(--surface-raised);
   box-shadow: none;
   text-align: left;
+}
+
+/* The row the bar is currently carrying. */
+.key-panel-item.active {
+  border-color: var(--accent);
+  background: var(--accent-surface);
+}
+
+.key-panel-item.active .key-panel-item-label {
+  color: var(--accent-text);
 }
 
 .key-panel-item-label {
