@@ -979,6 +979,9 @@ let lastSelectionApplyLogAt = 0;
 let lastTouchClientX = 0;
 let lastTouchClientY = 0;
 let deferredInstallPrompt = null;
+// Row 2 held open without the keyboard, by holding the keyboard button. The
+// keyboard raises row 2 on its own; this is for reaching the keys without it.
+let footerRowTwoHeldOpen = false;
 // Which modifier row 2 is showing. Null means it shows the profile's keys, which
 // is its resting state — row 2 is a surface, not a drawer that opens.
 let footerChordModifier = null;
@@ -2649,7 +2652,7 @@ function toggleFooterPin(kind, id) {
  * needs it, in which case it is worth the reflow for the moment it is up.
  */
 function footerRowTwoShouldShow() {
-  if (footerChordModifier) {
+  if (footerChordModifier || footerRowTwoHeldOpen) {
     return true;
   }
   // Portrait only. The analysis measured 85.5% of portrait height going to the
@@ -2682,6 +2685,23 @@ function updateFooterRowTwo() {
   if (wasHidden !== footerDrawerElement.hidden) {
     scheduleLayoutDebug('drawer');
   }
+}
+
+/**
+ * Hold the keyboard button to see every key without raising the keyboard.
+ *
+ * Row 2 is otherwise tied to the soft keyboard, which leaves the full list out of
+ * reach when the keyboard is down — row 1 only carries ten chips. This is the way
+ * back to it, and it stays until it is held again.
+ */
+function toggleFooterRowTwoHeld() {
+  footerRowTwoHeldOpen = !footerRowTwoHeldOpen;
+  if (!footerRowTwoHeldOpen) {
+    footerChordModifier = null;
+    setArmedModifier(null);
+  }
+  updateFooterRowTwo();
+  setStatus(footerRowTwoHeldOpen ? 'Keys shown' : 'Keys hidden');
 }
 
 function closeFooterDrawer() {
@@ -4974,7 +4994,7 @@ function setKeyboardButtonState(visible) {
   keyboardButton.classList.toggle('active', visible);
   keyboardButton.setAttribute('aria-pressed', String(visible));
   const keyboardLabel = visible ? 'Hide keyboard' : 'Show keyboard';
-  keyboardButton.title = keyboardLabel;
+  keyboardButton.title = `${keyboardLabel} — hold to show keys`;
   keyboardButton.setAttribute('aria-label', keyboardLabel);
 }
 
@@ -13375,7 +13395,10 @@ for (const activity of ['pointerdown', 'keydown', 'focusin', 'scroll']) {
 document
   .querySelector('#collapse-header')
   .addEventListener('click', () => setHeaderCollapsed(true));
-keyboardButton.addEventListener('click', toggleKeyboard);
+installChipLongPress(keyboardButton, {
+  onTap: toggleKeyboard,
+  onHold: toggleFooterRowTwoHeld
+});
 // Start clipboard read on the earliest gesture (text + image in one call).
 pasteButton.addEventListener(
   'pointerdown',
