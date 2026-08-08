@@ -50,7 +50,6 @@ const filesOptionsDialog = document.querySelector('#files-options-dialog');
 const filesOptionsClose = document.querySelector('#files-options-close');
 const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
 const filesOptionHidden = document.querySelector('#files-option-hidden');
-const filesOptionTerminal = document.querySelector('#files-option-terminal');
 const filesOptionSettings = document.querySelector('#files-option-settings');
 const filesStartSessionButtons = document.querySelectorAll(
   '[data-files-start-session]'
@@ -90,7 +89,6 @@ const quickMenuProfileValue = document.querySelector(
 );
 const quickMenuProfileHint = document.querySelector('#quick-menu-profile-hint');
 const quickMenuProfileList = document.querySelector('#quick-menu-profile-list');
-const quickMenuViewButton = document.querySelector('#quick-menu-view');
 const quickMenuFindButton = document.querySelector('#quick-menu-find');
 const quickMenuReconnectButton = document.querySelector(
   '#quick-menu-reconnect'
@@ -105,6 +103,7 @@ const keyboardButton = document.querySelector('#keyboard');
 const pasteButton = document.querySelector('#paste');
 const pasteHistoryElement = document.querySelector('#paste-history');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
+const viewSwipeLabelElement = document.querySelector('#swipe-session-name');
 const terminalLinkChip = document.querySelector('#terminal-link-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
 const pickerScrimElement = document.querySelector('#picker-scrim');
@@ -263,7 +262,10 @@ const viewSwipeActivationDistance = 22;
 // view, which is the failure mode that makes swipe navigation feel broken.
 const viewSwipeDominanceRatio = 1.8;
 // Fraction of viewport width that commits the switch on release.
-const viewSwipeCommitFraction = 0.22;
+// 0.35, not the 0.22 a free view switch used. Committing now tears down a socket
+// and redraws a whole terminal, so an accidental flick costing that is worse than
+// a deliberate swipe having to travel further.
+const viewSwipeCommitFraction = 0.35;
 const viewSwipeMinimumCommitDistance = 56;
 // iOS Safari claims edge drags for back/forward when not installed as a web app,
 // so a swipe starting in this band would fight the browser and lose.
@@ -316,29 +318,7 @@ const builtinShortcutCatalog = {
   ctrl: { label: 'Ctrl', kind: 'modifier', modifier: 'ctrl' },
   shift: { label: 'Shift', kind: 'modifier', modifier: 'shift' },
   alt: { label: 'Alt', kind: 'modifier', modifier: 'alt' },
-  'ctrl-a': { label: 'Ctrl+A', kind: 'sequence', sequence: '\u0001' },
-  'ctrl-b': { label: 'Ctrl+B', kind: 'sequence', sequence: '\u0002' },
-  'ctrl-c': { label: 'Ctrl+C', kind: 'sequence', sequence: '\u0003' },
-  'ctrl-d': { label: 'Ctrl+D', kind: 'sequence', sequence: '\u0004' },
-  'ctrl-e': { label: 'Ctrl+E', kind: 'sequence', sequence: '\u0005' },
-  'ctrl-f': { label: 'Ctrl+F', kind: 'sequence', sequence: '\u0006' },
-  'ctrl-g': { label: 'Ctrl+G', kind: 'sequence', sequence: '\u0007' },
-  'ctrl-h': { label: 'Ctrl+H', kind: 'sequence', sequence: '\u0008' },
-  'ctrl-k': { label: 'Ctrl+K', kind: 'sequence', sequence: '\u000b' },
-  'ctrl-l': { label: 'Ctrl+L', kind: 'sequence', sequence: '\u000c' },
-  'ctrl-n': { label: 'Ctrl+N', kind: 'sequence', sequence: '\u000e' },
-  'ctrl-o': { label: 'Ctrl+O', kind: 'sequence', sequence: '\u000f' },
-  'ctrl-p': { label: 'Ctrl+P', kind: 'sequence', sequence: '\u0010' },
-  'ctrl-r': { label: 'Ctrl+R', kind: 'sequence', sequence: '\u0012' },
-  'ctrl-t': { label: 'Ctrl+T', kind: 'sequence', sequence: '\u0014' },
-  'ctrl-u': { label: 'Ctrl+U', kind: 'sequence', sequence: '\u0015' },
-  'ctrl-v': { label: 'Ctrl+V', kind: 'sequence', sequence: '\u0016' },
-  'ctrl-w': { label: 'Ctrl+W', kind: 'sequence', sequence: '\u0017' },
-  'ctrl-x': { label: 'Ctrl+X', kind: 'sequence', sequence: '\u0018' },
-  'ctrl-y': { label: 'Ctrl+Y', kind: 'sequence', sequence: '\u0019' },
-  'ctrl-z': { label: 'Ctrl+Z', kind: 'sequence', sequence: '\u001a' },
   tab: { label: 'Tab', kind: 'sequence', sequence: '\t' },
-  'shift-tab': { label: 'S-Tab', kind: 'sequence', sequence: '\u001b[Z' },
   left: { label: '←', kind: 'sequence', sequence: '\u001b[D' },
   up: { label: '↑', kind: 'sequence', sequence: '\u001b[A' },
   down: { label: '↓', kind: 'sequence', sequence: '\u001b[B' },
@@ -364,17 +344,14 @@ const builtinShortcutCatalog = {
   f9: { label: 'F9', kind: 'sequence', sequence: '\u001b[20~' },
   f10: { label: 'F10', kind: 'sequence', sequence: '\u001b[21~' },
   f11: { label: 'F11', kind: 'sequence', sequence: '\u001b[23~' },
-  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' },
-  // Only reachable through the contextual vim chip set, and deliberately absent
-  // from builtinShortcutGroups: the picker offers keys, not editor commands.
-  'vim-write': { label: ':w', kind: 'sequence', sequence: ':w\r' }
+  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' }
 };
 // Grouped for the Settings → Keys add picker (order within groups is picker order).
-// Single keys and modifiers only. Every combination — ctrl-a…ctrl-z, shift-tab —
-// is reachable by holding its modifier and tapping the key, so a chip for it would
-// be a second spelling of something already on the bar. The definitions stay in
-// builtinShortcutCatalog so older profiles keep loading, and the Custom key editor
-// (type Ctrl, letter c) puts any of them back for anyone who wants the one tap.
+// The catalog above holds single keys and modifiers only. A combination is made by
+// holding its modifier and tapping the key, so a chip for one would be a second
+// spelling of something the bar already does. Profiles that still name a removed id
+// drop it in sanitizeShortcutIdsForProfile, and the Custom key editor (type Ctrl,
+// letter c) rebuilds any of them for anyone who wants the one tap back.
 const builtinShortcutGroups = [
   {
     label: 'Shell',
@@ -1253,13 +1230,6 @@ function updateTermControlsEnabled() {
     button.title = name;
     button.setAttribute('aria-label', name);
   };
-  if (quickMenuViewButton) {
-    // Names the destination, not the current view: 'Browse files' while the
-    // terminal is up, and back again from Files.
-    quickMenuViewButton.textContent =
-      viewMode === 'files' ? 'Show terminal' : 'Browse files';
-  }
-  describeMenuAction(quickMenuViewButton, true);
   describeMenuAction(
     quickMenuFindButton,
     live,
@@ -9631,20 +9601,28 @@ function startNativeTouchGesture(touch) {
 // Written free of DOM and browser globals so it can be sliced out of the shipped
 // source for tests, like the keyboard transition and footer rail blocks.
 
-/** Left to right. A swipe left advances, a swipe right retreats. */
-const viewSwipeOrder = ['term', 'files'];
-
 /**
- * Which view a horizontal swipe of `dx` from `mode` would land on, or null when
+ * Which session a horizontal swipe of `dx` from `current` lands on, or null when
  * there is nothing that way. Null is what produces the rubber-band: the drag is
  * still tracked, it just cannot commit.
+ *
+ * `order` is the session list as the picker shows it, so the swipe and the list
+ * agree on what "next" means. The deck is N sessions rather than a pair, and it
+ * stops at both ends rather than wrapping — wrapping would make the last session
+ * adjacent to the first, which is not how the list reads.
+ *
+ * The viewSwipe* names are historical: this gesture used to switch between the
+ * terminal and Files. The mechanics below — activation distance, dominance ratio,
+ * edge guard, damping — are unchanged; only what it lands on moved.
  */
-function viewSwipeTarget(mode, dx) {
-  const index = viewSwipeOrder.indexOf(mode);
+function viewSwipeTarget(order, current, dx) {
+  const index = order.indexOf(current);
   if (index < 0 || dx === 0) {
     return null;
   }
-  return viewSwipeOrder[index + (dx < 0 ? 1 : -1)] ?? null;
+  const target = order[index + (dx < 0 ? 1 : -1)] ?? null;
+  // Landing on the session already connected must be a no-op, not a reconnect.
+  return target === current ? null : target;
 }
 
 /**
@@ -9715,6 +9693,31 @@ function viewSwipeShouldCommit(dx, viewportWidth, hasTarget) {
 }
 // ---- End of the pure view swipe block. ----
 
+/** The deck, in the order renderSessions() lays the picker out. */
+function viewSwipeSessionOrder() {
+  return sessions.map((session) => session.name);
+}
+
+/**
+ * Name the session the drag is heading for.
+ *
+ * One terminal looks like another, so without this a swipe is a leap: you let go
+ * and find out. The pill follows the drag and clears the moment there is no
+ * target, which is also how the ends of the deck announce themselves.
+ */
+function showViewSwipeTarget(name) {
+  if (!viewSwipeLabelElement) {
+    return;
+  }
+  if (!name) {
+    viewSwipeLabelElement.hidden = true;
+    viewSwipeLabelElement.textContent = '';
+    return;
+  }
+  viewSwipeLabelElement.textContent = name;
+  viewSwipeLabelElement.hidden = false;
+}
+
 // Non-null only while a horizontal swipe owns the gesture.
 let viewSwipe = null;
 let viewSwipeSettleTimer = null;
@@ -9761,13 +9764,19 @@ function settleViewSwipe(main) {
   );
 }
 
-function beginViewSwipe(fromMode) {
+function beginViewSwipe(fromSession) {
   const main = mainViewElement();
-  if (!main) {
+  // No session, or the only one, means nothing to swipe to. Starting the gesture
+  // anyway would rubber-band against an empty deck for no reason.
+  //
+  // Term only. The deck is sessions now, and switching the session you cannot see
+  // from a file listing is a change with no feedback; Files has the Term|Files
+  // control for getting back and its own horizontal scrollers to protect.
+  if (!main || !fromSession || viewMode !== 'term' || sessions.length < 2) {
     return;
   }
   viewSwipeSettleCleanup?.();
-  viewSwipe = { from: fromMode, dx: 0, committed: false };
+  viewSwipe = { from: fromSession, dx: 0, committed: false };
   main.style.transition = 'none';
   document.body.classList.add('view-swiping');
 }
@@ -9778,7 +9787,8 @@ function updateViewSwipe(dx) {
     return;
   }
   viewSwipe.dx = dx;
-  const target = viewSwipeTarget(viewSwipe.from, dx);
+  const target = viewSwipeTarget(viewSwipeSessionOrder(), viewSwipe.from, dx);
+  showViewSwipeTarget(target);
   main.style.transform = `translateX(${viewSwipeOffset(dx, Boolean(target))}px)`;
 }
 
@@ -9789,9 +9799,10 @@ function finishViewSwipe() {
     return false;
   }
   const { dx, from } = viewSwipe;
-  const target = viewSwipeTarget(from, dx);
+  const target = viewSwipeTarget(viewSwipeSessionOrder(), from, dx);
   const commit = viewSwipeShouldCommit(dx, window.innerWidth, Boolean(target));
   viewSwipe = null;
+  showViewSwipeTarget(null);
   // The compositor layer has to outlive the drag, or it is torn down and rebuilt
   // in the middle of the slide. view-settling carries will-change until the end.
   document.body.classList.remove('view-swiping');
@@ -9803,10 +9814,11 @@ function finishViewSwipe() {
     settleViewSwipe(main);
     return false;
   }
-  // Switch first, then slide the new view in from the side the finger came from.
-  // Sliding the old one out first would double the time before anything is
-  // readable, and paging should feel immediate.
-  setViewMode(target);
+  // Switch first, then slide the new session in from the side the finger came
+  // from. Sliding the old one out first would double the time before anything is
+  // readable, and paging should feel immediate. connect() is async and repaints
+  // when the socket is up; the slide is not waiting on it.
+  void connect(target);
   main.style.transition = 'none';
   main.style.transform = `translateX(${dx < 0 ? '100%' : '-100%'})`;
   // Force the start offset to be applied before the transition to 0.
@@ -9919,7 +9931,7 @@ function installViewSwipeGestures() {
         })
       ) {
         event.preventDefault();
-        beginViewSwipe(viewMode);
+        beginViewSwipe(activeSession);
         updateViewSwipe(dx);
       }
     },
@@ -10046,7 +10058,7 @@ function handleTerminalTouchMove(event) {
   ) {
     touchMoved = true;
     clearNativeSelectionLongPressTimer();
-    beginViewSwipe(viewMode);
+    beginViewSwipe(activeSession);
     updateViewSwipe(dx);
     return true;
   }
@@ -10432,7 +10444,7 @@ function installTouchScrolling() {
           })
         ) {
           touchMoved = true;
-          beginViewSwipe(viewMode);
+          beginViewSwipe(activeSession);
           updateViewSwipe(swipeDx);
           return;
         }
@@ -12608,10 +12620,6 @@ filesPreviewPaneClose?.addEventListener('click', () => {
 filesOptionsClose?.addEventListener('click', () => {
   closeFilesOptions();
 });
-filesOptionTerminal?.addEventListener('click', () => {
-  closeFilesOptions();
-  setViewMode('term');
-});
 filesOptionNewFolder?.addEventListener('click', () => {
   openFilesNameDialog('create');
 });
@@ -12887,11 +12895,6 @@ commandPaletteDialog?.addEventListener('close', () => {
   } catch {
     // A control that vanished while the palette was open is not worth failing on.
   }
-});
-quickMenuViewButton?.addEventListener('click', () => {
-  const next = viewMode === 'files' ? 'term' : 'files';
-  closeQuickMenu();
-  setViewMode(next);
 });
 quickMenuFindButton?.addEventListener('click', () => {
   closeQuickMenu();

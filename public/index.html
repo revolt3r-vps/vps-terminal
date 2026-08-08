@@ -91,6 +91,9 @@
              location select move in here, because the Files header row is
              otherwise blank while the toolbar below it is crowded. -->
         <div id="files-header-nav" hidden></div>
+        <!-- Two segments, not a toggle: the active view is readable without
+             working out what the icon would do next. Text, because "Term" and
+             "Files" are shorter to read than either icon is to decode. -->
         <div id="view-mode" role="tablist" aria-label="Main view">
           <button
             type="button"
@@ -98,28 +101,16 @@
             data-view-mode="term"
             role="tab"
             aria-selected="true"
-            title="Terminal"
             aria-label="Terminal"
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <rect x="2.5" y="3.5" width="15" height="13" rx="2" />
-              <path d="m5.5 7 2.5 2.5L5.5 12M10 12h4" />
-            </svg>
-          </button>
+          >Term</button>
           <button
             type="button"
             class="view-mode-btn"
             data-view-mode="files"
             role="tab"
             aria-selected="false"
-            title="Files"
             aria-label="Files"
-          >
-            <svg viewBox="0 0 20 20" aria-hidden="true">
-              <path d="M2.5 6.5h15v8a2 2 0 0 1-2 2h-11a2 2 0 0 1-2-2z" />
-              <path d="M2.5 7V5.5a2 2 0 0 1 2-2h3l1.5 2h6.5a2 2 0 0 1 2 2" />
-            </svg>
-          </button>
+          >Files</button>
         </div>
         <button
           id="header-settings"
@@ -302,10 +293,6 @@
           <button id="files-options-close" class="icon-button" type="button" title="Close">×</button>
         </div>
         <div class="files-actions-buttons">
-          <!-- The way back that does not need a gesture. Files cannot reach the
-               Menu sheet, which is where the Term side keeps its half of this
-               toggle, so the pair has to be one control in each view. -->
-          <button id="files-option-terminal" type="button">Show terminal</button>
           <button id="files-option-new-folder" type="button">New folder</button>
           <label class="files-checkbox-control">
             <input id="files-option-hidden" type="checkbox">
@@ -381,17 +368,6 @@
       <div id="picker-scrim" hidden aria-hidden="true"></div>
       <div id="scroll-position" hidden aria-hidden="true" title="Scroll position"></div>
       <div id="scroll-thumb" aria-hidden="true"></div>
-      <!-- Touch has no Ctrl/Cmd, so a tap on a link offers this instead. A real
-           button, so a one-cell-wide link stays reachable at a proper touch size:
-           the chip is the target, not the glyphs. -->
-      <button
-        id="terminal-link-chip"
-        type="button"
-        aria-label="Open link"
-        hidden
-      ></button>
-      <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
-      <button id="selection-copy-chip" type="button" hidden>Copy</button>
       <div id="find-bar" hidden>
         <input
           id="find-input"
@@ -409,6 +385,29 @@
         <button id="find-close" type="button" title="Close find">×</button>
       </div>
     </main>
+
+    <!-- Both are position:fixed and both sit OUTSIDE <main> on purpose. The swipe
+         sets `transform` on `main`, and a transformed element is a containing
+         block for its fixed descendants — inside main these would position
+         against the sliding view and travel with it instead of holding still.
+         #find-bar and #scroll-catcher stay inside main because they are absolute
+         and are meant to move with the view. -->
+
+    <!-- Touch has no Ctrl/Cmd, so a tap on a link offers this instead. A real
+         button, so a one-cell-wide link stays reachable at a proper touch size:
+         the chip is the target, not the glyphs. -->
+    <button
+      id="terminal-link-chip"
+      type="button"
+      aria-label="Open link"
+      hidden
+    ></button>
+    <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
+    <button id="selection-copy-chip" type="button" hidden>Copy</button>
+    <!-- Names the session a horizontal swipe is heading for, because one terminal
+         looks like another. Fixed and outside <main> for the same reason as the
+         chips above: it must hold still while the view slides under it. -->
+    <div id="swipe-session-name" hidden aria-hidden="true"></div>
 
     <div id="status" role="status" aria-live="polite"></div>
 
@@ -696,10 +695,6 @@
         ></div>
       </section>
       <div class="quick-menu-actions">
-        <!-- The Term|Files switch left the header once the view swipe replaced it.
-             On touch the swipe is the primary path; this is the one that does not
-             depend on a gesture landing, and the only one a screen reader has. -->
-        <button id="quick-menu-view" type="button">Browse files</button>
         <button id="quick-menu-find" type="button">Find in scrollback</button>
         <button id="quick-menu-reconnect" type="button">Reconnect session</button>
         <button id="quick-menu-settings" type="button">Terminal settings</button>

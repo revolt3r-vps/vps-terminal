@@ -65,6 +65,10 @@
      geometry — the width a row of single glyphs should be. Height is not here:
      keys keep the 44px --control-size so the vertical target never shrinks. */
   --key-width: 32px;
+  /* Shorter than --control-size on purpose. A key is not a control: Paste, the
+     keyboard and Menu stay 44px and stay the tallest things on the bar, so the
+     keys read as a strip of keycaps between them rather than more buttons. */
+  --key-height: 38px;
   --key-gap: 4px;
   --key-radius: 6px;
   /* Top chrome — denser so the terminal keeps vertical space. */
@@ -182,10 +186,6 @@ header:not(.collapsed) {
 }
 
 /* Session picker expanded: full width for sessions — hide Term|Files. */
-header:not(.collapsed) #view-mode {
-  display: none;
-}
-
 header.collapsed {
   align-items: stretch;
   padding: var(--safe-top) 0 0;
@@ -283,16 +283,31 @@ header.collapsed .header-row {
   background: linear-gradient(180deg, var(--surface-raised) 0%, var(--surface) 100%);
 }
 
+/*
+ * Term | Files, top right, in both header states. It is the only tap route
+ * between the views now — the Menu and File-options entries are gone, and the
+ * horizontal swipe moved to sessions — so it cannot be collapsed-only.
+ *
+ * margin-left: auto pins it right whatever else the header row holds. Each
+ * segment is a full --header-control tall and the frame costs no height, so the
+ * control is exactly one control high and the header does not grow.
+ */
 #view-mode {
   display: flex;
   flex: 0 0 auto;
   flex-shrink: 0;
   gap: 1px;
   z-index: 2;
+  margin-left: auto;
   margin-right: 2px;
-  padding: 2px;
-  border: 1px solid var(--control-border);
+  padding: 0;
+  /* The frame is an inset shadow, not a border, so it costs no height. A 1px
+     border either side would push a full --header-control segment past the
+     header row, and the segments have to stay full size to remain real touch
+     targets. */
+  border: 0;
   border-radius: var(--header-radius);
+  box-shadow: inset 0 0 0 1px var(--control-border);
   background: var(--surface-raised);
 }
 
@@ -302,25 +317,16 @@ header.collapsed #view-mode {
 
 .view-mode-btn {
   flex: 0 0 auto;
-  min-width: calc(var(--header-control) - 4px);
-  min-height: calc(var(--header-control) - 4px);
-  padding: 0;
+  min-width: 0;
+  min-height: var(--header-control);
+  padding: 0 9px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--header-radius) - 1px);
   background: transparent;
   color: var(--muted);
+  font-size: var(--header-font);
   font-weight: 700;
   letter-spacing: 0.02em;
-}
-
-.view-mode-btn svg {
-  width: 17px;
-  height: 17px;
-  fill: none;
-  stroke: currentColor;
-  stroke-width: var(--icon-stroke-width);
-  stroke-linecap: round;
-  stroke-linejoin: round;
 }
 
 .view-mode-btn[aria-selected='true'] {
@@ -338,16 +344,16 @@ header.collapsed #view-mode {
   body {
     --header-control: 44px;
     /* The floor: one 44px touch target plus the 1px bottom border. It used to be
-     * 52px to fit the 46px Term|Files switch, which the view swipe replaced. */
+     * 52px to fit a 46px Term|Files switch. The switch is back as two text
+     * segments, but its frame is an inset shadow rather than a border, so the
+     * control is 44px in the 45px row instead of 46px. */
     --header-height: calc(var(--header-control) + 1px);
   }
 
-  #view-mode {
-    padding: 0;
-  }
-
+  /* Full control height, so each segment is a real 44px target. The width comes
+   * from the label rather than a square icon box. */
   .view-mode-btn {
-    min-width: var(--header-control);
+    min-width: 0;
     min-height: var(--header-control);
   }
 
@@ -1994,6 +2000,39 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /* One-tap Copy near the finger after long-press selection (iOS-reliable). */
+/*
+ * The target-session pill during a horizontal swipe.
+ *
+ * Fixed, and just under the header, so it holds still while the view slides
+ * under it and lands where the eye already is for the session name. z-index 35
+ * puts it over the find bar (30) and the view, and under the copy chip (40),
+ * the header (50) and the sheets (80) — it is a hint during a gesture, never
+ * something to interact with, hence pointer-events: none.
+ */
+#swipe-session-name {
+  position: fixed;
+  top: calc(var(--app-top) + var(--header-height) + 10px);
+  left: 50%;
+  z-index: 35;
+  transform: translateX(-50%);
+  max-width: 70vw;
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font-size: var(--control-font-label);
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+
+#swipe-session-name[hidden] {
+  display: none !important;
+}
+
 #selection-copy-chip {
   position: fixed;
   z-index: 40;
@@ -2845,11 +2884,15 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   /* The same trough as #footer-pins, so both scrolling strips read alike.
    * Horizontal padding only: vertical padding here would grow the footer and
    * bring back the reflow that reserving this row exists to avoid. */
+  align-items: center;
   padding: 0 3px;
   border-radius: var(--control-radius);
-  background: var(--surface-deep);
-  box-shadow: inset 0 0 0 1px var(--border);
-  min-height: var(--control-size);
+  /* Translucent black rather than --surface-deep: that token is only 14% toward
+     black from the background, which on most themes is too close to the footer
+     to read as a recess at all. This darkens whatever is behind it. */
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
+  min-height: var(--key-height);
   max-width: 100%;
   overflow-x: auto;
   overflow-y: hidden;
@@ -3061,7 +3104,11 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
  */
 #footer-pins #footer-edit-keys {
   min-width: var(--control-size);
-  min-height: var(--control-size);
+  /* Sits on the key strip, so it takes the key height. Only its width, padding
+     and dashed outline say "action" — matching the height keeps the trough one
+     even band rather than one chip standing proud of the row. */
+  min-height: var(--key-height);
+  height: var(--key-height);
   padding: 0 10px;
   border-color: var(--control-border);
   border-style: dashed;
@@ -3089,13 +3136,28 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #footer-pins button {
   flex: 0 0 auto;
   min-width: var(--key-width);
-  min-height: var(--control-size);
+  min-height: var(--key-height);
+  height: var(--key-height);
   padding: 0 4px;
-  border-color: var(--border);
+  /* Filled caps with no outline, against outlined icon controls either side.
+     That is the difference you actually see: Paste and Menu are drawn as
+     rectangles you look through, keys are solid things you press. */
+  border-color: transparent;
   border-radius: var(--key-radius);
-  box-shadow: none;
+  background: var(--surface-pressed);
+  /* The shadow sits under the cap, not on it, so the strip reads as raised
+     keys in a recess rather than another row of buttons. */
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.45);
   font-size: var(--control-font-label);
   font-weight: 600;
+}
+
+/* Pressing a key drops it into the trough: darker, and the cap edge goes with
+ * the travel that button:active already applies. */
+#footer-drawer button:active,
+#footer-pins button:active {
+  background: var(--surface-raised);
+  box-shadow: none;
 }
 
 /* An id selector outranks button.active, so the accent border has to be restated
@@ -3114,7 +3176,11 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #footer-drawer .chord-lead {
   position: sticky;
   left: 0;
-  z-index: 1;
+  /* 2, not 1. `footer button` already gives every button in here z-index 1, so a
+   * lead at 1 only ties with the keys and loses the tie on DOM order — the keys
+   * come after it. Scrolled keys were painting over the sticky lead and taking
+   * its taps, which is the whole thing it exists to prevent. */
+  z-index: 2;
   border-color: var(--accent);
   background: var(--accent-surface);
   color: var(--accent-text);
@@ -3140,11 +3206,15 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 #footer-pins {
   display: flex;
   flex: 1 1 auto;
+  align-items: center;
   gap: var(--key-gap);
   padding: 0 3px;
   border-radius: var(--control-radius);
-  background: var(--surface-deep);
-  box-shadow: inset 0 0 0 1px var(--border);
+  /* Translucent black rather than --surface-deep: that token is only 14% toward
+     black from the background, which on most themes is too close to the footer
+     to read as a recess at all. This darkens whatever is behind it. */
+  background: rgba(0, 0, 0, 0.3);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.4);
   min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
@@ -3787,10 +3857,10 @@ footer button {
   }
 
   header .view-mode-btn {
-    width: 32px;
-    min-width: 32px;
-    min-height: 32px;
-    padding: 0;
+    width: auto;
+    min-width: 0;
+    min-height: var(--header-control);
+    padding: 0 8px;
   }
 
   header.collapsed #header-summary {
@@ -4191,22 +4261,5 @@ footer button {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
-  }
-}
-
-/*
- * Term|Files switch: gone on touch, where the horizontal view swipe replaces it.
- * Kept for hover + fine pointers, which have no swipe at all — the command
- * palette carries "Show Files" there, but a palette entry is a path, not a
- * discoverable control.
- *
- * Last in the file on purpose: the orientation-specific #view-mode rules above
- * are equally specific, so this has to win on source order.
- */
-@media (pointer: coarse) {
-  header #view-mode,
-  header.collapsed #view-mode,
-  header:not(.collapsed) #view-mode {
-    display: none;
   }
 }
