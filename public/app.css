@@ -2888,21 +2888,23 @@ body:has(#files-options-dialog[open]) footer {
  * as many rows as it had. Giving the strip's height back to the terminal instead
  * would reflow it on every open — the one cost this shape exists to avoid.
  */
-body.key-panel-open footer {
-  height: calc(var(--key-panel-base, 53px) + var(--key-panel-height, 300px));
-}
+@media (orientation: portrait) {
+  body.key-panel-open footer {
+    height: calc(var(--key-panel-base, 53px) + var(--key-panel-height, 300px));
+  }
 
-body.key-panel-open #footer-term {
-  display: none !important;
+  body.key-panel-open #footer-term {
+    display: none !important;
+  }
 }
 
 #key-panel[hidden] {
   display: none !important;
 }
 
-/* Landscape, fine pointers and Files all keep the settings dialog: there is no
- * keyboard area to occupy, and every tab in here is a terminal concept. */
-@media (orientation: landscape), (pointer: fine) {
+/* Fine pointers keep the dialog: there is no keyboard area for a panel to stand
+ * in for, and every tab in here is a terminal concept Files does not have. */
+@media (pointer: fine) {
   #key-panel {
     display: none !important;
   }
@@ -3172,6 +3174,31 @@ body.files-view #key-panel {
 
 .settings-session-row[hidden] {
   display: none !important;
+}
+
+/*
+ * Landscape: the panel cannot live in the footer's flow, because the footer is a
+ * 48px side rail there. It becomes an overlay along the bottom instead.
+ *
+ * z-index 20 puts it over the terminal (#scroll-catcher is 18) and under the
+ * rail (25), so the rail stays on top and usable — the gear still closes the
+ * panel and the keys stay one tap away. The tab bar keeps clear of the rail so
+ * its buttons are not sitting underneath it.
+ */
+@media (orientation: landscape) and (pointer: coarse) {
+  body.key-panel-open #key-panel {
+    position: fixed;
+    /* Exactly the middle column of the landscape grid, so it never sits under
+       either rail: sessions on the left, keys on the right. Insetting beats
+       padding the tab bar, which only fixed the right-hand collision. */
+    left: calc(var(--session-rail-width) + var(--safe-left));
+    right: calc(48px + var(--safe-right));
+    bottom: 0;
+    z-index: 20;
+    height: var(--key-panel-height, 260px);
+    margin: 0;
+    border-top: 1px solid var(--border);
+  }
 }
 
 /* The rail no longer scrolls; the drawer is the one strip that still does. */

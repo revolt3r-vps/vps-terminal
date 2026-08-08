@@ -2186,14 +2186,19 @@ let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
 let keyPanelTab = 'keys';
 
-/** Portrait touch, in Term. Everywhere else the settings dialog does this job. */
+/**
+ * Touch, in Term, either orientation.
+ *
+ * Portrait puts the panel in the footer's flow, standing in for the keyboard.
+ * Landscape has no room to give — the footer is a 48px side rail there — so it
+ * overlays the bottom of the terminal instead. Fine pointers keep the dialog:
+ * there is no keyboard area for a panel to take the place of.
+ */
 function keyPanelIsAvailable() {
   if (!keyPanelElement || viewMode !== 'term') {
     return false;
   }
-  return Boolean(
-    window.matchMedia?.('(orientation: portrait) and (pointer: coarse)').matches
-  );
+  return Boolean(window.matchMedia?.('(pointer: coarse)').matches);
 }
 
 /**
@@ -2244,6 +2249,21 @@ function keyPanelHeight() {
     // Fall through to the guess.
   }
   return Math.round(Math.min(320, (window.innerHeight || 700) * 0.45));
+}
+
+/**
+ * What the panel is allowed to be, whatever the keyboard measured.
+ *
+ * A keyboard measured in portrait is most of a landscape viewport, and a stored
+ * measurement can outlive the device that made it. The panel never takes more
+ * than about two thirds of the screen, so there is always terminal behind it.
+ */
+function clampedKeyPanelHeight() {
+  const viewportHeight = window.innerHeight || 700;
+  return Math.max(
+    160,
+    Math.min(keyPanelHeight(), Math.round(viewportHeight * 0.66))
+  );
 }
 
 function loadKeyPanelTab() {
@@ -2302,7 +2322,7 @@ function setKeyPanelOpen(open) {
     );
     document.documentElement.style.setProperty(
       '--key-panel-height',
-      `${keyPanelHeight()}px`
+      `${clampedKeyPanelHeight()}px`
     );
     keyPanelElement.hidden = false;
     document.body.classList.add('key-panel-open');
