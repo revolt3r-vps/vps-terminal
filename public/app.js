@@ -2842,14 +2842,34 @@ function installReorder(container, options) {
    * also makes it independent of which engine is doing it.
    */
   let slotCentres = [];
+  /** The grid's own box at press time, and how far outside it still counts. */
+  let slotArea = null;
   const items = () => [...container.querySelectorAll(itemSelector)];
 
   /**
    * Nearest slot centre, rather than the slot containing the point: the gaps
    * between tiles are dead space, and a pointer in one would report no slot and
    * stall the reorder.
+   *
+   * Bounded, though, and that part is not optional. Nearest-centre with no bounds
+   * answers for every point on the screen, so a finger in the strip between the
+   * last row and the tab bar still resolved to a tile — and because that strip is
+   * roughly equidistant from a whole row of centres, sliding sideways there flipped
+   * the target between them and churned the order on almost every move.
+   *
+   * Half a tile of slack keeps the edges forgiving: dragging just past the last row
+   * still targets it, which is what a thumb aiming at the end of the list does.
    */
   function slotIndexAt(x, y) {
+    if (
+      slotArea &&
+      (x < slotArea.left ||
+        x > slotArea.right ||
+        y < slotArea.top ||
+        y > slotArea.bottom)
+    ) {
+      return -1;
+    }
     let best = -1;
     let bestDistance = Infinity;
     slotCentres.forEach((centre, index) => {
@@ -2879,13 +2899,32 @@ function installReorder(container, options) {
     startX = event.clientX;
     startY = event.clientY;
     moved = false;
-    slotCentres = items().map((tile) => {
+    const tiles = items();
+    slotCentres = tiles.map((tile) => {
       const bounds = tile.getBoundingClientRect();
       return {
         x: bounds.left + bounds.width / 2,
         y: bounds.top + bounds.height / 2
       };
     });
+    // Bounded by where the tiles actually are, not by the container.
+    //
+    // The grid is `flex: 1 1 auto` and takes the page's spare height, so with 13
+    // tiles it runs about 70px past the last row. That empty tail is inside the
+    // container, and a finger there is nearer to a middle-row centre than to the
+    // short last row — so sweeping across it flipped the target between six tiles
+    // and churned the order, which is what a drag into the strip above the tab bar
+    // looked like.
+    const tileBounds = tiles.map((tile) => tile.getBoundingClientRect());
+    const slack = box.height / 2;
+    slotArea = tileBounds.length
+      ? {
+          left: Math.min(...tileBounds.map((bounds) => bounds.left)) - slack,
+          right: Math.max(...tileBounds.map((bounds) => bounds.right)) + slack,
+          top: Math.min(...tileBounds.map((bounds) => bounds.top)) - slack,
+          bottom: Math.max(...tileBounds.map((bounds) => bounds.bottom)) + slack
+        }
+      : null;
     item.classList.add('dragging');
     item.setPointerCapture(event.pointerId);
   });
@@ -2958,6 +2997,7 @@ function installReorder(container, options) {
     dragging = null;
     dragPointerId = null;
     slotCentres = [];
+    slotArea = null;
     // A press that never moved is not a reorder, and saving one would write the
     // order back for nothing.
     if (moved) {
