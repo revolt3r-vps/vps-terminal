@@ -318,7 +318,41 @@ const builtinShortcutCatalog = {
   f9: { label: 'F9', kind: 'sequence', sequence: '\u001b[20~' },
   f10: { label: 'F10', kind: 'sequence', sequence: '\u001b[21~' },
   f11: { label: 'F11', kind: 'sequence', sequence: '\u001b[23~' },
-  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' }
+  f12: { label: 'F12', kind: 'sequence', sequence: '\u001b[24~' },
+  // Characters rather than keys, and every one of them costs a layout switch
+  // or two on a phone keyboard — the same tax the arrows and Esc are here to
+  // avoid. A pipe or a tilde earns a chip on a surface that exists because the
+  // soft keyboard is bad at shells.
+  'sym-pipe': { label: '|', kind: 'sequence', sequence: '|' },
+  'sym-tilde': { label: '~', kind: 'sequence', sequence: '~' },
+  'sym-backtick': { label: '`', kind: 'sequence', sequence: '`' },
+  'sym-backslash': { label: '\\', kind: 'sequence', sequence: '\\' },
+  'sym-slash': { label: '/', kind: 'sequence', sequence: '/' },
+  'sym-dash': { label: '-', kind: 'sequence', sequence: '-' },
+  'sym-underscore': { label: '_', kind: 'sequence', sequence: '_' },
+  'sym-equals': { label: '=', kind: 'sequence', sequence: '=' },
+  'sym-plus': { label: '+', kind: 'sequence', sequence: '+' },
+  'sym-colon': { label: ':', kind: 'sequence', sequence: ':' },
+  'sym-semicolon': { label: ';', kind: 'sequence', sequence: ';' },
+  'sym-paren-open': { label: '(', kind: 'sequence', sequence: '(' },
+  'sym-paren-close': { label: ')', kind: 'sequence', sequence: ')' },
+  'sym-bracket-open': { label: '[', kind: 'sequence', sequence: '[' },
+  'sym-bracket-close': { label: ']', kind: 'sequence', sequence: ']' },
+  'sym-brace-open': { label: '{', kind: 'sequence', sequence: '{' },
+  'sym-brace-close': { label: '}', kind: 'sequence', sequence: '}' },
+  'sym-less': { label: '<', kind: 'sequence', sequence: '<' },
+  'sym-greater': { label: '>', kind: 'sequence', sequence: '>' },
+  'sym-dollar': { label: '$', kind: 'sequence', sequence: '$' },
+  'sym-hash': { label: '#', kind: 'sequence', sequence: '#' },
+  'sym-percent': { label: '%', kind: 'sequence', sequence: '%' },
+  'sym-caret': { label: '^', kind: 'sequence', sequence: '^' },
+  'sym-ampersand': { label: '&', kind: 'sequence', sequence: '&' },
+  'sym-asterisk': { label: '*', kind: 'sequence', sequence: '*' },
+  'sym-at': { label: '@', kind: 'sequence', sequence: '@' },
+  'sym-bang': { label: '!', kind: 'sequence', sequence: '!' },
+  'sym-question': { label: '?', kind: 'sequence', sequence: '?' },
+  'sym-quote': { label: "'", kind: 'sequence', sequence: "'" },
+  'sym-doublequote': { label: '"', kind: 'sequence', sequence: '"' }
 };
 // Grouped for the Settings → Keys add picker (order within groups is picker order).
 // The catalog above holds single keys and modifiers only. A combination is made by
@@ -365,6 +399,41 @@ const builtinShortcutGroups = [
       'f10',
       'f11',
       'f12'
+    ]
+  },
+  {
+    label: 'Symbols',
+    ids: [
+      'sym-pipe',
+      'sym-tilde',
+      'sym-backtick',
+      'sym-backslash',
+      'sym-slash',
+      'sym-dash',
+      'sym-underscore',
+      'sym-equals',
+      'sym-plus',
+      'sym-colon',
+      'sym-semicolon',
+      'sym-quote',
+      'sym-doublequote',
+      'sym-paren-open',
+      'sym-paren-close',
+      'sym-bracket-open',
+      'sym-bracket-close',
+      'sym-brace-open',
+      'sym-brace-close',
+      'sym-less',
+      'sym-greater',
+      'sym-dollar',
+      'sym-hash',
+      'sym-percent',
+      'sym-caret',
+      'sym-ampersand',
+      'sym-asterisk',
+      'sym-at',
+      'sym-bang',
+      'sym-question'
     ]
   }
 ];
@@ -1944,6 +2013,9 @@ let keyPanelTab = 'keys';
 // What the Keys tab is doing: sending keys, editing them, or picking a new one.
 // Never persisted — an edit mode that survived a reload would be a surprise.
 let keyPanelKeysMode = 'list';
+// Pixels handed to the footer because no terminal row can use them. Mirrored in
+// --terminal-slack; see syncTerminalSlack.
+let terminalSlack = 0;
 
 /**
  * Anywhere, in Term.
@@ -2245,11 +2317,24 @@ function renderKeyPanelKeys(page) {
     grid.append(createKeyPanelKeyTile(id, def, editing));
   }
   if (!editing) {
+    // Last in the grid, like Edit is last in the strip: a hold is not something
+    // the surface can show you, so there has to be a control that says it.
+    grid.append(createKeyPanelEditTile());
     page.replaceChildren(grid);
     return;
   }
   installKeyTileReorder(grid);
   page.replaceChildren(createKeyPanelEditHeader(), grid);
+}
+
+function createKeyPanelEditTile() {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'key-panel-key key-panel-key-edit';
+  button.textContent = 'Edit';
+  button.title = 'Edit keys — or hold any key';
+  button.addEventListener('click', () => setKeyPanelKeysMode('edit'));
+  return button;
 }
 
 /** The secondaries of a held modifier, where the grid usually is. */
@@ -3074,7 +3159,7 @@ function updateAppHelpPanel() {
     `${appDisplayName}.`,
     'The key bar carries every key you have; Search is at the end of it.',
     'The gear opens the panel — keys, snippets, paste and appearance — where the keyboard would be.',
-    'Hold a key in the panel to reorder, remove, or add one.',
+    'Edit in the panel, or hold any key there, to reorder, remove, or add one.',
     'Swipe the terminal sideways to change session; tap the connection dot to reconnect a dropped one.',
     'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
   ].join(' ');
@@ -10635,6 +10720,68 @@ function fit() {
     lastSentTerminalCols = terminal.cols;
     lastSentTerminalRows = terminal.rows;
   }
+  syncTerminalSlack();
+}
+
+/**
+ * Hand the panel the strip of terminal box that no row can occupy.
+ *
+ * xterm fits whole rows, so a box that is not an exact multiple of the row
+ * height keeps the remainder as terminal background. With the keyboard up that
+ * remainder is the bottom of the screen; with the panel up it is a band between
+ * the last line and the keys, which reads as a seam. Growing the footer by it
+ * cannot cost a row — those pixels never held one — and the terminal's last
+ * line ends where the panel begins.
+ *
+ * Idempotent on purpose: the space available to the terminal is its own height
+ * plus whatever slack is already applied, so the answer does not depend on the
+ * value currently set. Recomputing from the raw height instead would take the
+ * slack away, re-measure it, and put it back forever.
+ */
+function syncTerminalSlack() {
+  const applied = (next) => {
+    if (Math.abs(next - terminalSlack) < 1) {
+      return;
+    }
+    terminalSlack = next;
+    if (next > 0) {
+      document.documentElement.style.setProperty(
+        '--terminal-slack',
+        `${next}px`
+      );
+    } else {
+      document.documentElement.style.removeProperty('--terminal-slack');
+    }
+    scheduleFit();
+  };
+  // Only a panel in the footer's flow takes space from the terminal. Landscape
+  // and desktop lift one of the two out of it and overlay the terminal instead,
+  // where there is no seam to close. Asked of the layout rather than of a media
+  // query, which is a guess at the same thing.
+  const inFooterFlow =
+    Boolean(footerElement) &&
+    window.getComputedStyle(footerElement).position !== 'fixed' &&
+    window.getComputedStyle(keyPanelElement).position !== 'fixed';
+  if (!keyPanelOpen || !inFooterFlow || !terminal || terminalElement.hidden) {
+    applied(0);
+    return;
+  }
+  const screen = terminalElement.querySelector('.xterm-screen');
+  const rows = terminal.rows;
+  if (!screen || !(rows > 0)) {
+    return;
+  }
+  const cell = screen.getBoundingClientRect().height / rows;
+  if (!(cell > 1)) {
+    return;
+  }
+  const available =
+    terminalElement.getBoundingClientRect().height + terminalSlack;
+  // Floored, not rounded: rounding up would take a pixel the row needs and cost
+  // the row.
+  applied(
+    Math.max(0, Math.min(Math.floor(available % cell), Math.ceil(cell)))
+  );
 }
 
 function disconnect() {

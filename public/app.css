@@ -2524,11 +2524,29 @@ body:has(#files-options-dialog[open]) footer {
  */
 @media (orientation: portrait) {
   body.key-panel-open footer {
-    height: calc(var(--key-panel-base, 53px) + var(--key-panel-height, 300px));
+    /*
+     * The slack is the strip xterm cannot use: rows are whole, the box it fits
+     * them into is not, and the remainder is dead terminal background between
+     * the last line and the panel. syncTerminalSlack hands it to the footer,
+     * which costs the terminal nothing — those pixels never held a row — and
+     * closes the seam.
+     */
+    height: calc(
+      var(--key-panel-base, 53px) + var(--key-panel-height, 300px) +
+        var(--terminal-slack, 0px)
+    );
   }
 
   body.key-panel-open #footer-term {
     display: none !important;
+  }
+
+  /* Up onto the footer's own border, which is then the only line between the
+     terminal and the keys. Left where it is, the footer's top padding shows as
+     a band of a third colour above the panel. */
+  body.key-panel-open #key-panel {
+    margin-top: calc(0px - var(--footer-top-padding));
+    border-top: 0;
   }
 }
 
@@ -2688,6 +2706,16 @@ body.files-view #key-panel {
 .key-panel-key:active {
   background: var(--surface-raised);
   box-shadow: none;
+}
+
+/* Not a key. Reads as the control it is, so a glance at the grid still counts
+   only keys. */
+.key-panel-key-edit {
+  border: 1px dashed var(--control-border);
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--control-font);
 }
 
 /* The modifier that opened this set, and the way back out of it. */
