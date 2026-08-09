@@ -2842,33 +2842,39 @@ function installReorder(container, options) {
    * also makes it independent of which engine is doing it.
    */
   let slotCentres = [];
-  /** The grid's own box at press time, and how far outside it still counts. */
-  let slotArea = null;
+  /** The vertical extent of the tiles at press time, top and bottom. */
+  let slotSpan = null;
   const items = () => [...container.querySelectorAll(itemSelector)];
 
   /**
-   * Nearest slot centre, rather than the slot containing the point: the gaps
-   * between tiles are dead space, and a pointer in one would report no slot and
-   * stall the reorder.
+   * Which slot the pointer is over.
    *
-   * Bounded, though, and that part is not optional. Nearest-centre with no bounds
-   * answers for every point on the screen, so a finger in the strip between the
-   * last row and the tab bar still resolved to a tile — and because that strip is
-   * roughly equidistant from a whole row of centres, sliding sideways there flipped
-   * the target between them and churned the order on almost every move.
+   * Nearest centre rather than the slot containing the point: the gaps between
+   * tiles are dead space, and a pointer in one would report no slot and stall the
+   * reorder.
    *
-   * Half a tile of slack keeps the edges forgiving: dragging just past the last row
-   * still targets it, which is what a thumb aiming at the end of the list does.
+   * Past the ends it answers first or last rather than declining. A thumb dragged
+   * above everything means the top of the list, and below everything means the
+   * bottom, so there is nowhere on screen the drag stops responding.
+   *
+   * That also removes the churn this replaced. The grid is `flex: 1 1 auto` and
+   * keeps the page's spare height, so with 13 tiles it runs about 70px past the
+   * last row. Nearest-centre in that tail picks a middle-row tile — it is closer
+   * than the short last row — so sliding sideways there stepped the dragged tile
+   * through four positions. Below the tiles the answer is now simply "last",
+   * which does not change as the finger moves across.
    */
   function slotIndexAt(x, y) {
-    if (
-      slotArea &&
-      (x < slotArea.left ||
-        x > slotArea.right ||
-        y < slotArea.top ||
-        y > slotArea.bottom)
-    ) {
+    if (slotCentres.length === 0) {
       return -1;
+    }
+    if (slotSpan) {
+      if (y < slotSpan.top) {
+        return 0;
+      }
+      if (y > slotSpan.bottom) {
+        return slotCentres.length - 1;
+      }
     }
     let best = -1;
     let bestDistance = Infinity;
@@ -2907,29 +2913,27 @@ function installReorder(container, options) {
         y: bounds.top + bounds.height / 2
       };
     });
-    // Bounded by where the tiles actually are, not by the container.
-    //
-    // The grid is `flex: 1 1 auto` and takes the page's spare height, so with 13
-    // tiles it runs about 70px past the last row. That empty tail is inside the
-    // container, and a finger there is nearer to a middle-row centre than to the
-    // short last row — so sweeping across it flipped the target between six tiles
-    // and churned the order, which is what a drag into the strip above the tab bar
-    // looked like.
+    // The tiles' own extent, not the container's box: the container includes the
+    // empty tail below the last row, which is the region that used to misbehave.
     const tileBounds = tiles.map((tile) => tile.getBoundingClientRect());
-    const slack = box.height / 2;
-    slotArea = tileBounds.length
+    slotSpan = tileBounds.length
       ? {
-          left: Math.min(...tileBounds.map((bounds) => bounds.left)) - slack,
-          right: Math.max(...tileBounds.map((bounds) => bounds.right)) + slack,
-          top: Math.min(...tileBounds.map((bounds) => bounds.top)) - slack,
-          bottom: Math.max(...tileBounds.map((bounds) => bounds.bottom)) + slack
+          top: Math.min(...tileBounds.map((bounds) => bounds.top)),
+          bottom: Math.max(...tileBounds.map((bounds) => bounds.bottom))
         }
       : null;
     item.classList.add('dragging');
     item.setPointerCapture(event.pointerId);
   });
 
-  container.addEventListener('pointermove', (event) => {
+  // On the window, not the container.
+  //
+  // Two reasons, and either one is enough. A drag that leaves the grid stops
+  // receiving events from it, so the tile froze in place as soon as the finger
+  // crossed the edge — and the whole point is that it follows the finger anywhere.
+  // Pointer capture does not save it either: reordering moves the tile with
+  // insertBefore, and moving a node releases its capture.
+  window.addEventListener('pointermove', (event) => {
     if (!dragging || event.pointerId !== dragPointerId) {
       return;
     }
@@ -2997,15 +3001,17 @@ function installReorder(container, options) {
     dragging = null;
     dragPointerId = null;
     slotCentres = [];
-    slotArea = null;
+    slotSpan = null;
     // A press that never moved is not a reorder, and saving one would write the
     // order back for nothing.
     if (moved) {
       onDrop(items().map((item) => item.dataset.reorderId));
     }
   };
-  container.addEventListener('pointerup', drop);
-  container.addEventListener('pointercancel', drop);
+  // Also on the window: a release outside the grid has to end the drag, or the
+  // tile stays stuck to the finger with no button held.
+  window.addEventListener('pointerup', drop);
+  window.addEventListener('pointercancel', drop);
 }
 
 /**
