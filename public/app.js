@@ -2680,25 +2680,46 @@ function prefersReducedMotion() {
 /** One `flipping` timer per root, so overlapping slides extend it rather than racing. */
 const flipTimers = new WeakMap();
 
+/** The cleanup currently pending for an element, so a new slide can cancel it. */
+const motionCleanups = new WeakMap();
+
 /**
  * Clear the inline transform and transition a FLIP left behind, once it has
  * played. The timer is a fallback: transitionend does not fire if the element is
  * re-rendered or the transform never actually changed.
+ *
+ * Any cleanup already pending for this element is cancelled first, and that is the
+ * whole point of the WeakMap. A drag that crosses several slots starts a new slide
+ * on the same tile before the last has finished, and the earlier cleanup would then
+ * fire mid-flight and wipe the newer transform — the tile jumping to its slot and
+ * starting over. qa:reorder counted four such interruptions on a single tile, which
+ * is exactly what a slide restarting looks like.
  */
 function clearMotionAfter(element, milliseconds, onDone) {
+  motionCleanups.get(element)?.cancel();
   let settled = false;
   const finish = () => {
     if (settled) {
       return;
     }
     settled = true;
+    window.clearTimeout(timer);
+    element.removeEventListener('transitionend', finish);
+    motionCleanups.delete(element);
     element.style.transition = '';
     element.style.transform = '';
-    element.removeEventListener('transitionend', finish);
     onDone?.();
   };
+  const timer = window.setTimeout(finish, milliseconds);
   element.addEventListener('transitionend', finish);
-  window.setTimeout(finish, milliseconds);
+  motionCleanups.set(element, {
+    cancel() {
+      settled = true;
+      window.clearTimeout(timer);
+      element.removeEventListener('transitionend', finish);
+      motionCleanups.delete(element);
+    }
+  });
 }
 
 /**
@@ -2807,7 +2828,39 @@ function installReorder(container, options) {
   let startX = 0;
   let startY = 0;
   let moved = false;
+  /**
+   * Slot centres, captured once when the drag begins.
+   *
+   * The grid holds a fixed number of tiles for the length of a drag, so the slots
+   * never move — only which tile sits in which. The swap target comes from this
+   * snapshot and nothing else.
+   *
+   * This replaced elementFromPoint, which reports where a tile is *drawn*. Once
+   * the displaced tiles animate, that returns one caught between slots, the swap
+   * reverses, and the grid oscillates. Deciding from layout instead makes the
+   * gesture independent of what the compositor is doing mid-animation — which
+   * also makes it independent of which engine is doing it.
+   */
+  let slotCentres = [];
   const items = () => [...container.querySelectorAll(itemSelector)];
+
+  /**
+   * Nearest slot centre, rather than the slot containing the point: the gaps
+   * between tiles are dead space, and a pointer in one would report no slot and
+   * stall the reorder.
+   */
+  function slotIndexAt(x, y) {
+    let best = -1;
+    let bestDistance = Infinity;
+    slotCentres.forEach((centre, index) => {
+      const distance = Math.hypot(centre.x - x, centre.y - y);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = index;
+      }
+    });
+    return best;
+  }
 
   container.addEventListener('pointerdown', (event) => {
     const item = event.target.closest?.(itemSelector);
@@ -2826,6 +2879,13 @@ function installReorder(container, options) {
     startX = event.clientX;
     startY = event.clientY;
     moved = false;
+    slotCentres = items().map((tile) => {
+      const bounds = tile.getBoundingClientRect();
+      return {
+        x: bounds.left + bounds.width / 2,
+        y: bounds.top + bounds.height / 2
+      };
+    });
     item.classList.add('dragging');
     item.setPointerCapture(event.pointerId);
   });
@@ -2845,27 +2905,24 @@ function installReorder(container, options) {
       return;
     }
     moved = true;
-    dragging.style.pointerEvents = 'none';
-    const under = document
-      .elementFromPoint(event.clientX, event.clientY)
-      ?.closest?.(itemSelector);
-    dragging.style.pointerEvents = '';
-    if (under && under !== dragging && container.contains(under)) {
-      // Deliberately instant.
-      //
-      // Sliding the displaced tiles here made the grid unusable. The slide puts
-      // an inline transform on each one, elementFromPoint above then hit-tests
-      // them where they are drawn rather than where they sit, so it returns a
-      // tile that is halfway out of its slot. That swaps back, which re-triggers,
-      // and the tiles oscillate. The dragged tile is the worst of it: every swap
-      // changes its DOM slot, so the offset below is recomputed against a moving
-      // origin and it cannot travel more than a few pixels from where it started.
-      //
-      // A slide here has to hit-test layout positions instead of drawn ones. Until
-      // it does, this stays a one-frame swap.
-      const order = items();
-      const forward = order.indexOf(under) > order.indexOf(dragging);
-      container.insertBefore(dragging, forward ? under.nextSibling : under);
+    const order = items();
+    const currentIndex = order.indexOf(dragging);
+    const targetIndex = slotIndexAt(event.clientX, event.clientY);
+    if (targetIndex >= 0 && currentIndex >= 0 && targetIndex !== currentIndex) {
+      // The reference node comes from the order with the dragged tile removed, so
+      // moving right lands after the tile now in that slot rather than before it.
+      // Inserting before would leave the index unchanged and repeat the swap on
+      // every move.
+      const withoutDragging = order.filter((tile) => tile !== dragging);
+      const reference = withoutDragging[targetIndex] || null;
+      // The displaced tiles slide. The dragged one is excluded: it follows the
+      // finger and must not carry a transition.
+      reorderWithMotion(
+        container,
+        itemSelector,
+        () => container.insertBefore(dragging, reference),
+        { except: dragging }
+      );
     }
     // Measured after any swap, so the offset is against where the item now
     // sits rather than where the drag started.
@@ -2880,10 +2937,27 @@ function installReorder(container, options) {
     if (!dragging) {
       return;
     }
-    dragging.classList.remove('dragging');
-    dragging.style.transform = '';
+    const tile = dragging;
+    tile.classList.remove('dragging');
+    // Settle into the slot rather than teleporting there from under the finger.
+    //
+    // `settling` keeps the wobble suspended for the trip: removing `dragging`
+    // restores the edit-mode animation, and an animation on transform outranks the
+    // inline transform being transitioned, so the slide would never be seen.
+    if (moved && !prefersReducedMotion() && tile.style.transform) {
+      const duration = reorderSlideMilliseconds();
+      tile.classList.add('settling');
+      tile.style.transition = `transform ${duration}ms var(--ease-out)`;
+      tile.style.transform = '';
+      clearMotionAfter(tile, duration + reorderSlideGraceMilliseconds, () => {
+        tile.classList.remove('settling');
+      });
+    } else {
+      tile.style.transform = '';
+    }
     dragging = null;
     dragPointerId = null;
+    slotCentres = [];
     // A press that never moved is not a reorder, and saving one would write the
     // order back for nothing.
     if (moved) {
@@ -2908,7 +2982,12 @@ function installKeyTileReorder(grid) {
     ignoreSelector: '.key-panel-key-remove',
     onDrop: (order) => {
       saveShortcutIds(order);
-      refreshKeysUi();
+      // Deliberately not refreshKeysUi(): renderKeyPanel() would replace the tile
+      // still sliding into its slot. The drag already left the grid in this order,
+      // so the panel needs no rebuild — only the surfaces that mirror it do.
+      updateFooterRowTwo();
+      renderFooterPins();
+      renderHeaderSummary();
     }
   });
 }
