@@ -25,14 +25,17 @@
    * token that is defined and never used.
    *
    * Tokens arrive with the phase that needs them rather than up front, because
-   * an unused custom property is dead code and the suite says so. Phase 2 adds
-   * --ease-settle for the reorder drop; phase 3 adds --ease-in and
-   * --duration-panel for sheets and dialogs.
+   * an unused custom property is dead code and the suite says so. --ease-settle
+   * and --ease-in were both planned and neither was needed: the reorder drop has
+   * no scale to overshoot, and --ease-in is for exits, which phase 3 deliberately
+   * leaves immediate.
    */
   --ease-out: cubic-bezier(0.2, 0, 0, 1);
   /* State changes: something appeared, moved, or responded to a press. */
   --duration-instant: 90ms;
   --duration-quick: 160ms;
+  /* Sheets, dialogs, and the session picker arriving. */
+  --duration-panel: 240ms;
   /*
    * The view-swipe settle. Read from JS by readMotionToken() because the slide
    * is per-gesture and set inline; it lives here anyway so every duration in the
@@ -4437,6 +4440,79 @@ footer button {
   .files-toolbar-button span {
     display: none;
   }
+}
+
+/*
+ * Surfaces arriving: dialogs, the session picker, and the key panel.
+ *
+ * Keyframes rather than transitions, which is the whole reason this is short. A
+ * transition needs two computed values to move between, and all three of these
+ * surfaces arrive from `display: none` — nothing to transition from. That is what
+ * `@starting-style` exists to solve, and it is too recent to rely on for an
+ * iOS-first product. A keyframe animation has no such problem: it runs when the
+ * element becomes displayed, everywhere, with no JavaScript and no support floor.
+ *
+ * `from` only, so the end state is whatever the rule already computes. None of
+ * these surfaces carries a positional transform of its own, which was checked
+ * before writing this — otherwise the animation would fight it.
+ *
+ * Only the arrival is animated. Closing stays immediate: an exit needs the element
+ * kept alive past `close()` with transitionend bookkeeping across seven dialogs,
+ * and a modal that lingers reads as slower, not smoother. Deliberate scope, not an
+ * oversight.
+ *
+ * The global prefers-reduced-motion override below neuters all of it.
+ */
+@keyframes surface-dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+}
+
+@keyframes surface-backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes surface-picker-in {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+}
+
+@keyframes surface-sheet-in {
+  from {
+    transform: translateY(100%);
+  }
+}
+
+/* All seven dialogs, by element rather than by id, so an eighth is covered too. */
+dialog[open] {
+  animation: surface-dialog-in var(--duration-panel) var(--ease-out);
+}
+
+dialog[open]::backdrop {
+  animation: surface-backdrop-in var(--duration-panel) var(--ease-out);
+}
+
+/*
+ * The picker is an overlay: header:not(.collapsed) is position: fixed and
+ * #header-expanded is absolute on mobile, so this moves nothing else and cannot
+ * reflow the terminal.
+ */
+header:not(.collapsed) #header-expanded {
+  animation: surface-picker-in var(--duration-quick) var(--ease-out);
+}
+
+/*
+ * The sheet rises from the bottom edge. Transform only, so the terminal keeps the
+ * rows it had — the panel takes the footer's height, never the terminal's.
+ */
+#key-panel:not([hidden]) {
+  animation: surface-sheet-in var(--duration-panel) var(--ease-out);
 }
 
 @media (prefers-reduced-motion: reduce) {
