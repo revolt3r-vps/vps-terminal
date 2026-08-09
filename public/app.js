@@ -1579,7 +1579,12 @@ function activateShortcut(id) {
   if (def.kind === 'sequence') {
     clearTerminalSelection();
     setArmedModifier(null);
-    sendInput(def.sequence);
+    // Same words the snippets use. Without them a key with no session behind it
+    // is indistinguishable from one that worked: nothing moves either way, and
+    // the bar and the panel both look live because the keys are real.
+    if (!sendInput(def.sequence)) {
+      setStatus('Connect a session first');
+    }
   }
 }
 
@@ -2323,23 +2328,56 @@ function renderKeyPanelKeys(page) {
     grid.append(createKeyPanelKeyTile(id, def, editing));
   }
   if (!editing) {
-    // Last in the grid, like Edit is last in the strip: a hold is not something
-    // the surface can show you, so there has to be a control that says it.
-    grid.append(createKeyPanelEditTile());
-    page.replaceChildren(grid);
+    // A hold is not something the surface can show you, so there has to be a
+    // control that says it. In the pinned row, where every other page keeps
+    // theirs, rather than as a tile pretending to be a key.
+    page.replaceChildren(
+      grid,
+      createKeyPanelActions(
+        keyPanelAction('Edit', () => setKeyPanelKeysMode('edit'), {
+          title: 'Edit keys — or hold any key'
+        })
+      )
+    );
     return;
   }
   installKeyTileReorder(grid);
-  page.replaceChildren(createKeyPanelEditHeader(), grid);
+  page.replaceChildren(
+    grid,
+    createKeyPanelActions(
+      keyPanelAction('Add key', () => setKeyPanelKeysMode('add')),
+      keyPanelAction('Reset', resetShortcuts, {
+        title: 'Reset the keys to their defaults'
+      }),
+      keyPanelAction('Done', () => setKeyPanelKeysMode('list'))
+    )
+  );
 }
 
-function createKeyPanelEditTile() {
+/**
+ * The row every page keeps its controls in: pinned to the bottom of the panel,
+ * above the tab strip.
+ *
+ * Sticky rather than merely last, so a list long enough to scroll cannot take
+ * the way out with it — which it did, on the tab whose only route to the
+ * snippet dialog sat under seven snippets.
+ */
+function createKeyPanelActions(...controls) {
+  const row = document.createElement('div');
+  row.className = 'key-panel-actions';
+  row.append(...controls.filter(Boolean));
+  return row;
+}
+
+function keyPanelAction(label, onClick, options = {}) {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'key-panel-key key-panel-key-edit';
-  button.textContent = 'Edit';
-  button.title = 'Edit keys — or hold any key';
-  button.addEventListener('click', () => setKeyPanelKeysMode('edit'));
+  button.className = 'key-panel-action';
+  button.textContent = label;
+  if (options.title) {
+    button.title = options.title;
+  }
+  button.addEventListener('click', onClick);
   return button;
 }
 
@@ -2440,29 +2478,6 @@ function createKeyPanelKeyTile(id, def, editing) {
   return tile;
 }
 
-function createKeyPanelEditHeader() {
-  const header = document.createElement('div');
-  header.className = 'key-panel-header';
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'key-panel-header-action';
-  add.textContent = 'Add key';
-  add.addEventListener('click', () => setKeyPanelKeysMode('add'));
-  const reset = document.createElement('button');
-  reset.type = 'button';
-  reset.className = 'key-panel-header-action';
-  reset.textContent = 'Reset';
-  reset.title = 'Reset the keys to their defaults';
-  reset.addEventListener('click', resetShortcuts);
-  const done = document.createElement('button');
-  done.type = 'button';
-  done.className = 'key-panel-header-action key-panel-header-done';
-  done.textContent = 'Done';
-  done.addEventListener('click', () => setKeyPanelKeysMode('list'));
-  header.append(add, reset, done);
-  return header;
-}
-
 /**
  * Drag to reorder, the way icons move on a home screen.
  *
@@ -2542,15 +2557,6 @@ function installKeyTileReorder(grid) {
  * keyboard, which lands on top of the panel standing in the keyboard's place.
  */
 function renderKeyPanelKeyPicker(page) {
-  const header = document.createElement('div');
-  header.className = 'key-panel-header';
-  const back = document.createElement('button');
-  back.type = 'button';
-  back.className = 'key-panel-header-action';
-  back.textContent = '‹ Back';
-  back.addEventListener('click', () => setKeyPanelKeysMode('edit'));
-  header.append(back);
-
   const active = new Set(loadShortcutIds());
   const groups = [
     ...builtinShortcutGroups.map((group) => ({
@@ -2599,7 +2605,13 @@ function renderKeyPanelKeyPicker(page) {
     note.textContent = 'Every built-in key is already on the bar.';
     body.append(note);
   }
-  page.replaceChildren(header, body, createCustomKeyForm());
+  page.replaceChildren(
+    body,
+    createCustomKeyForm(),
+    createKeyPanelActions(
+      keyPanelAction('‹ Back', () => setKeyPanelKeysMode('edit'))
+    )
+  );
 }
 
 function createCustomKeyForm() {
@@ -2700,7 +2712,7 @@ function renderKeyPanelSnippets(page) {
     // The button comes too. It is the only way into the dialog now, so an empty
     // list must not be a dead end.
     renderKeyPanelPlaceholder(page, 'No snippets yet.');
-    page.append(createSnippetLibraryButton());
+    page.append(createKeyPanelActions(createSnippetLibraryButton()));
     void loadSnippetsFromServer();
     return;
   }
@@ -2739,7 +2751,10 @@ function renderKeyPanelSnippets(page) {
     });
     list.append(item);
   }
-  page.replaceChildren(list, createSnippetLibraryButton());
+  page.replaceChildren(
+    list,
+    createKeyPanelActions(createSnippetLibraryButton())
+  );
 }
 
 /**
@@ -2891,29 +2906,21 @@ function renderKeyPanelPaste(page) {
     );
   }
 
-  const actions = document.createElement('div');
-  actions.className = 'key-panel-row-actions';
-  const clear = document.createElement('button');
-  clear.type = 'button';
-  clear.className = 'key-panel-action';
-  clear.textContent = 'Clear history';
-  clear.addEventListener('click', () => {
-    clearPasteHistory();
-    renderKeyPanel();
-  });
   const persisted = pasteHistoryPersistEnabled();
-  const keep = document.createElement('button');
-  keep.type = 'button';
-  keep.className = 'key-panel-action';
-  keep.textContent = persisted ? 'Keep: on' : 'Keep: off';
-  keep.title = persisted
-    ? 'Stop keeping paste history after this tab closes'
-    : 'Keep paste history after this tab closes';
-  keep.addEventListener('click', () => {
-    setPasteHistoryPersist(!persisted);
-    renderKeyPanel();
-  });
-  actions.append(clear, keep);
+  const actions = createKeyPanelActions(
+    keyPanelAction('Clear history', () => {
+      clearPasteHistory();
+      renderKeyPanel();
+    }),
+    keyPanelAction(persisted ? 'Keep: on' : 'Keep: off', () => {
+      setPasteHistoryPersist(!persisted);
+      renderKeyPanel();
+    }, {
+      title: persisted
+        ? 'Stop keeping paste history after this tab closes'
+        : 'Keep paste history after this tab closes'
+    })
+  );
   page.replaceChildren(list, actions);
 }
 

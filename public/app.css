@@ -2601,15 +2601,25 @@ body.files-view #key-panel {
   padding: 8px calc(8px + var(--safe-left)) 8px calc(8px + var(--safe-right));
 }
 
+.key-panel-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
 .key-panel-page[hidden] {
   display: none !important;
 }
 
 /* The tab bar sits at the very bottom, where the keyboard's own bottom row was. */
-#key-panel-tabs {
+/* The bar. A tablist may only hold tabs, and the keyboard button is not one —
+ * it leaves the panel rather than switching within it — so it sits beside the
+ * tablist rather than inside it, pushed to the far end. */
+#key-panel-tabbar {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
+  justify-content: space-between;
   gap: 2px;
   padding: 4px calc(8px + var(--safe-left))
     calc(4px + var(--layout-safe-bottom)) calc(8px + var(--safe-right));
@@ -2617,10 +2627,10 @@ body.files-view #key-panel {
   background: var(--surface);
 }
 
-/* Pushes the keyboard button to the right, away from the tabs: it leaves the
- * panel rather than switching within it. */
-.key-panel-tabs-spacer {
-  flex: 1 1 auto;
+#key-panel-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
 .key-panel-tab {
@@ -2654,27 +2664,6 @@ body.files-view #key-panel {
   color: var(--accent-text);
 }
 
-/* Keys tab: the row above the grid while it is being edited. */
-.key-panel-header {
-  display: flex;
-  align-items: center;
-  gap: var(--control-gap);
-  margin-bottom: 8px;
-}
-
-.key-panel-header-action {
-  flex: 0 0 auto;
-  min-width: var(--control-size);
-  min-height: 38px;
-  padding: 0 14px;
-  border-color: var(--control-border);
-  border-radius: var(--control-radius);
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-  font-size: var(--control-font);
-  font-weight: 650;
-}
 
 /*
  * Every key at once. The strip along the bottom carries the same
@@ -2708,27 +2697,12 @@ body.files-view #key-panel {
   box-shadow: none;
 }
 
-/* Not a key. Reads as the control it is, so a glance at the grid still counts
-   only keys. */
-.key-panel-key-edit {
-  border: 1px dashed var(--control-border);
-  background: transparent;
-  box-shadow: none;
-  color: var(--muted);
-  font-size: var(--control-font);
-}
-
 /* The modifier that opened this set, and the way back out of it. */
 .key-panel-key-lead,
 .key-panel-key.active {
   border-color: var(--accent);
   background: var(--accent-surface);
   color: var(--accent-text);
-}
-
-/* Done sits at the far end, away from the two controls that change things. */
-.key-panel-header-done {
-  margin-left: auto;
 }
 
 /*
@@ -3056,16 +3030,32 @@ body.files-view #key-panel {
 }
 
 /* Two actions side by side, where a tab has a pair rather than one way out. */
-.key-panel-row-actions {
+/*
+ * Every page keeps its controls here: the bottom of the panel, in thumb reach,
+ * in the same place on every tab.
+ *
+ * Sticky, and pushed down by the page's own margin-top:auto when the content is
+ * short. A row that merely came last went off the bottom of a list long enough
+ * to scroll — which is where the one route to the snippet dialog used to sit.
+ */
+.key-panel-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   gap: var(--control-gap);
+  margin-top: auto;
+  padding-top: 8px;
+  /* Opaque, or the list scrolls through it. */
+  background: var(--surface-deep);
 }
 
-.key-panel-row-actions .key-panel-action {
+.key-panel-actions .key-panel-action {
   flex: 1 1 0;
+  width: auto;
+  margin-top: 0;
 }
 
-/* The way out to the full editor, at the end of a tab's own content. */
 .key-panel-action {
   width: 100%;
   min-height: 38px;
