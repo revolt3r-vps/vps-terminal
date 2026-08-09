@@ -219,6 +219,15 @@ const maximumCustomKeySequenceLength = 32;
 // and what it never shrinks below. The strip's own keys stay at the minimum.
 const minimumKeyTileHeight = 38;
 const maximumKeyTileHeight = 60;
+/**
+ * The last row height fitKeyTilesToPanel measured.
+ *
+ * Kept because that measurement can only happen after layout, so it lands a frame
+ * late, while renderKeyPanel() builds a fresh grid every time. The new grid wears
+ * this value immediately and the measurement then confirms it, which is what stops
+ * a rebuild painting one frame of 38px tiles.
+ */
+let lastKeyTileHeight = 0;
 const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
@@ -2447,6 +2456,20 @@ function renderKeyPanelKeys(page) {
   grid.className = editing
     ? 'key-panel-keys key-panel-keys-main editing'
     : 'key-panel-keys key-panel-keys-main';
+  // Carry the last measured row height onto the new grid straight away.
+  //
+  // fitKeyTilesToPanel can only measure after layout, so it sets this property in
+  // a requestAnimationFrame. The property is inline on the grid, and this function
+  // replaces the grid — so without this line every rebuild paints one frame with
+  // grid-auto-rows falling back to the 38px strip height, and all thirteen tiles
+  // visibly collapse and spring back. Reordering rebuilds the panel on drop, which
+  // is where it showed.
+  //
+  // Set on the grid rather than an ancestor on purpose: .key-panel-keys covers the
+  // picker's grids too, and they are meant to keep the --key-height fallback.
+  if (lastKeyTileHeight > 0) {
+    grid.style.setProperty('--key-tile-height', `${lastKeyTileHeight}px`);
+  }
   if (editing) {
     grid.setAttribute('role', 'list');
     grid.setAttribute('aria-label', 'Keys, editing');
@@ -2515,10 +2538,14 @@ function fitKeyTilesToPanel(grid) {
     const rows = Math.ceil(tiles / Math.max(1, columns));
     const available = grid.getBoundingClientRect().height - (rows - 1) * gap;
     const height = Math.floor(available / rows);
-    grid.style.setProperty(
-      '--key-tile-height',
-      `${Math.max(minimumKeyTileHeight, Math.min(height, maximumKeyTileHeight))}px`
+    const clamped = Math.max(
+      minimumKeyTileHeight,
+      Math.min(height, maximumKeyTileHeight)
     );
+    // Remembered so the next rebuild can apply it before its first paint, rather
+    // than showing a frame of collapsed tiles while waiting for this callback.
+    lastKeyTileHeight = clamped;
+    grid.style.setProperty('--key-tile-height', `${clamped}px`);
   });
 }
 
