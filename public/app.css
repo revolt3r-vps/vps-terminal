@@ -15,6 +15,40 @@
 }
 
 :root {
+  /*
+   * Motion vocabulary. Every transition and animation duration in this file
+   * comes from here, so the app's feel is tunable in one block rather than
+   * across four thousand lines of hand-typed milliseconds.
+   *
+   * test/motion.test.js enforces that: a literal duration outside this block
+   * fails the suite, as does an animation that targets a layout property or a
+   * token that is defined and never used.
+   *
+   * Tokens arrive with the phase that needs them rather than up front, because
+   * an unused custom property is dead code and the suite says so. Phase 2 adds
+   * --ease-settle for the reorder drop; phase 3 adds --ease-in and
+   * --duration-panel for sheets and dialogs.
+   */
+  --ease-out: cubic-bezier(0.2, 0, 0, 1);
+  /* State changes: something appeared, moved, or responded to a press. */
+  --duration-instant: 90ms;
+  --duration-quick: 160ms;
+  /*
+   * The view-swipe settle. Read from JS by readMotionToken() because the slide
+   * is per-gesture and set inline; it lives here anyway so every duration in the
+   * app is in one block. viewSwipeSettleGraceMilliseconds assumes this value.
+   */
+  --duration-swipe: 180ms;
+  /*
+   * Ambient loops. These run until a state clears rather than moving between two
+   * states, so they keep the ease-in-out keyword: their motion is symmetric,
+   * where --ease-out is deliberately not.
+   */
+  --duration-wobble: 420ms;
+  --duration-spin: 700ms;
+  --duration-pulse: 1s;
+  /* Error pulses slower than connecting, so the two read differently. */
+  --duration-pulse-slow: 1.2s;
   /* Scrollbar geometry is fixed; the colours come from the active theme via
    * applyAppTheme. The fallbacks cover first paint. */
   --app-scrollbar-width: 8px;
@@ -823,7 +857,7 @@ body.files-view #files-name-dialog {
   border-bottom: 1px solid #232a33;
   outline: none;
   cursor: pointer;
-  transition: background-color 120ms ease;
+  transition: background-color var(--duration-instant) var(--ease-out);
 }
 
 #files-list li:active {
@@ -938,7 +972,7 @@ body.files-view #files-name-dialog {
 }
 
 #files-panel[aria-busy='true'] #files-refresh-desktop svg {
-  animation: files-spin 700ms linear infinite;
+  animation: files-spin var(--duration-spin) linear infinite;
 }
 
 @keyframes files-spin {
@@ -1210,9 +1244,14 @@ body.files-view #terminal-link-chip {
   box-shadow: inset 2px 0 0 var(--accent);
 }
 
+/* An <li role="option">, so the bare button:active baseline does not reach it. */
+.command-palette-option:active {
+  background: var(--surface-pressed);
+}
+
 @media (prefers-reduced-motion: no-preference) {
   .command-palette-option {
-    transition: background-color 120ms ease;
+    transition: background-color var(--duration-instant) var(--ease-out);
   }
 }
 
@@ -1267,6 +1306,11 @@ body.files-view #terminal-link-chip {
   font-size: 13px;
   font-weight: 600;
   cursor: pointer;
+}
+
+/* A 44px tap target, but not a button, so it needs its own press state. */
+.files-checkbox-control:active {
+  background: var(--surface-pressed);
 }
 
 .files-actions-buttons > .files-checkbox-control {
@@ -1435,7 +1479,7 @@ header.collapsed #connection-dot {
 
 #connection-dot[data-state="connecting"] {
   background: radial-gradient(circle at center, #f0ad4e 0 4px, transparent 4.5px);
-  animation: connection-pulse 1s ease-in-out infinite;
+  animation: connection-pulse var(--duration-pulse) ease-in-out infinite;
 }
 
 #connection-dot[data-state="connected"] {
@@ -1446,7 +1490,16 @@ header.collapsed #connection-dot {
 
 #connection-dot[data-state="error"] {
   background: radial-gradient(circle at center, #ff5c72 0 4px, transparent 4.5px);
-  animation: connection-pulse 1.2s ease-in-out infinite;
+  animation: connection-pulse var(--duration-pulse-slow) ease-in-out infinite;
+}
+
+/*
+ * The dot is a button, but the [data-state] rules above are ID+attribute and so
+ * outrank button:active's background. Scale instead of recolouring: the colour
+ * is carrying connection state and must not be borrowed for press feedback.
+ */
+#connection-dot:active {
+  transform: scale(0.88);
 }
 
 @keyframes connection-pulse {
@@ -1538,8 +1591,10 @@ button {
   /* Baseline feedback for every button; a component with its own hover/press
      styling (lower specificity conflicts are avoided by keeping this a bare
      element selector) simply overrides these defaults. */
-  transition: background-color 120ms ease, border-color 120ms ease,
-    color 120ms ease, transform 80ms ease;
+  transition: background-color var(--duration-instant) var(--ease-out),
+    border-color var(--duration-instant) var(--ease-out),
+    color var(--duration-instant) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
 }
 
 /* Hover only where a real pointer can hover (design-principles.md §5) — a
@@ -1823,7 +1878,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 #paste.copy-mode.copy-needs-attention {
-  animation: copy-attention 1s ease-in-out 2;
+  animation: copy-attention var(--duration-pulse) ease-in-out 2;
 }
 
 @keyframes copy-attention {
@@ -2000,7 +2055,7 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   background: #c2cad6;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 140ms ease;
+  transition: opacity var(--duration-quick) var(--ease-out);
 }
 
 #scroll-thumb.visible {
@@ -2037,7 +2092,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   opacity: 0;
   pointer-events: none;
   transform: translateY(5px);
-  transition: opacity 120ms ease, transform 120ms ease;
+  transition: opacity var(--duration-quick) var(--ease-out),
+    transform var(--duration-quick) var(--ease-out);
 }
 
 #status.visible {
@@ -2678,7 +2734,7 @@ body.files-view #key-panel {
   touch-action: none;
   border: 1px solid transparent;
   cursor: grab;
-  animation: key-tile-wobble 0.42s ease-in-out infinite alternate;
+  animation: key-tile-wobble var(--duration-wobble) ease-in-out infinite alternate;
 }
 
 /* Second, third and fourth tiles start out of phase, so the grid wobbles as a
@@ -2780,6 +2836,10 @@ body.files-view #key-panel {
   padding: 0;
   border: 0;
   background: transparent;
+}
+
+.key-panel-custom-key > summary:active {
+  background: var(--surface-pressed);
 }
 
 .key-panel-custom-key > summary {

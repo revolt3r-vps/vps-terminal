@@ -241,7 +241,25 @@ const viewSwipeMinimumCommitDistance = 56;
 // iOS Safari claims edge drags for back/forward when not installed as a web app,
 // so a swipe starting in this band would fight the browser and lose.
 const viewSwipeEdgeGuard = 24;
-const viewSwipeSettleMilliseconds = 180;
+/**
+ * Read one motion token from :root, falling back if the stylesheet has not
+ * arrived. The swipe slide is set inline per gesture, so it cannot pick these up
+ * from a rule the way every other animation does — this keeps its duration and
+ * curve in the same block as the rest.
+ */
+function readMotionToken(name, fallback) {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(name)
+    .trim();
+  return raw || fallback;
+}
+const viewSwipeSettleEasing = readMotionToken(
+  '--ease-out',
+  'cubic-bezier(0.2, 0, 0, 1)'
+);
+// Kept numeric: the fallback settle timer below needs to compare against it.
+const viewSwipeSettleMilliseconds =
+  Number.parseFloat(readMotionToken('--duration-swipe', '180ms')) || 180;
 // Slack on the fallback timer, so it only ever fires when transitionend did not.
 const viewSwipeSettleGraceMilliseconds = 120;
 const nativeScrollDeltaThreshold = 1;
@@ -10473,7 +10491,8 @@ function finishViewSwipe() {
   document.body.classList.add('view-settling');
   if (!commit) {
     // Snap back from wherever the finger left it.
-    main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
+    main.style.transition =
+      `transform ${viewSwipeSettleMilliseconds}ms ${viewSwipeSettleEasing}`;
     main.style.transform = 'translateX(0)';
     settleViewSwipe(main);
     return false;
@@ -10487,7 +10506,8 @@ function finishViewSwipe() {
   main.style.transform = `translateX(${dx < 0 ? '100%' : '-100%'})`;
   // Force the start offset to be applied before the transition to 0.
   void main.offsetWidth;
-  main.style.transition = `transform ${viewSwipeSettleMilliseconds}ms ease-out`;
+  main.style.transition =
+      `transform ${viewSwipeSettleMilliseconds}ms ${viewSwipeSettleEasing}`;
   main.style.transform = 'translateX(0)';
   settleViewSwipe(main);
   return true;

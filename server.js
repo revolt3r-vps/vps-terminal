@@ -1331,13 +1331,18 @@ const buildIdPlaceholder = '__VPS_BUILD_ID__';
 /**
  * A short identifier for the running build, shown in Settings.
  *
- * Derived from the package version plus the client bundle's modification time, so
- * it changes on every install without needing a build step or a git checkout — the
- * public package has neither. Computed once at boot: a reinstall restarts the
- * service, so a stale value cannot outlive the files it describes.
+ * Derived from the package version plus the newest modification time across the
+ * client's own files, so it changes on every install without needing a build step
+ * or a git checkout — the public package has neither. Computed once at boot: a
+ * reinstall restarts the service, so a stale value cannot outlive the files it
+ * describes.
  *
  * This exists because "is the deploy live, or is my page stale?" is otherwise
  * unanswerable from the client, and guessing wrong costs a debugging session.
+ *
+ * app.css is in the list because it used to not be. A stylesheet-only deploy left
+ * the marker identical, so the one check meant to catch a stale client reported
+ * success without looking at the file that had changed.
  */
 const buildId = (() => {
   let version = '0.0.0';
@@ -1348,14 +1353,15 @@ const buildId = (() => {
   } catch {
     // An unreadable package.json should not stop the server booting.
   }
-  let stamp = '0';
-  try {
-    stamp = Math.floor(
-      fs.statSync(path.join(publicRoot, 'app.js')).mtimeMs / 1000
-    ).toString(36);
-  } catch {
-    // Likewise: a missing bundle is a bigger problem, reported elsewhere.
+  let newest = 0;
+  for (const name of ['app.js', 'app.css', 'index.html']) {
+    try {
+      newest = Math.max(newest, fs.statSync(path.join(publicRoot, name)).mtimeMs);
+    } catch {
+      // A missing client file is a bigger problem, reported elsewhere.
+    }
   }
+  const stamp = Math.floor(newest / 1000).toString(36);
   return `${version}+${stamp}`;
 })();
 
