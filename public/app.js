@@ -2222,6 +2222,12 @@ function setKeyPanelOpen(open) {
     if (terminalInputIsFocused()) {
       terminal?.blur();
     }
+    // The panel owns that space from this instant, so the keyboard geometry goes
+    // now. Left to the blur, this only happens when the terminal had focus —
+    // and any other route in leaves the app sized to a viewport the keyboard is
+    // still shrinking, with the footer already carrying the panel.
+    keyboardLayoutLock = null;
+    clearLockedAppGeometry({ force: true });
     setKeyPanelTab(keyPanelTab);
   } else {
     keyPanelElement.hidden = true;
@@ -9463,6 +9469,9 @@ function captureKeyboardLayoutLock() {
     recordKeyboardTransition('capture-declined');
     return;
   }
+  // They are the same space, so they are never both. A keyboard that comes back
+  // — tapping the terminal behind the panel does it — takes its place back.
+  setKeyPanelOpen(false);
   keyboardLayoutLock = currentVisualViewportGeometry();
   lastAppliedViewportHeight = keyboardLayoutLock.height;
   lastAppliedViewportTop = 0;
@@ -9494,6 +9503,36 @@ function pinPageToOrigin() {
   document.body.scrollTop = 0;
 }
 
+/**
+ * How tall the app should be right now.
+ *
+ * The visual viewport, normally: a keyboard takes space the app cannot use.
+ *
+ * Not while the panel is open. The panel is standing in the keyboard's place,
+ * and the keyboard takes ~300ms to leave — so sizing the app to a viewport the
+ * keyboard is still shrinking subtracts the panel and the keyboard at once. The
+ * terminal collapses to a row for the length of the animation, xterm refits it,
+ * and tmux is told the pane is one row tall. That is the shift: the pane comes
+ * back reflowed at a size it was never meant to be.
+ *
+ * A browser toolbar is the other thing that shrinks the visual viewport, and it
+ * genuinely takes space. keyboardViewportIsReduced carries the 120px threshold
+ * that tells the two apart.
+ */
+function targetAppHeight() {
+  const viewport = window.visualViewport;
+  const visual = Math.round(
+    viewport?.height ||
+      window.innerHeight ||
+      document.documentElement.clientHeight ||
+      0
+  );
+  if (keyPanelOpen && keyboardViewportIsReduced()) {
+    return Math.round(document.documentElement.clientHeight || visual);
+  }
+  return visual;
+}
+
 function applyRestingAppHeight(options = {}) {
   const force = options.force === true;
   if (
@@ -9505,13 +9544,7 @@ function applyRestingAppHeight(options = {}) {
   ) {
     return;
   }
-  const viewport = window.visualViewport;
-  const height = Math.round(
-    viewport?.height ||
-      window.innerHeight ||
-      document.documentElement.clientHeight ||
-      0
-  );
+  const height = targetAppHeight();
   if (height <= 0) {
     return;
   }
@@ -9583,10 +9616,13 @@ function releaseKeyboardLayoutLock() {
       scheduleVisualViewportUpdate();
       return;
     }
-    // Follow the expanding visual viewport while the keyboard animates away.
-    const viewport = window.visualViewport;
-    const height = Math.round(viewport?.height || window.innerHeight);
-    document.documentElement.classList.add('keyboard-open');
+    // Follow the expanding visual viewport while the keyboard animates away —
+    // unless the panel has taken its place, where targetAppHeight is already the
+    // height the app will settle at and following would be the squeeze.
+    const height = targetAppHeight();
+    if (!keyPanelOpen) {
+      document.documentElement.classList.add('keyboard-open');
+    }
     document.documentElement.style.setProperty('--app-height', `${height}px`);
     document.documentElement.style.setProperty('--app-top', '0px');
     lastAppliedViewportHeight = height;
@@ -13342,11 +13378,16 @@ function updateVisualViewport() {
   } else if (keyboardLayoutLock || !keyboardOpen) {
     keyboardSettleState = null;
   }
-  const height =
-    selectionViewportLock?.height ??
-    keyboardLayoutLock?.height ??
-    Math.round(viewport?.height || window.innerHeight);
-  const top = selectionViewportLock?.top ?? keyboardLayoutLock?.top ?? 0;
+  // targetAppHeight first: while the panel is open there is no keyboard height
+  // worth honouring, whatever a lock left behind.
+  const height = keyPanelOpen
+    ? targetAppHeight()
+    : selectionViewportLock?.height ??
+      keyboardLayoutLock?.height ??
+      Math.round(viewport?.height || window.innerHeight);
+  const top = keyPanelOpen
+    ? 0
+    : selectionViewportLock?.top ?? keyboardLayoutLock?.top ?? 0;
   if (
     height === lastAppliedViewportHeight &&
     top === lastAppliedViewportTop
