@@ -762,7 +762,7 @@ const terminalThemes = {
     brightCyan: '#8ec07c',
     brightWhite: '#ebdbb2'
   },
-  // --- Light themes. All three palettes come from the Shiki themes T3 Code ships,
+  // --- Light themes. All four palettes come from the Shiki themes T3 Code ships,
   // including its own house theme, so the ANSI colours are the authors' rather than
   // guesses at light equivalents. See THIRD_PARTY_NOTICES.md.
   //
@@ -4074,6 +4074,13 @@ function clearTerminalSelection() {
     if (!terminalInputIsFocused() && !terminalFocusedBeforeSelection) {
       releaseKeyboardLayoutLock();
     }
+  }
+  // A fit deferred while the selection was up is usually a rotation. When the
+  // keyboard was never involved nothing else flushes it, so the terminal would
+  // keep the old column count until the next resize.
+  if (pendingFitAfterTouch) {
+    pendingFitAfterTouch = false;
+    scheduleFit();
   }
 }
 
@@ -9871,11 +9878,19 @@ function touchDistance(touches) {
 
 function scheduleFit() {
   // Fitting mid-gesture or mid-selection reflows rows and wipes selection.
+  //
+  // hasSelection() is the one that catches rotation. The two flags above it
+  // only cover a selection made while the keyboard was up, or one still being
+  // dragged. Select with no keyboard, lift your finger, then turn the phone:
+  // both flags are false, the fit runs, and the selection is gone before you
+  // can copy it. releaseKeyboardLayoutLock() has always checked hasSelection()
+  // for the same reason.
   if (
     nativeTouchStartX !== null ||
     nativeTouchScrolling ||
     holdKeyboardLayoutForSelection ||
-    xtermTouchSelecting
+    xtermTouchSelecting ||
+    terminal?.hasSelection()
   ) {
     pendingFitAfterTouch = true;
     return;
@@ -10162,8 +10177,14 @@ function finishTouchGesture() {
   if (wasXtermSelecting) {
     updateClipboardButton();
   }
-  // Do not fit while selection still holds the keyboard layout freeze.
-  if (pendingFitAfterTouch && !holdKeyboardLayoutForSelection) {
+  // Do not fit while a selection is still up: the freeze may be holding the
+  // keyboard geometry, and a live selection is wiped by the reflow either way.
+  // clearTerminalSelection() releases both and flushes the fit.
+  if (
+    pendingFitAfterTouch &&
+    !holdKeyboardLayoutForSelection &&
+    !terminal?.hasSelection()
+  ) {
     pendingFitAfterTouch = false;
     scheduleFit();
   }
