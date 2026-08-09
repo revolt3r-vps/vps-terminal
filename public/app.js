@@ -3032,19 +3032,32 @@ function renderKeyPanelAppearance(page) {
     const preview = document.createElement('span');
     preview.className = 'key-panel-theme-preview';
     preview.style.background = theme.background;
-    // Three bars of prompt-ish colour: enough to tell two themes apart at a
-    // glance without pretending to be a real terminal.
-    for (const [width, colour] of [
-      ['80%', theme.green || theme.foreground],
-      ['60%', theme.foreground],
-      ['40%', theme.cyan || theme.blue || theme.foreground]
+    // A line of text and the palette under it.
+    //
+    // Three bars of green, foreground and cyan is what this used to be, and it
+    // made every dark theme look like the last one: those are the three roles
+    // dark palettes agree on. What separates Dracula from Nord from Monokai is
+    // the rest of the ring — the pinks, the oranges, how grey the blue is — so
+    // that is what the swatch shows.
+    const line = document.createElement('span');
+    line.className = 'key-panel-theme-bar';
+    line.style.background = theme.foreground;
+    const ring = document.createElement('span');
+    ring.className = 'key-panel-theme-ring';
+    for (const role of [
+      'red',
+      'yellow',
+      'green',
+      'cyan',
+      'blue',
+      'magenta'
     ]) {
-      const bar = document.createElement('span');
-      bar.className = 'key-panel-theme-bar';
-      bar.style.width = width;
-      bar.style.background = colour;
-      preview.append(bar);
+      const chip = document.createElement('span');
+      chip.className = 'key-panel-theme-chip';
+      chip.style.background = theme[role] || theme.foreground;
+      ring.append(chip);
     }
+    preview.append(line, ring);
 
     const name = document.createElement('span');
     name.className = 'key-panel-theme-name';
