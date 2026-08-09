@@ -3223,7 +3223,12 @@ function runSnippet(id, options = {}) {
   }
   body = body.replace(/\n+$/g, '');
   if (shouldRun) {
-    body = `${body}\n`;
+    // Carriage return, because Run means "and press Enter" and the Enter key
+    // sends CR. A shell cannot tell the two apart — the line discipline maps CR
+    // to NL on the way in — but anything in raw mode can, and reads LF as
+    // "insert a newline" rather than "submit". That is a Run snippet adding a
+    // blank line to an editor or an agent prompt instead of running.
+    body = `${body}\r`;
   }
   if (!body) {
     setStatus('Snippet empty');
