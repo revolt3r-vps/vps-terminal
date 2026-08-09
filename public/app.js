@@ -222,6 +222,10 @@ const chipLongPressMoveTolerance = 10;
 const maximumCustomKeys = 24;
 const maximumCustomKeyLabelLength = 16;
 const maximumCustomKeySequenceLength = 32;
+// What a key in the panel may grow to when the panel has height going spare,
+// and what it never shrinks below. The strip's own keys stay at the minimum.
+const minimumKeyTileHeight = 38;
+const maximumKeyTileHeight = 60;
 const preferencesSyncDebounceMs = 650;
 const maximumPasteImageBytes = 5 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
@@ -2315,7 +2319,9 @@ function renderKeyPanelKeys(page) {
   }
   const editing = keyPanelKeysMode === 'edit';
   const grid = document.createElement('div');
-  grid.className = editing ? 'key-panel-keys editing' : 'key-panel-keys';
+  grid.className = editing
+    ? 'key-panel-keys key-panel-keys-main editing'
+    : 'key-panel-keys key-panel-keys-main';
   if (editing) {
     grid.setAttribute('role', 'list');
     grid.setAttribute('aria-label', 'Keys, editing');
@@ -2339,6 +2345,7 @@ function renderKeyPanelKeys(page) {
         })
       )
     );
+    fitKeyTilesToPanel(grid);
     return;
   }
   installKeyTileReorder(grid);
@@ -2352,6 +2359,40 @@ function renderKeyPanelKeys(page) {
       keyPanelAction('Done', () => setKeyPanelKeysMode('list'))
     )
   );
+  fitKeyTilesToPanel(grid);
+}
+
+/**
+ * Spend the panel's spare height on the keys, up to a point.
+ *
+ * The panel is as tall as the keyboard it replaces. A dozen keys leave two
+ * thirds of that empty, and 38px is the strip's size — chosen for a 44px bar,
+ * not for a surface this big. Rows grow to share what is going spare, capped so
+ * a set of three does not become three slabs, and left alone entirely once the
+ * keys need the room themselves.
+ */
+function fitKeyTilesToPanel(grid) {
+  const tiles = grid.childElementCount;
+  if (tiles === 0) {
+    return;
+  }
+  // After layout: the column count is the grid's own auto-fill answer, and only
+  // the box knows it.
+  window.requestAnimationFrame(() => {
+    if (!grid.isConnected) {
+      return;
+    }
+    const style = window.getComputedStyle(grid);
+    const gap = Number.parseFloat(style.rowGap) || 0;
+    const columns = style.gridTemplateColumns.split(' ').filter(Boolean).length;
+    const rows = Math.ceil(tiles / Math.max(1, columns));
+    const available = grid.getBoundingClientRect().height - (rows - 1) * gap;
+    const height = Math.floor(available / rows);
+    grid.style.setProperty(
+      '--key-tile-height',
+      `${Math.max(minimumKeyTileHeight, Math.min(height, maximumKeyTileHeight))}px`
+    );
+  });
 }
 
 /**
@@ -2384,7 +2425,7 @@ function keyPanelAction(label, onClick, options = {}) {
 /** The secondaries of a held modifier, where the grid usually is. */
 function createKeyPanelChordGrid() {
   const grid = document.createElement('div');
-  grid.className = 'key-panel-keys';
+  grid.className = 'key-panel-keys key-panel-keys-main';
   const definition = modifierChordDefinitions[footerChordModifier];
   const lead = document.createElement('button');
   lead.type = 'button';
@@ -3163,19 +3204,33 @@ function installChipLongPress(button, { onTap, onHold }) {
   });
 }
 
+/**
+ * The gestures, and only the gestures.
+ *
+ * This was a paragraph that described the app to someone already using it: what
+ * the key bar carries (visible), what the gear opens (you are inside it), what
+ * it is called (in the title). What is left is the three things a surface
+ * cannot show you, because nothing about a key says it can be held.
+ */
+const appHelpGestures = [
+  ['Hold a key', 'reorder, remove, add'],
+  ['Swipe the terminal', 'previous or next session'],
+  ['Tap the connection dot', 'reconnect']
+];
+
 function updateAppHelpPanel() {
   const help = document.querySelector('#app-help-text');
   if (!help) {
     return;
   }
-  help.textContent = [
-    `${appDisplayName}.`,
-    'The key bar carries every key you have; Search is at the end of it.',
-    'The gear opens the panel — keys, snippets, paste and appearance — where the keyboard would be.',
-    'Edit in the panel, or hold any key there, to reorder, remove, or add one.',
-    'Swipe the terminal sideways to change session; tap the connection dot to reconnect a dropped one.',
-    'Keys reach the session even when focus is on chrome, except reserved browser shortcuts (Ctrl/Cmd+R, etc.).'
-  ].join(' ');
+  help.replaceChildren();
+  for (const [gesture, result] of appHelpGestures) {
+    const term = document.createElement('dt');
+    term.textContent = gesture;
+    const detail = document.createElement('dd');
+    detail.textContent = result;
+    help.append(term, detail);
+  }
 }
 
 async function loadAppConfig() {

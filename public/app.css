@@ -2673,7 +2673,18 @@ body.files-view #key-panel {
 .key-panel-keys {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(56px, 1fr));
+  grid-auto-rows: var(--key-tile-height, var(--key-height));
   gap: var(--key-gap);
+}
+
+/*
+ * The grid that owns the page takes what the page does not need, and
+ * fitKeyTilesToPanel spends it on row height. The picker's grids sit in a
+ * scrolling list and keep the strip's size.
+ */
+.key-panel-keys-main {
+  flex: 1 1 auto;
+  align-content: start;
 }
 
 .key-panel-key {
@@ -3068,6 +3079,27 @@ body.files-view #key-panel {
   color: var(--muted);
   font-size: var(--control-font);
   font-weight: 600;
+}
+
+/* The three gestures, as rows rather than a paragraph about them. */
+.key-panel-hints {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 0;
+  padding: 2px 0;
+}
+
+.key-panel-hints dt {
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.key-panel-hints dd {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
 }
 
 /* An empty tab still says something; a blank panel looks broken. */
