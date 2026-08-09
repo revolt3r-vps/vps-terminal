@@ -1,6 +1,6 @@
 {
   "name": "vps-terminal",
-  "version": "1.9.2",
+  "version": "1.9.3",
   "private": false,
   "description": "Mobile-first tmux terminal PWA for a Linux host (reverse-proxy auth)",
   "license": "MIT",
