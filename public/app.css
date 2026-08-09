@@ -2898,22 +2898,58 @@ body.files-view #key-panel {
  * button you can flip, and remove sits at the end where the eye already goes
  * for it.
  */
-.key-panel-list.editing {
-  touch-action: none;
-}
-
+/* No touch-action here on purpose: the list scrolls, and taking the vertical
+   gesture for a drag froze it. The arrows do the moving. */
 .key-panel-list.editing .key-panel-item {
   grid-template-columns: minmax(0, 1fr) auto auto;
   grid-template-areas:
-    'label mode remove'
-    'detail mode remove';
-  cursor: grab;
+    'label mode controls'
+    'detail mode controls';
+}
+
+.key-panel-item-controls {
+  grid-area: controls;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.key-panel-item-move,
+.key-panel-item-edit {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.key-panel-item-move:disabled {
+  opacity: 0.3;
+}
+
+.key-panel-item-edit svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
 }
 
 .key-panel-list.editing .key-panel-item-mode {
   min-width: 0;
-  min-height: 30px;
-  padding: 0 8px;
+  min-height: 26px;
+  padding: 0 7px;
   border: 1px solid var(--control-border);
   border-radius: 999px;
   background: var(--surface);
@@ -2938,12 +2974,6 @@ body.files-view #key-panel {
   line-height: 1;
 }
 
-.key-panel-item.dragging {
-  z-index: 2;
-  cursor: grabbing;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.5);
-  opacity: 0.92;
-}
 
 /* Font size: two steppers either side of the current value. */
 .key-panel-size {

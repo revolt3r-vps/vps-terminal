@@ -50,7 +50,6 @@ const filesOptionsDialog = document.querySelector('#files-options-dialog');
 const filesOptionsClose = document.querySelector('#files-options-close');
 const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
 const filesOptionHidden = document.querySelector('#files-option-hidden');
-const filesOptionSettings = document.querySelector('#files-option-settings');
 const filesStartSessionButtons = document.querySelectorAll(
   '[data-files-start-session]'
 );
@@ -2068,11 +2067,13 @@ function renderFooterDrawer() {
  * this covers the keyboard, which you were not using anyway.
  */
 
-const keyPanelTabs = ['keys', 'snippets', 'paste', 'appearance', 'app'];
+// Paste leads: it is the tab reached for most, and the one whose rows are all
+// one tap. The order here is the order in the strip.
+const keyPanelTabs = ['paste', 'keys', 'snippets', 'appearance', 'app'];
 // Non-zero once a keyboard has actually been seen this session.
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
-let keyPanelTab = 'keys';
+let keyPanelTab = keyPanelTabs[0];
 // What the Keys tab is doing: sending keys, editing them, or picking a new one.
 // Never persisted — an edit mode that survived a reload would be a surprise.
 let keyPanelKeysMode = 'list';
@@ -2216,7 +2217,7 @@ function loadKeyPanelTab() {
   } catch {
     // Default below.
   }
-  return 'keys';
+  return keyPanelTabs[0];
 }
 
 function setKeyPanelKeysMode(mode) {
@@ -2230,7 +2231,7 @@ function setKeyPanelSnippetsMode(mode) {
 }
 
 function setKeyPanelTab(tab) {
-  keyPanelTab = keyPanelTabs.includes(tab) ? tab : 'keys';
+  keyPanelTab = keyPanelTabs.includes(tab) ? tab : keyPanelTabs[0];
   if (keyPanelTab !== 'keys') {
     keyPanelKeysMode = 'list';
   }
@@ -2375,7 +2376,12 @@ function renderKeyPanelKeys(page) {
   // and row 2 is behind the panel. Editing waits until it is released.
   if (footerChordModifier) {
     keyPanelKeysMode = 'list';
-    page.replaceChildren(createKeyPanelChordGrid());
+    page.replaceChildren(
+      keyPanelGroupLabel(
+        `${modifierChordDefinitions[footerChordModifier].label} held`
+      ),
+      createKeyPanelChordGrid()
+    );
     return;
   }
   if (keyPanelKeysMode === 'add') {
@@ -2383,6 +2389,7 @@ function renderKeyPanelKeys(page) {
     return;
   }
   const editing = keyPanelKeysMode === 'edit';
+  const heading = keyPanelGroupLabel(editing ? 'Editing keys' : 'Keys');
   const grid = document.createElement('div');
   grid.className = editing
     ? 'key-panel-keys key-panel-keys-main editing'
@@ -2403,6 +2410,7 @@ function renderKeyPanelKeys(page) {
     // control that says it. In the pinned row, where every other page keeps
     // theirs, rather than as a tile pretending to be a key.
     page.replaceChildren(
+      heading,
       grid,
       createKeyPanelActions(
         keyPanelAction('Edit', () => setKeyPanelKeysMode('edit'), {
@@ -2415,6 +2423,7 @@ function renderKeyPanelKeys(page) {
   }
   installKeyTileReorder(grid);
   page.replaceChildren(
+    heading,
     grid,
     createKeyPanelActions(
       keyPanelAction('Add key', () => setKeyPanelKeysMode('add')),
@@ -2585,11 +2594,14 @@ function createKeyPanelKeyTile(id, def, editing) {
 }
 
 /**
- * The pointer half of a reorderable list: press, drag, drop — and a tap that
- * never moved, which is a different thing and belongs to the caller.
+ * The pointer half of a reorderable grid: press, drag, drop.
+ *
+ * Only for something that fits without scrolling. A list that scrolls wants the
+ * same vertical gesture, and taking it — which is what touch-action: none does —
+ * freezes the list instead.
  */
 function installReorder(container, options) {
-  const { itemSelector, ignoreSelector, onDrop, onTap } = options;
+  const { itemSelector, ignoreSelector, onDrop } = options;
   let dragging = null;
   let dragPointerId = null;
   let grabX = 0;
@@ -2658,15 +2670,12 @@ function installReorder(container, options) {
     if (!dragging) {
       return;
     }
-    const tapped = !moved ? dragging.dataset.reorderId : null;
     dragging.classList.remove('dragging');
     dragging.style.transform = '';
     dragging = null;
     dragPointerId = null;
-    if (tapped !== null && onTap) {
-      onTap(tapped);
-      return;
-    }
+    // A press that never moved is not a reorder, and saving one would write the
+    // order back for nothing.
     if (moved) {
       onDrop(items().map((item) => item.dataset.reorderId));
     }
@@ -2719,6 +2728,7 @@ function renderKeyPanelKeyPicker(page) {
 
   const body = document.createElement('div');
   body.className = 'key-panel-groups';
+  body.append(keyPanelGroupLabel('Add a key'));
   for (const group of groups) {
     const heading = keyPanelGroupLabel(group.label);
     const grid = document.createElement('div');
@@ -2764,11 +2774,30 @@ function renderKeyPanelKeyPicker(page) {
  * the panel's space back — with the field still in it. The panel closes and
  * this opens instead.
  */
-function showInputDialog(title, body, actions) {
+function showInputDialog(title, body, actions, options = {}) {
   if (!inputDialogElement) {
     return;
   }
+  // Where it was opened from, so the sheet can put it back. Closing the panel
+  // to make room for a keyboard should not cost you your place in it.
+  const returning = options.returnToPanel === true && keyPanelOpen;
+  const tab = keyPanelTab;
+  const keysMode = keyPanelKeysMode;
+  const snippetsMode = keyPanelSnippetsMode;
   setKeyPanelOpen(false);
+  if (returning) {
+    inputDialogElement.addEventListener(
+      'close',
+      () => {
+        setKeyPanelOpen(true);
+        setKeyPanelTab(tab);
+        keyPanelKeysMode = keysMode;
+        keyPanelSnippetsMode = snippetsMode;
+        renderKeyPanel();
+      },
+      { once: true }
+    );
+  }
   const heading = document.createElement('strong');
   heading.className = 'input-dialog-title';
   heading.textContent = title;
@@ -2877,6 +2906,7 @@ function openCustomKeyDialog() {
   type.setAttribute('aria-label', 'Custom key type');
   for (const option of [
     { value: 'ctrl', label: 'Ctrl+letter' },
+    { value: 'alt', label: 'Alt+letter' },
     { value: 'scroll', label: 'Scroll' },
     { value: 'text', label: 'Sequence' }
   ]) {
@@ -2905,12 +2935,16 @@ function openCustomKeyDialog() {
   }
 
   const syncFields = () => {
-    value.hidden = type.value !== 'ctrl' && type.value !== 'text';
+    value.hidden =
+      type.value !== 'ctrl' && type.value !== 'alt' && type.value !== 'text';
     scroll.hidden = type.value !== 'scroll';
-    if (type.value === 'ctrl') {
+    if (type.value === 'ctrl' || type.value === 'alt') {
       value.placeholder = 'letter (a–z)';
       value.maxLength = 1;
-      value.setAttribute('aria-label', 'Ctrl letter');
+      value.setAttribute(
+        'aria-label',
+        type.value === 'ctrl' ? 'Ctrl letter' : 'Alt letter'
+      );
     } else if (type.value === 'text') {
       value.placeholder = 'text or \\e \\x1b \\n';
       value.maxLength = 64;
@@ -2939,7 +2973,7 @@ function openCustomKeyDialog() {
       inputDialogElement.close();
     }
   });
-  showInputDialog('Custom key', form, [add]);
+  showInputDialog('Custom key', form, [add], { returnToPanel: true });
   label.focus();
 }
 
@@ -2959,6 +2993,7 @@ function renderKeyPanelSnippets(page) {
       page,
       snippetsRequested ? 'No snippets yet.' : 'Loading…'
     );
+    page.prepend(keyPanelGroupLabel('Snippets'));
     page.append(
       createKeyPanelActions(
         keyPanelAction('Add snippet', () => openSnippetDialog(null))
@@ -2969,6 +3004,7 @@ function renderKeyPanelSnippets(page) {
     }
     return;
   }
+  const heading = keyPanelGroupLabel(editing ? 'Editing snippets' : 'Snippets');
   const list = document.createElement('div');
   list.className = editing ? 'key-panel-list editing' : 'key-panel-list';
   if (editing) {
@@ -2980,6 +3016,7 @@ function renderKeyPanelSnippets(page) {
   }
   if (!editing) {
     page.replaceChildren(
+      heading,
       list,
       createKeyPanelActions(
         keyPanelAction('Edit', () => setKeyPanelSnippetsMode('edit'), {
@@ -2989,15 +3026,8 @@ function renderKeyPanelSnippets(page) {
     );
     return;
   }
-  installReorder(list, {
-    itemSelector: '.key-panel-item[data-reorder-id]',
-    ignoreSelector: '.key-panel-item-remove, .key-panel-item-mode',
-    onDrop: (order) => void reorderSnippets(order),
-    // A press that never moved is not a drag. On a row that holds a command,
-    // it is the way in to change it.
-    onTap: (id) => openSnippetDialog(snippetsList.find((e) => e.id === id))
-  });
   page.replaceChildren(
+    heading,
     list,
     createKeyPanelActions(
       keyPanelAction('Add snippet', () => openSnippetDialog(null)),
@@ -3054,10 +3084,8 @@ function createKeyPanelSnippetRow(snippet, editing) {
 
   const item = document.createElement('div');
   item.className = 'key-panel-item';
-  item.dataset.reorderId = snippet.id;
+  item.dataset.snippetId = snippet.id;
   item.setAttribute('role', 'listitem');
-  item.tabIndex = 0;
-  item.title = `Drag to move ${snippet.label}`;
 
   // The mode is the toggle now. It said Run or Insert and did nothing; a tap
   // was the obvious thing to try, and it is one field on one snippet.
@@ -3080,17 +3108,48 @@ function createKeyPanelSnippetRow(snippet, editing) {
   remove.textContent = '×';
   remove.title = `Remove ${snippet.label}`;
   remove.setAttribute('aria-label', `Remove ${snippet.label}`);
-  remove.addEventListener('click', () => void removeSnippet(snippet.id));
-
-  item.addEventListener('keydown', (event) => {
-    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
-      return;
+  // Asked for, because a snippet is typed once and kept for months, and the ×
+  // sits a thumb's width from the arrows.
+  remove.addEventListener('click', () => {
+    if (window.confirm(`Delete the “${snippet.label}” snippet?`)) {
+      void removeSnippet(snippet.id);
     }
-    event.preventDefault();
-    void moveSnippet(snippet.id, event.key === 'ArrowUp' ? -1 : 1);
   });
 
-  item.append(label, body, mode, remove);
+  const index = snippetsList.findIndex((entry) => entry.id === snippet.id);
+  const move = (direction, glyph, name) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'key-panel-item-move';
+    button.textContent = glyph;
+    button.title = `Move ${snippet.label} ${name}`;
+    button.setAttribute('aria-label', `Move ${snippet.label} ${name}`);
+    button.disabled =
+      direction < 0 ? index <= 0 : index >= snippetsList.length - 1;
+    button.addEventListener('click', () => void moveSnippet(snippet.id, direction));
+    return button;
+  };
+
+  const edit = document.createElement('button');
+  edit.type = 'button';
+  edit.className = 'key-panel-item-edit';
+  // The same pencil the session rename wears. A text pencil renders as a colour
+  // emoji on iOS, the only glyph in the panel that would.
+  edit.innerHTML =
+    '<svg viewBox="0 0 16 16" aria-hidden="true">' +
+    '<path d="M10.5 2.5l3 3-7.5 7.5H3v-3z" /></svg>';
+  edit.title = `Edit ${snippet.label}`;
+  edit.setAttribute('aria-label', `Edit ${snippet.label}`);
+  edit.addEventListener('click', () => openSnippetDialog(snippet));
+
+  // Arrows rather than a drag. The list scrolls, and a vertical drag would have
+  // to take the gesture from the scroll to work at all — which is what it did:
+  // holding a snippet froze the list.
+  const controls = document.createElement('div');
+  controls.className = 'key-panel-item-controls';
+  controls.append(move(-1, '↑', 'up'), move(1, '↓', 'down'), edit, remove);
+
+  item.append(label, body, mode, controls);
   return item;
 }
 
@@ -3377,7 +3436,12 @@ function renderKeyPanelAppearance(page) {
     });
     grid.append(card);
   }
-  page.replaceChildren(size, grid);
+  page.replaceChildren(
+    keyPanelGroupLabel('Text size'),
+    size,
+    keyPanelGroupLabel('Theme'),
+    grid
+  );
 }
 
 /** The stepper half of what pinch-to-zoom already does, sharing its state. */
@@ -3688,15 +3752,6 @@ async function commitSnippets(next, done) {
   }
 }
 
-async function reorderSnippets(order) {
-  const byId = new Map(snippetsList.map((entry) => [entry.id, entry]));
-  const next = order.map((id) => byId.get(id)).filter(Boolean);
-  if (next.length !== snippetsList.length) {
-    renderKeyPanel();
-    return;
-  }
-  await commitSnippets(next);
-}
 
 async function setSnippetRun(id, run) {
   await commitSnippets(
@@ -3793,7 +3848,9 @@ function openSnippetDialog(snippet) {
       }
     });
   });
-  showInputDialog(snippet ? 'Edit snippet' : 'New snippet', form, [save]);
+  showInputDialog(snippet ? 'Edit snippet' : 'New snippet', form, [save], {
+    returnToPanel: true
+  });
   label.focus();
 }
 
@@ -3900,20 +3957,25 @@ function addCustomKey({ type, label: requestedLabel, value, scroll }) {
   let label = sanitizeCustomKeyLabel(requestedLabel || '');
   let def = null;
 
-  if (type === 'ctrl') {
+  if (type === 'ctrl' || type === 'alt') {
     const letter = String(value || '').trim().toLowerCase();
     if (!/^[a-z]$/.test(letter)) {
-      setStatus('Enter a letter a–z for Ctrl+…');
+      setStatus(`Enter a letter a–z for ${type === 'ctrl' ? 'Ctrl' : 'Alt'}+…`);
       return false;
     }
     if (!label) {
-      label = `Ctrl+${letter.toUpperCase()}`;
+      label = `${type === 'ctrl' ? 'Ctrl' : 'Alt'}+${letter.toUpperCase()}`;
     }
     def = {
       id: createCustomKeyId(),
       label,
       kind: 'sequence',
-      sequence: String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64)
+      // The same bytes the modifier row sends: a control code for Ctrl, an
+      // escape prefix for Alt. foldModifierInput is the other half of this.
+      sequence:
+        type === 'ctrl'
+          ? String.fromCharCode(letter.toUpperCase().charCodeAt(0) - 64)
+          : `\u001b${letter}`
     };
   } else if (type === 'scroll') {
     if (scroll !== 'up' && scroll !== 'down' && scroll !== 'bottom') {
@@ -13165,10 +13227,6 @@ filesNameCancel?.addEventListener('click', () => {
 filesNameForm?.addEventListener('submit', (event) => {
   event.preventDefault();
   void submitFilesName();
-});
-filesOptionSettings?.addEventListener('click', () => {
-  closeFilesOptions();
-  openTerminalSettings();
 });
 filesActionsDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
