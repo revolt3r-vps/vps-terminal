@@ -92,10 +92,12 @@ See [docs/auth-google.md](docs/auth-google.md) and
 
 - tmux session list, create, rename, kill
 - xterm.js terminal, reconnect, scrollback find
-- Mobile footer: a scrolling key bar, snippets, paste helpers
+- Mobile footer: a scrolling key bar with every key on it
+- A panel where the keyboard would be: paste, keys, snippets, appearance
 - One editable key set and one snippet list, both edited in place: hold one to
   reorder, remove or change it, with optional per-login setup sync across
   browsers
+- Paste from the clipboard, a device file, or your password manager
 - App-wide adaptive terminal themes
 - Hardware keyboard support when focus is on chrome
 - Files workspace with jailed Locations, preview, rename, new folders, and
