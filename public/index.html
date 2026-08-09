@@ -421,48 +421,7 @@
 
     <div id="status" role="status" aria-live="polite"></div>
 
-    <!-- Snippets only, since keys moved into the panel. No heading row: a title
-         plus a close button cost ~110px of a 844px screen to say what the one
-         section already says. Dismissal is the backdrop tap
-         installDialogBackdropDismiss wires up, plus Escape. -->
-    <dialog id="settings-dialog" aria-label="Snippets">
-      <div class="settings-panels">
-        <section class="settings-panel" aria-label="Snippet Library">
-          <p class="settings-hint">
-            One list, shared across devices. Keys are edited in the panel: hold
-            one to reorder, remove, or add.
-            <strong>Run</strong> = execute, off = insert only.
-          </p>
-          <ul id="snippet-editor-list"></ul>
-          <div class="settings-snippet-edit">
-            <input
-              id="snippet-label-input"
-              type="text"
-              maxlength="32"
-              placeholder="Label"
-              autocomplete="off"
-              spellcheck="false"
-            >
-            <textarea
-              id="snippet-body-input"
-              rows="3"
-              maxlength="4000"
-              placeholder="Command body"
-              spellcheck="false"
-            ></textarea>
-            <label class="settings-check" for="snippet-run-input">
-              <input id="snippet-run-input" type="checkbox" checked>
-              <span>Run</span>
-              <span class="settings-check-hint">send Enter after insert</span>
-            </label>
-            <button id="snippet-save" type="button">Add snippet</button>
-          </div>
-          <button id="snippet-reset" type="button" class="settings-secondary">
-            Reset snippet defaults
-          </button>
-        </section>
-      </div>
-    </dialog>
+    
 
     <!--
       Anything in the app that needs typing.

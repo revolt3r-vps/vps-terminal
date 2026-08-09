@@ -105,14 +105,7 @@ const keyPanelKeyboardButton = document.querySelector('#key-panel-keyboard');
 const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
-const settingsDialogElement = document.querySelector('#settings-dialog');
 const inputDialogElement = document.querySelector('#input-dialog');
-const snippetEditorList = document.querySelector('#snippet-editor-list');
-const snippetLabelInput = document.querySelector('#snippet-label-input');
-const snippetBodyInput = document.querySelector('#snippet-body-input');
-const snippetRunInput = document.querySelector('#snippet-run-input');
-const snippetSaveButton = document.querySelector('#snippet-save');
-const snippetResetButton = document.querySelector('#snippet-reset');
 const findBarElement = document.querySelector('#find-bar');
 const findInputElement = document.querySelector('#find-input');
 const findPrevButton = document.querySelector('#find-prev');
@@ -989,7 +982,10 @@ let connectionWatchTimer = null;
 let appDisplayName = 'VPS Terminal';
 let snippetsList = [];
 let snippetsLoadPromise = null;
-let snippetEditorSelectedId = null;
+// Whether the list has been asked for at all. An account with no snippets is
+// indistinguishable from one that has not loaded yet, and the Snippets tab
+// fetches on the difference.
+let snippetsRequested = false;
 let keySetDocument = null;
 let sessionThemesMemory = null;
 const hadDurablePreferencesAtBoot = hasDurableBrowserPreferences();
@@ -2080,6 +2076,8 @@ let keyPanelTab = 'keys';
 // What the Keys tab is doing: sending keys, editing them, or picking a new one.
 // Never persisted — an edit mode that survived a reload would be a surprise.
 let keyPanelKeysMode = 'list';
+// The same, for the Snippets tab: running them, or editing the list.
+let keyPanelSnippetsMode = 'list';
 // Pixels handed to the footer because no terminal row can use them. Mirrored in
 // --terminal-slack; see syncTerminalSlack.
 let terminalSlack = 0;
@@ -2226,10 +2224,18 @@ function setKeyPanelKeysMode(mode) {
   renderKeyPanel();
 }
 
+function setKeyPanelSnippetsMode(mode) {
+  keyPanelSnippetsMode = mode === 'edit' ? 'edit' : 'list';
+  renderKeyPanel();
+}
+
 function setKeyPanelTab(tab) {
   keyPanelTab = keyPanelTabs.includes(tab) ? tab : 'keys';
   if (keyPanelTab !== 'keys') {
     keyPanelKeysMode = 'list';
+  }
+  if (keyPanelTab !== 'snippets') {
+    keyPanelSnippetsMode = 'list';
   }
   try {
     window.localStorage.setItem(keyPanelTabStorageKey, keyPanelTab);
@@ -2265,6 +2271,7 @@ function setKeyPanelOpen(open) {
   }
   keyPanelOpen = next;
   keyPanelKeysMode = 'list';
+  keyPanelSnippetsMode = 'list';
   if (next) {
     // The keyboard being replaced is still up and still measurable, and this is
     // the last moment it will be: the blur below is what ends it. Taking the
@@ -2522,7 +2529,7 @@ function createKeyPanelKeyTile(id, def, editing) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'key-panel-key';
-    button.dataset.keyId = id;
+    button.dataset.reorderId = id;
     button.textContent = def.label;
     button.title = def.label;
     if (def.kind === 'modifier' && modifierChipIsHeld(def.modifier)) {
@@ -2542,7 +2549,7 @@ function createKeyPanelKeyTile(id, def, editing) {
 
   const tile = document.createElement('div');
   tile.className = 'key-panel-key';
-  tile.dataset.keyId = id;
+  tile.dataset.reorderId = id;
   tile.setAttribute('role', 'listitem');
   tile.tabIndex = 0;
   tile.title = `Drag to move ${def.label}`;
@@ -2570,7 +2577,7 @@ function createKeyPanelKeyTile(id, def, editing) {
     event.preventDefault();
     moveShortcut(id, event.key === 'ArrowLeft' ? -1 : 1);
     keyPanelBodyElement
-      ?.querySelector(`.key-panel-key[data-key-id="${CSS.escape(id)}"]`)
+      ?.querySelector(`.key-panel-key[data-reorder-id="${CSS.escape(id)}"]`)
       ?.focus();
   });
   tile.append(label, remove);
@@ -2578,54 +2585,67 @@ function createKeyPanelKeyTile(id, def, editing) {
 }
 
 /**
- * Drag to reorder, the way icons move on a home screen.
- *
- * Pointer events rather than HTML5 drag, which never fires on touch. The tile
- * under the finger is found with elementFromPoint, with the dragged tile taken
- * out of hit testing for the call, so tiles swap as you cross them rather than
- * on release.
+ * The pointer half of a reorderable list: press, drag, drop — and a tap that
+ * never moved, which is a different thing and belongs to the caller.
  */
-function installKeyTileReorder(grid) {
+function installReorder(container, options) {
+  const { itemSelector, ignoreSelector, onDrop, onTap } = options;
   let dragging = null;
   let dragPointerId = null;
   let grabX = 0;
   let grabY = 0;
-  const tiles = () => [...grid.querySelectorAll('.key-panel-key[data-key-id]')];
+  let startX = 0;
+  let startY = 0;
+  let moved = false;
+  const items = () => [...container.querySelectorAll(itemSelector)];
 
-  grid.addEventListener('pointerdown', (event) => {
-    const tile = event.target.closest?.('.key-panel-key[data-key-id]');
+  container.addEventListener('pointerdown', (event) => {
+    const item = event.target.closest?.(itemSelector);
     if (
-      !tile ||
+      !item ||
       event.button !== 0 ||
-      event.target.closest?.('.key-panel-key-remove')
+      (ignoreSelector && event.target.closest?.(ignoreSelector))
     ) {
       return;
     }
-    const box = tile.getBoundingClientRect();
-    dragging = tile;
+    const box = item.getBoundingClientRect();
+    dragging = item;
     dragPointerId = event.pointerId;
     grabX = event.clientX - box.left;
     grabY = event.clientY - box.top;
-    tile.classList.add('dragging');
-    tile.setPointerCapture(event.pointerId);
+    startX = event.clientX;
+    startY = event.clientY;
+    moved = false;
+    item.classList.add('dragging');
+    item.setPointerCapture(event.pointerId);
   });
 
-  grid.addEventListener('pointermove', (event) => {
+  container.addEventListener('pointermove', (event) => {
     if (!dragging || event.pointerId !== dragPointerId) {
       return;
     }
     event.preventDefault();
+    // Below the tolerance this is still a tap. A row that opens an editor
+    // cannot treat the first pixel of a press as a drag, or it never opens.
+    if (
+      !moved &&
+      Math.hypot(event.clientX - startX, event.clientY - startY) <=
+        chipLongPressMoveTolerance
+    ) {
+      return;
+    }
+    moved = true;
     dragging.style.pointerEvents = 'none';
     const under = document
       .elementFromPoint(event.clientX, event.clientY)
-      ?.closest?.('.key-panel-key[data-key-id]');
+      ?.closest?.(itemSelector);
     dragging.style.pointerEvents = '';
-    if (under && under !== dragging && grid.contains(under)) {
-      const order = tiles();
+    if (under && under !== dragging && container.contains(under)) {
+      const order = items();
       const forward = order.indexOf(under) > order.indexOf(dragging);
-      grid.insertBefore(dragging, forward ? under.nextSibling : under);
+      container.insertBefore(dragging, forward ? under.nextSibling : under);
     }
-    // Measured after any swap, so the offset is against where the tile now
+    // Measured after any swap, so the offset is against where the item now
     // sits rather than where the drag started.
     dragging.style.transform = '';
     const box = dragging.getBoundingClientRect();
@@ -2638,15 +2658,40 @@ function installKeyTileReorder(grid) {
     if (!dragging) {
       return;
     }
+    const tapped = !moved ? dragging.dataset.reorderId : null;
     dragging.classList.remove('dragging');
     dragging.style.transform = '';
     dragging = null;
     dragPointerId = null;
-    saveShortcutIds(tiles().map((tile) => tile.dataset.keyId));
-    refreshKeysUi();
+    if (tapped !== null && onTap) {
+      onTap(tapped);
+      return;
+    }
+    if (moved) {
+      onDrop(items().map((item) => item.dataset.reorderId));
+    }
   };
-  grid.addEventListener('pointerup', drop);
-  grid.addEventListener('pointercancel', drop);
+  container.addEventListener('pointerup', drop);
+  container.addEventListener('pointercancel', drop);
+}
+
+/**
+ * Drag to reorder, the way icons move on a home screen.
+ *
+ * Pointer events rather than HTML5 drag, which never fires on touch. The item
+ * under the finger is found with elementFromPoint, with the dragged one taken
+ * out of hit testing for the call, so they swap as you cross them rather than
+ * on release.
+ */
+function installKeyTileReorder(grid) {
+  installReorder(grid, {
+    itemSelector: '.key-panel-key[data-reorder-id]',
+    ignoreSelector: '.key-panel-key-remove',
+    onDrop: (order) => {
+      saveShortcutIds(order);
+      refreshKeysUi();
+    }
+  });
 }
 
 /**
@@ -2907,72 +2952,148 @@ function openCustomKeyDialog() {
  * is standing in the keyboard's place.
  */
 function renderKeyPanelSnippets(page) {
+  const editing = keyPanelSnippetsMode === 'edit';
   if (snippetsList.length === 0) {
-    // The button comes too. It is the only way into the dialog now, so an empty
-    // list must not be a dead end.
-    renderKeyPanelPlaceholder(page, 'No snippets yet.');
-    page.append(createKeyPanelActions(createSnippetLibraryButton()));
-    void loadSnippetsFromServer();
+    keyPanelSnippetsMode = 'list';
+    renderKeyPanelPlaceholder(
+      page,
+      snippetsRequested ? 'No snippets yet.' : 'Loading…'
+    );
+    page.append(
+      createKeyPanelActions(
+        keyPanelAction('Add snippet', () => openSnippetDialog(null))
+      )
+    );
+    if (!snippetsRequested) {
+      void loadSnippetsFromServer();
+    }
     return;
   }
   const list = document.createElement('div');
-  list.className = 'key-panel-list';
-  for (const snippet of snippetsList) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'key-panel-item';
-    item.dataset.snippetId = snippet.id;
-
-    const label = document.createElement('span');
-    label.className = 'key-panel-item-label';
-    label.textContent = snippet.label;
-
-    const body = document.createElement('span');
-    body.className = 'key-panel-item-detail';
-    body.textContent = snippet.body.replace(/\s+/g, ' ').trim().slice(0, 80);
-
-    const mode = document.createElement('span');
-    mode.className = 'key-panel-item-mode';
-    mode.textContent = snippet.run === false ? 'Insert' : 'Run';
-
-    item.append(label, body, mode);
-    item.addEventListener('click', () => {
-      const inserts = snippet.run === false;
-      runSnippet(snippet.id);
-      // Either way the panel closes. Insert additionally hands the keyboard
-      // back, because inserting is how you say you will finish the command
-      // yourself — leaving the panel up would only be in the way.
-      if (inserts) {
-        keyPanelShowKeyboard();
-      } else {
-        setKeyPanelOpen(false);
-      }
-    });
-    list.append(item);
+  list.className = editing ? 'key-panel-list editing' : 'key-panel-list';
+  if (editing) {
+    list.setAttribute('role', 'list');
+    list.setAttribute('aria-label', 'Snippets, editing');
   }
+  for (const snippet of snippetsList) {
+    list.append(createKeyPanelSnippetRow(snippet, editing));
+  }
+  if (!editing) {
+    page.replaceChildren(
+      list,
+      createKeyPanelActions(
+        keyPanelAction('Edit', () => setKeyPanelSnippetsMode('edit'), {
+          title: 'Edit snippets — or hold one'
+        })
+      )
+    );
+    return;
+  }
+  installReorder(list, {
+    itemSelector: '.key-panel-item[data-reorder-id]',
+    ignoreSelector: '.key-panel-item-remove, .key-panel-item-mode',
+    onDrop: (order) => void reorderSnippets(order),
+    // A press that never moved is not a drag. On a row that holds a command,
+    // it is the way in to change it.
+    onTap: (id) => openSnippetDialog(snippetsList.find((e) => e.id === id))
+  });
   page.replaceChildren(
     list,
-    createKeyPanelActions(createSnippetLibraryButton())
+    createKeyPanelActions(
+      keyPanelAction('Add snippet', () => openSnippetDialog(null)),
+      keyPanelAction('Reset', () => void resetSnippetsToPresets(), {
+        title: 'Reset snippets to their built-in defaults'
+      }),
+      keyPanelAction('Done', () => setKeyPanelSnippetsMode('list'))
+    )
   );
 }
 
 /**
- * The way to the settings dialog, which is the snippet library and nothing else.
+ * One snippet.
  *
- * The panel's own Customize tab used to open it as well. Two entries into one
- * list of snippets was one too many, and this is the one that sits beside them.
+ * A button while the list runs them, a row item while it edits them: a button
+ * carrying two more buttons is not something a screen reader can describe, and
+ * both remove and the Run toggle have to be real ones.
  */
-function createSnippetLibraryButton() {
-  const edit = document.createElement('button');
-  edit.type = 'button';
-  edit.className = 'key-panel-action';
-  edit.textContent = 'Add or edit snippets';
-  edit.addEventListener('click', () => {
-    setKeyPanelOpen(false);
-    openSettingsDialog();
+function createKeyPanelSnippetRow(snippet, editing) {
+  const label = document.createElement('span');
+  label.className = 'key-panel-item-label';
+  label.textContent = snippet.label;
+
+  const body = document.createElement('span');
+  body.className = 'key-panel-item-detail';
+  body.textContent = snippet.body.replace(/\s+/g, ' ').trim().slice(0, 80);
+
+  const runs = snippet.run !== false;
+  if (!editing) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'key-panel-item';
+    item.dataset.reorderId = snippet.id;
+    const mode = document.createElement('span');
+    mode.className = 'key-panel-item-mode';
+    mode.textContent = runs ? 'Run' : 'Insert';
+    item.append(label, body, mode);
+    installChipLongPress(item, {
+      onTap: () => {
+        runSnippet(snippet.id);
+        // Either way the panel closes. Insert additionally hands the keyboard
+        // back, because inserting is how you say you will finish the command
+        // yourself — leaving the panel up would only be in the way.
+        if (!runs) {
+          keyPanelShowKeyboard();
+        } else {
+          setKeyPanelOpen(false);
+        }
+      },
+      onHold: () => setKeyPanelSnippetsMode('edit')
+    });
+    return item;
+  }
+
+  const item = document.createElement('div');
+  item.className = 'key-panel-item';
+  item.dataset.reorderId = snippet.id;
+  item.setAttribute('role', 'listitem');
+  item.tabIndex = 0;
+  item.title = `Drag to move ${snippet.label}`;
+
+  // The mode is the toggle now. It said Run or Insert and did nothing; a tap
+  // was the obvious thing to try, and it is one field on one snippet.
+  const mode = document.createElement('button');
+  mode.type = 'button';
+  mode.className = 'key-panel-item-mode';
+  mode.textContent = runs ? 'Run' : 'Insert';
+  mode.title = runs
+    ? 'Runs on tap — switch to insert only'
+    : 'Inserts on tap — switch to run';
+  mode.setAttribute(
+    'aria-label',
+    `${snippet.label}: ${runs ? 'runs' : 'inserts'}. Switch.`
+  );
+  mode.addEventListener('click', () => void setSnippetRun(snippet.id, !runs));
+
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'key-panel-item-remove';
+  remove.textContent = '×';
+  remove.title = `Remove ${snippet.label}`;
+  remove.setAttribute('aria-label', `Remove ${snippet.label}`);
+  remove.addEventListener('click', () => void removeSnippet(snippet.id));
+
+  item.addEventListener('keydown', (event) => {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
+      return;
+    }
+    event.preventDefault();
+    void moveSnippet(snippet.id, event.key === 'ArrowUp' ? -1 : 1);
   });
-  return edit;
+
+  item.append(label, body, mode, remove);
+  return item;
 }
+
 
 /**
  * A photo or file from the device, pasted as a path.
@@ -3494,6 +3615,10 @@ async function loadSnippetsFromServer() {
     return snippetsLoadPromise;
   }
   snippetsLoadPromise = (async () => {
+    // Before the request, not after: the tab fetches when it finds the list
+    // empty, and this render is what it looks at. Set on the way out instead
+    // and an empty account loops — render, fetch, render, fetch.
+    snippetsRequested = true;
     try {
       const documentValue = await api('/api/snippets');
       snippetsList = Array.isArray(documentValue.snippets)
@@ -3506,7 +3631,7 @@ async function loadSnippetsFromServer() {
       snippetsLoadPromise = null;
     }
     renderFooterPins();
-    renderSnippetEditor();
+    renderKeyPanel();
     return snippetsList;
   })();
   return snippetsLoadPromise;
@@ -3520,102 +3645,12 @@ async function saveSnippetsToServer(nextList) {
   });
   snippetsList = Array.isArray(saved.snippets) ? saved.snippets : nextList;
   renderFooterPins();
-  renderSnippetEditor();
+  renderKeyPanel();
   return snippetsList;
 }
 
-function renderSnippetEditor() {
-  if (!snippetEditorList) {
-    return;
-  }
-  snippetEditorList.replaceChildren();
-  snippetsList.forEach((snippet, index) => {
-    const item = document.createElement('li');
-    item.className = 'shortcut-editor-item';
-    item.dataset.snippetId = snippet.id;
-    if (snippetEditorSelectedId === snippet.id) {
-      item.classList.add('active');
-    }
 
-    const label = document.createElement('span');
-    label.className = 'shortcut-editor-label';
-    const runMark = snippet.run !== false ? '▸' : '·';
-    label.textContent = `${runMark} ${snippet.label}`;
-    label.title = `${snippet.run !== false ? 'Run' : 'Insert'}: ${snippet.body.slice(0, 120)}`;
 
-    const actions = document.createElement('div');
-    actions.className = 'shortcut-editor-actions';
-
-    const edit = document.createElement('button');
-    edit.type = 'button';
-    edit.dataset.action = 'edit';
-    edit.title = 'Edit';
-    edit.setAttribute('aria-label', `Edit ${snippet.label}`);
-    edit.textContent = '✎';
-
-    const up = document.createElement('button');
-    up.type = 'button';
-    up.dataset.action = 'up';
-    up.title = 'Move up';
-    up.textContent = '↑';
-    up.disabled = index === 0;
-
-    const down = document.createElement('button');
-    down.type = 'button';
-    down.dataset.action = 'down';
-    down.title = 'Move down';
-    down.textContent = '↓';
-    down.disabled = index === snippetsList.length - 1;
-
-    const remove = document.createElement('button');
-    remove.type = 'button';
-    remove.dataset.action = 'remove';
-    remove.title = 'Remove';
-    remove.textContent = '×';
-
-    actions.append(edit, up, down, remove);
-    item.append(label, actions);
-    snippetEditorList.append(item);
-  });
-}
-
-function clearSnippetEditorForm() {
-  snippetEditorSelectedId = null;
-  if (snippetLabelInput) {
-    snippetLabelInput.value = '';
-  }
-  if (snippetBodyInput) {
-    snippetBodyInput.value = '';
-  }
-  if (snippetRunInput) {
-    snippetRunInput.checked = true;
-  }
-  if (snippetSaveButton) {
-    snippetSaveButton.textContent = 'Add snippet';
-  }
-  renderSnippetEditor();
-}
-
-function beginEditSnippet(id) {
-  const snippet = snippetsList.find((entry) => entry.id === id);
-  if (!snippet) {
-    return;
-  }
-  snippetEditorSelectedId = id;
-  if (snippetLabelInput) {
-    snippetLabelInput.value = snippet.label;
-  }
-  if (snippetBodyInput) {
-    snippetBodyInput.value = snippet.body;
-  }
-  if (snippetRunInput) {
-    snippetRunInput.checked = snippet.run !== false;
-  }
-  if (snippetSaveButton) {
-    snippetSaveButton.textContent = 'Save snippet';
-  }
-  renderSnippetEditor();
-}
 
 async function moveSnippet(id, delta) {
   const index = snippetsList.findIndex((entry) => entry.id === id);
@@ -3629,65 +3664,143 @@ async function moveSnippet(id, delta) {
   const copy = [...snippetsList];
   const [item] = copy.splice(index, 1);
   copy.splice(next, 0, item);
+  await commitSnippets(copy);
+}
+
+/**
+ * Save a list, and put the panel back the way the server says it is.
+ *
+ * Every edit here is optimistic — the row has already moved, or gone — so a
+ * failed write has to redraw from state, or the panel keeps showing an order
+ * the server never accepted.
+ */
+async function commitSnippets(next, done) {
   try {
-    await saveSnippetsToServer(copy);
+    await saveSnippetsToServer(next);
+    if (done) {
+      setStatus(done);
+    }
+    return true;
   } catch (error) {
     window.alert(error.message);
+    renderKeyPanel();
+    return false;
   }
+}
+
+async function reorderSnippets(order) {
+  const byId = new Map(snippetsList.map((entry) => [entry.id, entry]));
+  const next = order.map((id) => byId.get(id)).filter(Boolean);
+  if (next.length !== snippetsList.length) {
+    renderKeyPanel();
+    return;
+  }
+  await commitSnippets(next);
+}
+
+async function setSnippetRun(id, run) {
+  await commitSnippets(
+    snippetsList.map((entry) =>
+      entry.id === id ? { ...entry, run } : entry
+    ),
+    `${run ? 'Runs' : 'Inserts'} on tap`
+  );
+}
+
+/**
+ * The one part of a snippet that cannot be edited by pointing at it.
+ *
+ * A label and a body are typing, and typing cannot happen in the panel — the
+ * panel is standing in the keyboard's place. Everything else about a snippet
+ * (order, mode, whether it exists) is a gesture, and stays in the tab.
+ */
+function openSnippetDialog(snippet) {
+  const form = document.createElement('div');
+  form.className = 'input-dialog-form';
+
+  const label = document.createElement('input');
+  label.type = 'text';
+  label.maxLength = 32;
+  label.placeholder = 'Label';
+  label.autocomplete = 'off';
+  label.spellcheck = false;
+  label.setAttribute('aria-label', 'Snippet label');
+  label.value = snippet?.label || '';
+
+  const body = document.createElement('textarea');
+  body.rows = 4;
+  body.maxLength = 4000;
+  body.placeholder = 'Command body';
+  body.spellcheck = false;
+  body.setAttribute('aria-label', 'Snippet body');
+  body.value = snippet?.body || '';
+
+  const runRow = document.createElement('label');
+  runRow.className = 'settings-check';
+  const run = document.createElement('input');
+  run.type = 'checkbox';
+  run.checked = snippet ? snippet.run !== false : true;
+  const runText = document.createElement('span');
+  runText.textContent = 'Run';
+  const runHint = document.createElement('span');
+  runHint.className = 'settings-check-hint';
+  runHint.textContent = 'send Enter after insert';
+  runRow.append(run, runText, runHint);
+
+  form.append(label, body, runRow);
+
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.textContent = snippet ? 'Save' : 'Add snippet';
+  save.addEventListener('click', () => {
+    const cleanLabel = label.value.trim();
+    const cleanBody = body.value
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+    if (!cleanLabel) {
+      window.alert('Label is required');
+      return;
+    }
+    if (!cleanBody.trim()) {
+      window.alert('Body is required');
+      return;
+    }
+    const next = snippet
+      ? snippetsList.map((entry) =>
+          entry.id === snippet.id
+            ? {
+                ...entry,
+                label: cleanLabel,
+                body: cleanBody,
+                run: run.checked,
+                source: entry.source === 'preset' ? 'preset' : 'custom'
+              }
+            : entry
+        )
+      : [
+          ...snippetsList,
+          {
+            id: `c-${Date.now().toString(36)}`,
+            label: cleanLabel,
+            body: cleanBody,
+            run: run.checked,
+            source: 'custom'
+          }
+        ];
+    void commitSnippets(next, 'Snippets saved').then((saved) => {
+      if (saved) {
+        inputDialogElement.close();
+      }
+    });
+  });
+  showInputDialog(snippet ? 'Edit snippet' : 'New snippet', form, [save]);
+  label.focus();
 }
 
 async function removeSnippet(id) {
-  const next = snippetsList.filter((entry) => entry.id !== id);
-  if (snippetEditorSelectedId === id) {
-    clearSnippetEditorForm();
-  }
-  try {
-    await saveSnippetsToServer(next);
-    renderFooterPins();
-  } catch (error) {
-    window.alert(error.message);
-  }
+  await commitSnippets(snippetsList.filter((entry) => entry.id !== id));
 }
 
-async function saveSnippetFromForm() {
-  const label = (snippetLabelInput?.value || '').trim();
-  let body = snippetBodyInput?.value || '';
-  const run = snippetRunInput ? snippetRunInput.checked : true;
-  if (!label) {
-    window.alert('Label is required');
-    return;
-  }
-  if (!body.trim()) {
-    window.alert('Body is required');
-    return;
-  }
-  body = body.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-  const copy = [...snippetsList];
-  if (snippetEditorSelectedId) {
-    const index = copy.findIndex(
-      (entry) => entry.id === snippetEditorSelectedId
-    );
-    if (index >= 0) {
-      copy[index] = {
-        ...copy[index],
-        label,
-        body,
-        run,
-        source: copy[index].source === 'preset' ? 'preset' : 'custom'
-      };
-    }
-  } else {
-    const id = `c-${Date.now().toString(36)}`;
-    copy.push({ id, label, body, run, source: 'custom' });
-  }
-  try {
-    await saveSnippetsToServer(copy);
-    clearSnippetEditorForm();
-    setStatus('Snippets saved');
-  } catch (error) {
-    window.alert(error.message);
-  }
-}
 
 async function resetSnippetsToPresets() {
   if (!window.confirm('Reset snippets to their built-in defaults?')) {
@@ -3698,7 +3811,6 @@ async function resetSnippetsToPresets() {
     // defaults if empty on write — but writeSnippetsDocument sanitize empty
     // becomes defaultSnippetsDocument. Sending { snippets: [] } works.
     await saveSnippetsToServer([]);
-    clearSnippetEditorForm();
     setStatus('Snippets reset');
   } catch (error) {
     window.alert(error.message);
@@ -5052,7 +5164,7 @@ function commandPaletteCommands() {
       id: 'settings.open',
       label: 'Open Settings',
       keywords: 'preferences snippets library',
-      run: () => openSettingsDialog()
+      run: () => openTerminalSettings()
     }
   ];
   // One entry per other session, so switching is a single action rather than
@@ -9253,19 +9365,16 @@ function installDialogBackdropDismiss(dialog, dismiss) {
   });
 }
 
-function openSettingsDialog() {
-  renderAppBuildId();
-  renderKeybindingReference();
-  void loadSnippetsFromServer();
-  // A modal over a raised keyboard leaves both up, with the dialog squeezed into
-  // whatever the keyboard did not take. Hand the space back before showing it.
-  if (terminalInputIsFocused()) {
-    terminal?.blur();
-  }
-  setKeyPanelOpen(false);
-  if (settingsDialogElement && !settingsDialogElement.open) {
-    settingsDialogElement.showModal();
-  }
+/**
+ * Settings live in the panel, and the panel lives in Term.
+ *
+ * There is no settings dialog any more. Everything it held is a tab, and the
+ * three things that need typing — a custom key, a password, a snippet body —
+ * open the input sheet instead.
+ */
+function openTerminalSettings() {
+  setViewMode('term');
+  setKeyPanelOpen(true);
 }
 
 function installSessionRenameLongPress(button, sessionName) {
@@ -12952,9 +13061,7 @@ filesRefreshDesktopButton?.addEventListener('click', () => {
 filesSettingsButton?.addEventListener('click', () => {
   openFilesOptions();
 });
-filesSettingsDesktopButton?.addEventListener('click', () => {
-  openSettingsDialog();
-});
+filesSettingsDesktopButton?.addEventListener('click', openTerminalSettings);
 filesStartSessionButtons.forEach((button) => {
   button.addEventListener('click', openFilesSessionDialog);
 });
@@ -13061,7 +13168,7 @@ filesNameForm?.addEventListener('submit', (event) => {
 });
 filesOptionSettings?.addEventListener('click', () => {
   closeFilesOptions();
-  openSettingsDialog();
+  openTerminalSettings();
 });
 filesActionsDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
@@ -13333,7 +13440,7 @@ function openFooterMenu() {
     toggleKeyPanel();
     return;
   }
-  openSettingsDialog();
+  openTerminalSettings();
 }
 document.querySelector('#settings').addEventListener('click', openFooterMenu);
 headerSettingsButton?.addEventListener('click', openFooterMenu);
@@ -13346,33 +13453,6 @@ keyPanelTabsElement?.addEventListener('click', (event) => {
 keyPanelKeyboardButton?.addEventListener('click', keyPanelShowKeyboard);
 installDialogBackdropDismiss(inputDialogElement, () => {
   inputDialogElement.close();
-});
-installDialogBackdropDismiss(settingsDialogElement, () => {
-  settingsDialogElement.close();
-});
-snippetEditorList?.addEventListener('click', (event) => {
-  const button = event.target.closest('button[data-action]');
-  const item = event.target.closest('.shortcut-editor-item');
-  if (!button || !item || !snippetEditorList.contains(item)) {
-    return;
-  }
-  const id = item.dataset.snippetId;
-  const action = button.dataset.action;
-  if (action === 'edit') {
-    beginEditSnippet(id);
-  } else if (action === 'up') {
-    void moveSnippet(id, -1);
-  } else if (action === 'down') {
-    void moveSnippet(id, 1);
-  } else if (action === 'remove') {
-    void removeSnippet(id);
-  }
-});
-snippetSaveButton?.addEventListener('click', () => {
-  void saveSnippetFromForm();
-});
-snippetResetButton?.addEventListener('click', () => {
-  void resetSnippetsToPresets();
 });
 preferencesSyncEnableButton?.addEventListener('click', () => {
   void enablePreferencesSync();
