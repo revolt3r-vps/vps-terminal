@@ -2824,18 +2824,21 @@ function installReorder(container, options) {
       ?.closest?.(itemSelector);
     dragging.style.pointerEvents = '';
     if (under && under !== dragging && container.contains(under)) {
-      // The tiles being pushed aside slide; the dragged one is excluded because
-      // it is following the finger and must not be given a transition.
-      reorderWithMotion(
-        container,
-        itemSelector,
-        () => {
-          const order = items();
-          const forward = order.indexOf(under) > order.indexOf(dragging);
-          container.insertBefore(dragging, forward ? under.nextSibling : under);
-        },
-        { except: dragging }
-      );
+      // Deliberately instant.
+      //
+      // Sliding the displaced tiles here made the grid unusable. The slide puts
+      // an inline transform on each one, elementFromPoint above then hit-tests
+      // them where they are drawn rather than where they sit, so it returns a
+      // tile that is halfway out of its slot. That swaps back, which re-triggers,
+      // and the tiles oscillate. The dragged tile is the worst of it: every swap
+      // changes its DOM slot, so the offset below is recomputed against a moving
+      // origin and it cannot travel more than a few pixels from where it started.
+      //
+      // A slide here has to hit-test layout positions instead of drawn ones. Until
+      // it does, this stays a one-frame swap.
+      const order = items();
+      const forward = order.indexOf(under) > order.indexOf(dragging);
+      container.insertBefore(dragging, forward ? under.nextSibling : under);
     }
     // Measured after any swap, so the offset is against where the item now
     // sits rather than where the drag started.
@@ -2850,24 +2853,8 @@ function installReorder(container, options) {
     if (!dragging) {
       return;
     }
-    const tile = dragging;
-    tile.classList.remove('dragging');
-    // Settle into the slot instead of teleporting there from under the finger.
-    //
-    // `settling` keeps the wobble suspended for the trip: removing `dragging`
-    // restores the edit-mode animation, and an animation on transform outranks
-    // the inline transform being transitioned, so the slide would never be seen.
-    if (moved && !prefersReducedMotion() && tile.style.transform) {
-      const duration = reorderSlideMilliseconds();
-      tile.classList.add('settling');
-      tile.style.transition = `transform ${duration}ms var(--ease-out)`;
-      tile.style.transform = '';
-      clearMotionAfter(tile, duration + reorderSlideGraceMilliseconds, () => {
-        tile.classList.remove('settling');
-      });
-    } else {
-      tile.style.transform = '';
-    }
+    dragging.classList.remove('dragging');
+    dragging.style.transform = '';
     dragging = null;
     dragPointerId = null;
     // A press that never moved is not a reorder, and saving one would write the
@@ -2894,13 +2881,7 @@ function installKeyTileReorder(grid) {
     ignoreSelector: '.key-panel-key-remove',
     onDrop: (order) => {
       saveShortcutIds(order);
-      // Deliberately not refreshKeysUi(): renderKeyPanel() would replace the
-      // tile that is still sliding into its slot, so the settle would never be
-      // seen. The drag already left the grid in this order, so the panel needs
-      // no rebuild — only the surfaces that mirror it do.
-      updateFooterRowTwo();
-      renderFooterPins();
-      renderHeaderSummary();
+      refreshKeysUi();
     }
   });
 }

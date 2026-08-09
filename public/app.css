@@ -2801,27 +2801,19 @@ body.files-view #key-panel {
 }
 
 /*
- * Both of these suspend the wobble so a slide can be seen.
+ * Suspends the wobble so a slide can be seen.
  *
- * reorderWithMotion() and the drop settle move tiles by transitioning an inline
- * transform, and key-tile-wobble animates transform as well. A running CSS
- * animation outranks an inline style, so without this the wobble simply eats the
- * whole effect and the tiles appear to teleport exactly as before.
+ * reorderWithMotion() moves tiles by transitioning an inline transform, and
+ * key-tile-wobble animates transform as well. A running CSS animation outranks an
+ * inline style, so without this the wobble eats the whole effect and the tiles
+ * appear to teleport.
  *
- * Two `flipping` selectors because the two reorder routes have different stable
- * roots. A drag mutates the tiles in place, so the grid itself is the root. The
- * keyboard arrows go through renderKeyPanel(), which replaces the grid, so there
- * the root has to be the panel body — the class must outlive the re-render.
+ * The root is the panel body, not the grid: the keyboard route goes through
+ * renderKeyPanel(), which replaces the grid, so the class has to outlive that.
+ * The drag route does not slide at all — see the note in installReorder.
  */
-#key-panel-body.flipping .key-panel-key,
-.key-panel-keys.flipping .key-panel-key,
-.key-panel-key.settling {
+#key-panel-body.flipping .key-panel-key {
   animation: none;
-}
-
-/* Above its neighbours for the trip back into the slot. */
-.key-panel-key.settling {
-  z-index: 2;
 }
 
 @keyframes key-tile-wobble {
