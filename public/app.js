@@ -260,6 +260,16 @@ const viewSwipeSettleEasing = readMotionToken(
 // Kept numeric: the fallback settle timer below needs to compare against it.
 const viewSwipeSettleMilliseconds =
   Number.parseFloat(readMotionToken('--duration-swipe', '180ms')) || 180;
+/**
+ * How long a displaced tile takes to slide to its new slot. Read rather than
+ * stored so it still tracks --duration-quick if that is retuned; a reorder is a
+ * rare enough event that one getComputedStyle does not matter.
+ */
+function reorderSlideMilliseconds() {
+  return Number.parseFloat(readMotionToken('--duration-quick', '160ms')) || 160;
+}
+// Slack on the cleanup timer, so it only fires when transitionend did not.
+const reorderSlideGraceMilliseconds = 120;
 // Slack on the fallback timer, so it only ever fires when transitionend did not.
 const viewSwipeSettleGraceMilliseconds = 120;
 const nativeScrollDeltaThreshold = 1;
@@ -1558,6 +1568,30 @@ function keySetFromPreferences(value) {
   return sanitizeKeySet(profiles[0]);
 }
 
+/**
+ * Said once per session, the first time a key change cannot be written down.
+ *
+ * Carrying on in memory is the right call — a full storage quota is no reason to
+ * break the session — but doing it silently was not. The order stayed on screen,
+ * the write never happened, and the next load quietly restored the old one.
+ *
+ * The order on screen is left alone. Reverting it would fight the gesture the
+ * user just made for a reason they cannot see; telling them it will not survive
+ * a reload is the honest half.
+ */
+let keySetStorageFailureReported = false;
+function reportKeySetStorageFailure() {
+  if (keySetStorageFailureReported) {
+    return;
+  }
+  keySetStorageFailureReported = true;
+  // Guarded because a storage failure during first load can land before the
+  // status element has been found.
+  if (typeof setStatus === 'function' && statusElement) {
+    setStatus('Key changes apply now but cannot be saved', { sticky: true });
+  }
+}
+
 function saveKeySet(value) {
   const cleaned = sanitizeKeySet(value);
   keySetDocument = cleaned;
@@ -1565,7 +1599,8 @@ function saveKeySet(value) {
     try {
       window.localStorage.setItem(keySetStorageKey, JSON.stringify(cleaned));
     } catch {
-      // Continue with the in-memory key set.
+      // Continue with the in-memory key set, but say so.
+      reportKeySetStorageFailure();
     }
   }
   noteDurablePreferencesChange();
@@ -2611,6 +2646,124 @@ function createKeyPanelKeyTile(id, def, editing) {
   return tile;
 }
 
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+}
+
+/** One `flipping` timer per root, so overlapping slides extend it rather than racing. */
+const flipTimers = new WeakMap();
+
+/**
+ * Clear the inline transform and transition a FLIP left behind, once it has
+ * played. The timer is a fallback: transitionend does not fire if the element is
+ * re-rendered or the transform never actually changed.
+ */
+function clearMotionAfter(element, milliseconds, onDone) {
+  let settled = false;
+  const finish = () => {
+    if (settled) {
+      return;
+    }
+    settled = true;
+    element.style.transition = '';
+    element.style.transform = '';
+    element.removeEventListener('transitionend', finish);
+    onDone?.();
+  };
+  element.addEventListener('transitionend', finish);
+  window.setTimeout(finish, milliseconds);
+}
+
+/**
+ * FLIP a reorder: measure where things are, let the caller change the order, then
+ * play the difference so the ones that moved slide instead of teleporting.
+ *
+ * `root` has to outlive `mutate`. renderKeyPanel() rebuilds the grid with
+ * replaceChildren, so the grid element itself does not survive a re-render —
+ * items are matched across it by data-reorder-id, and the panel body is the
+ * stable ancestor to pass in.
+ *
+ * The wobble in edit mode animates transform too, and a running CSS animation
+ * outranks an inline style, so it would swallow the whole effect. `flipping` on
+ * the root suspends it for exactly as long as the slide takes.
+ */
+function reorderWithMotion(root, itemSelector, mutate, options = {}) {
+  const { except } = options;
+  if (!root || prefersReducedMotion()) {
+    mutate();
+    return;
+  }
+  // Measured with any in-flight transform still applied, which is the point: a
+  // drag that crosses three tiles quickly interrupts its own slides, and each
+  // one has to continue from where the tile currently looks rather than from
+  // where it would have landed.
+  const before = new Map();
+  for (const item of root.querySelectorAll(itemSelector)) {
+    if (item.dataset.reorderId) {
+      before.set(item.dataset.reorderId, item.getBoundingClientRect());
+    }
+  }
+
+  mutate();
+
+  // Clearing every in-flight slide first, then measuring, keeps this to one
+  // layout pass. Interleaving the two thrashes it once per tile — and
+  // getBoundingClientRect includes transforms, so measuring before the clear
+  // would read a half-animated position as the destination and compound the
+  // offset on every swap.
+  const candidates = [...root.querySelectorAll(itemSelector)].filter(
+    (item) => item !== except && before.has(item.dataset.reorderId)
+  );
+  for (const item of candidates) {
+    item.style.transition = 'none';
+    item.style.transform = '';
+  }
+
+  const moved = [];
+  for (const item of candidates) {
+    const from = before.get(item.dataset.reorderId);
+    const to = item.getBoundingClientRect();
+    const dx = Math.round(from.left - to.left);
+    const dy = Math.round(from.top - to.top);
+    if (dx === 0 && dy === 0) {
+      continue;
+    }
+    item.style.transform = `translate(${dx}px, ${dy}px)`;
+    moved.push(item);
+  }
+  if (moved.length === 0) {
+    for (const item of candidates) {
+      item.style.transition = '';
+    }
+    return;
+  }
+
+  root.classList.add('flipping');
+  // Apply the inverted offsets before transitioning them away, or the browser
+  // coalesces both writes and nothing animates.
+  void root.offsetWidth;
+  const duration = reorderSlideMilliseconds();
+  for (const item of moved) {
+    item.style.transition = `transform ${duration}ms var(--ease-out)`;
+    item.style.transform = '';
+    clearMotionAfter(item, duration + reorderSlideGraceMilliseconds);
+  }
+
+  // One timer for the root, restarted by each swap, rather than counting items
+  // down. A fast drag starts a new slide before the last one has finished, and
+  // per-item bookkeeping would let the earliest completion drop `flipping` while
+  // later tiles were still moving — which hands transform back to the wobble
+  // mid-slide.
+  window.clearTimeout(flipTimers.get(root));
+  flipTimers.set(
+    root,
+    window.setTimeout(() => {
+      root.classList.remove('flipping');
+      flipTimers.delete(root);
+    }, duration + reorderSlideGraceMilliseconds)
+  );
+}
+
 /**
  * The pointer half of a reorderable grid: press, drag, drop.
  *
@@ -2671,9 +2824,18 @@ function installReorder(container, options) {
       ?.closest?.(itemSelector);
     dragging.style.pointerEvents = '';
     if (under && under !== dragging && container.contains(under)) {
-      const order = items();
-      const forward = order.indexOf(under) > order.indexOf(dragging);
-      container.insertBefore(dragging, forward ? under.nextSibling : under);
+      // The tiles being pushed aside slide; the dragged one is excluded because
+      // it is following the finger and must not be given a transition.
+      reorderWithMotion(
+        container,
+        itemSelector,
+        () => {
+          const order = items();
+          const forward = order.indexOf(under) > order.indexOf(dragging);
+          container.insertBefore(dragging, forward ? under.nextSibling : under);
+        },
+        { except: dragging }
+      );
     }
     // Measured after any swap, so the offset is against where the item now
     // sits rather than where the drag started.
@@ -2688,8 +2850,24 @@ function installReorder(container, options) {
     if (!dragging) {
       return;
     }
-    dragging.classList.remove('dragging');
-    dragging.style.transform = '';
+    const tile = dragging;
+    tile.classList.remove('dragging');
+    // Settle into the slot instead of teleporting there from under the finger.
+    //
+    // `settling` keeps the wobble suspended for the trip: removing `dragging`
+    // restores the edit-mode animation, and an animation on transform outranks
+    // the inline transform being transitioned, so the slide would never be seen.
+    if (moved && !prefersReducedMotion() && tile.style.transform) {
+      const duration = reorderSlideMilliseconds();
+      tile.classList.add('settling');
+      tile.style.transition = `transform ${duration}ms var(--ease-out)`;
+      tile.style.transform = '';
+      clearMotionAfter(tile, duration + reorderSlideGraceMilliseconds, () => {
+        tile.classList.remove('settling');
+      });
+    } else {
+      tile.style.transform = '';
+    }
     dragging = null;
     dragPointerId = null;
     // A press that never moved is not a reorder, and saving one would write the
@@ -2716,7 +2894,13 @@ function installKeyTileReorder(grid) {
     ignoreSelector: '.key-panel-key-remove',
     onDrop: (order) => {
       saveShortcutIds(order);
-      refreshKeysUi();
+      // Deliberately not refreshKeysUi(): renderKeyPanel() would replace the
+      // tile that is still sliding into its slot, so the settle would never be
+      // seen. The drag already left the grid in this order, so the panel needs
+      // no rebuild — only the surfaces that mirror it do.
+      updateFooterRowTwo();
+      renderFooterPins();
+      renderHeaderSummary();
     }
   });
 }
@@ -3927,8 +4111,17 @@ function moveShortcut(id, delta) {
   const copy = [...ids];
   const [moved] = copy.splice(index, 1);
   copy.splice(next, 0, moved);
-  saveShortcutIds(copy);
-  refreshKeysUi();
+  // The keyboard route to an order gets the same slide the drag does. The panel
+  // body is the root rather than the grid, because renderKeyPanel() replaces the
+  // grid and items have to be matched across that by data-reorder-id.
+  reorderWithMotion(
+    keyPanelBodyElement,
+    '.key-panel-key[data-reorder-id]',
+    () => {
+      saveShortcutIds(copy);
+      refreshKeysUi();
+    }
+  );
 }
 
 function removeShortcut(id) {
