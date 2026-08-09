@@ -464,6 +464,16 @@
       </div>
     </dialog>
 
+    <!--
+      Anything in the app that needs typing.
+
+      Not the panel: the panel stands in for the keyboard, so a field inside it
+      asks for the very thing it replaced — and the keyboard that answers takes
+      the panel's space back, with the field still in it. A modal is over the
+      top of all that, and the browser scrolls it clear of the keyboard itself.
+    -->
+    <dialog id="input-dialog"></dialog>
+
     <!-- Keyboard-only, desktop-only: opened with mod+K while focus is outside the
          terminal. Adds no persistent chrome. -->
     <dialog

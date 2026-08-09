@@ -2085,6 +2085,73 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   content: '\2713';
 }
 
+/* Anything that needs typing: the same sheet as the settings dialog, sized to
+   its own content. */
+#input-dialog {
+
+  width: min(400px, calc(100vw - 28px));
+  max-height: min(88dvh, 720px);
+  padding: 14px 14px 16px;
+  overflow: hidden;
+  border: 1px solid var(--control-border);
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.48);
+}
+
+.input-dialog-title {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.input-dialog-form {
+  display: grid;
+  gap: 8px;
+}
+
+.input-dialog-form input,
+.input-dialog-form select {
+  width: 100%;
+  min-height: var(--control-size);
+  padding: 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--control-font-label);
+}
+
+.input-dialog-row {
+  display: flex;
+  gap: var(--control-gap);
+}
+
+.input-dialog-row > * {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.input-dialog-row > [hidden] {
+  display: none;
+}
+
+.input-dialog-actions {
+  display: flex;
+  gap: var(--control-gap);
+  margin-top: 12px;
+}
+
+.input-dialog-actions > button {
+  flex: 1 1 0;
+  min-height: var(--control-size);
+  border-radius: var(--control-radius);
+  font-size: var(--control-font-label);
+}
+
 #settings-dialog {
   width: min(400px, calc(100vw - 28px));
   max-height: min(88dvh, 720px);
@@ -3192,15 +3259,15 @@ body.files-view #key-panel {
 }
 
 /*
- * Search and Edit are actions, not keys: they keep the control width, the roomier
+ * Search is an action, not a key: it keeps the control width, the roomier
  * padding and the dashed outline, so scanning the row for a key skips over them.
  *
- * Scoped through #footer-pins on purpose. `#footer-edit-keys` alone is (1,0,0)
+ * Scoped through #footer-pins on purpose. `#footer-find` alone is (1,0,0)
  * and loses to `#footer-pins button` at (1,0,1), which is why its padding and
  * font-size were already being ignored before the keys got their own sizing.
  */
 #footer-pins #footer-find,
-#footer-pins #footer-edit-keys {
+#footer-pins #footer-find {
   min-width: var(--control-size);
   /* Sits on the key strip, so it takes the key height. Only its width, padding
      and dashed outline say "action" — matching the height keeps the trough one
@@ -3766,7 +3833,6 @@ footer button {
      outranks #footer-pins button and would otherwise keep them at 44px instead
      of stretching them across the rail. */
   #footer-pins #footer-find,
-  #footer-pins #footer-edit-keys,
   #footer-files-main > button,
   #footer-files-main > .files-upload-label {
     width: 100%;

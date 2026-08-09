@@ -106,6 +106,7 @@ const footerPinsElement = document.querySelector('#footer-pins');
 const footerScrollElement = document.querySelector('#footer-scroll');
 
 const settingsDialogElement = document.querySelector('#settings-dialog');
+const inputDialogElement = document.querySelector('#input-dialog');
 const snippetEditorList = document.querySelector('#snippet-editor-list');
 const snippetLabelInput = document.querySelector('#snippet-label-input');
 const snippetBodyInput = document.querySelector('#snippet-body-input');
@@ -465,6 +466,9 @@ const defaultShortcutIds = [
 // leaves it unreachable, which is exactly what happened once.
 const terminalThemeLabels = {
   matrix: 'Matrix',
+  sonokai: 'Sonokai',
+  synthwave: 'Synthwave',
+  vesper: 'Vesper',
   tokyonight: 'Tokyo Night',
   rosepine: 'Rosé Pine Moon',
   oscura: 'Oscura Midnight',
@@ -479,6 +483,85 @@ const terminalThemeLabels = {
   gruvboxlight: 'Gruvbox Light'
 };
 const terminalThemes = {
+  // Monokai's vividness on a colder base. Oxocarbon was the first pick here
+  // and did not survive its own remap: the published port scores well only
+  // because it puts teal in the red slot, and a faithful mapping lands it
+  // thirteen ΔE from Oscura Midnight — a near-duplicate, which is the thing
+  // this set was just pruned for.
+  sonokai: {
+    background: '#2c2e34',
+    foreground: '#e2e2e3',
+    cursor: '#e2e2e3',
+    cursorAccent: '#2c2e34',
+    selectionBackground: 'rgba(65, 69, 80, 0.4)',
+    black: '#181819',
+    red: '#fc5d7c',
+    green: '#9ed072',
+    yellow: '#e7c664',
+    blue: '#76cce0',
+    magenta: '#b39df3',
+    cyan: '#f39660',
+    white: '#e2e2e3',
+    brightBlack: '#7f8490',
+    brightRed: '#fc5d7c',
+    brightGreen: '#9ed072',
+    brightYellow: '#e7c664',
+    brightBlue: '#76cce0',
+    brightMagenta: '#b39df3',
+    brightCyan: '#f39660',
+    brightWhite: '#e2e2e3'
+  },
+  // Synthwave '84: neon on deep purple. The plain "Synthwave" port is the same
+  // idea on pure black with orange in the magenta slot; this one keeps red red
+  // and green green, which a terminal needs.
+  synthwave: {
+    background: '#2a2139',
+    foreground: '#f0eff1',
+    cursor: '#f772e0',
+    cursorAccent: '#2a2139',
+    selectionBackground: 'rgba(24, 21, 33, 0.4)',
+    black: '#fefefe',
+    red: '#f97e72',
+    green: '#72f1b8',
+    yellow: '#fede5d',
+    blue: '#6d77b3',
+    magenta: '#c792ea',
+    cyan: '#f772e0',
+    white: '#fefefe',
+    brightBlack: '#fefefe',
+    brightRed: '#f88414',
+    brightGreen: '#72f1b8',
+    brightYellow: '#fff951',
+    brightBlue: '#36f9f6',
+    brightMagenta: '#e1acff',
+    brightCyan: '#f92aad',
+    brightWhite: '#fefefe'
+  },
+  // Near-black, muted salmon and sage. The quietest palette here, and the only
+  // one that does not raise its voice for syntax.
+  vesper: {
+    background: '#101010',
+    foreground: '#ffffff',
+    cursor: '#acb1ab',
+    cursorAccent: '#101010',
+    selectionBackground: 'rgba(152, 128, 73, 0.4)',
+    black: '#101010',
+    red: '#f5a191',
+    green: '#90b99f',
+    yellow: '#e6b99d',
+    blue: '#aca1cf',
+    magenta: '#e29eca',
+    cyan: '#ea83a5',
+    white: '#a0a0a0',
+    brightBlack: '#7e7e7e',
+    brightRed: '#ff8080',
+    brightGreen: '#99ffe4',
+    brightYellow: '#ffc799',
+    brightBlue: '#b9aeda',
+    brightMagenta: '#ecaad6',
+    brightCyan: '#f591b2',
+    brightWhite: '#ffffff'
+  },
   // Former Termius Dark — green-on-navy classic.
   matrix: {
     background: '#141729',
@@ -2592,9 +2675,7 @@ function renderKeyPanelKeyPicker(page) {
   const body = document.createElement('div');
   body.className = 'key-panel-groups';
   for (const group of groups) {
-    const heading = document.createElement('p');
-    heading.className = 'key-panel-group-label';
-    heading.textContent = group.label;
+    const heading = keyPanelGroupLabel(group.label);
     const grid = document.createElement('div');
     grid.className = 'key-panel-keys';
     for (const id of group.ids) {
@@ -2623,20 +2704,119 @@ function renderKeyPanelKeyPicker(page) {
   }
   page.replaceChildren(
     body,
-    createCustomKeyForm(),
     createKeyPanelActions(
-      keyPanelAction('‹ Back', () => setKeyPanelKeysMode('edit'))
+      keyPanelAction('‹ Back', () => setKeyPanelKeysMode('edit')),
+      keyPanelAction('Custom key…', openCustomKeyDialog)
     )
   );
 }
 
-function createCustomKeyForm() {
-  const details = document.createElement('details');
-  details.className = 'key-panel-custom-key';
-  const summary = document.createElement('summary');
-  summary.textContent = 'Custom key';
+/**
+ * Show a form that needs typing, over everything.
+ *
+ * The panel cannot hold one. It is standing in the keyboard's place, so a field
+ * inside it summons the thing it replaced, and the keyboard that arrives takes
+ * the panel's space back — with the field still in it. The panel closes and
+ * this opens instead.
+ */
+function showInputDialog(title, body, actions) {
+  if (!inputDialogElement) {
+    return;
+  }
+  setKeyPanelOpen(false);
+  const heading = document.createElement('strong');
+  heading.className = 'input-dialog-title';
+  heading.textContent = title;
+  const row = document.createElement('div');
+  row.className = 'input-dialog-actions';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'settings-secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', () => inputDialogElement.close());
+  row.append(...actions, cancel);
+  inputDialogElement.replaceChildren(heading, body, row);
+  if (!inputDialogElement.open) {
+    inputDialogElement.showModal();
+  }
+}
+
+/**
+ * Send a password from the device's password manager.
+ *
+ * There is no web API that reads a vault. What there is, is AutoFill: a focused
+ * `type="password"` field makes iOS, Android and desktop managers offer their
+ * entries above the keyboard. The entry lands in the field, this sends it, and
+ * the field is cleared in the same breath.
+ *
+ * It never touches paste history — that list is for things you may want back,
+ * and this is not one of them. Insert only, no Enter: a wrong entry is then
+ * still yours to correct at the prompt rather than already submitted.
+ */
+function openPasswordFillDialog() {
+  const form = document.createElement('form');
+  form.className = 'input-dialog-form';
+  // A form, so a manager sees a login shape and offers to fill it.
+  form.addEventListener('submit', (event) => event.preventDefault());
+
   const hint = document.createElement('p');
-  hint.className = 'key-panel-empty';
+  hint.className = 'settings-hint';
+  hint.textContent =
+    'Fill from your password manager, then Send. It goes to the session as ' +
+    'typed text, with no Enter, and is kept nowhere — not here, not in paste ' +
+    'history.';
+
+  const input = document.createElement('input');
+  input.type = 'password';
+  input.name = 'password';
+  input.autocomplete = 'current-password';
+  input.enterKeyHint = 'send';
+  input.placeholder = 'Password';
+  input.setAttribute('aria-label', 'Password to send');
+
+  const send = document.createElement('button');
+  send.type = 'button';
+  send.textContent = 'Send';
+  const submit = () => {
+    const secret = input.value;
+    input.value = '';
+    if (!secret) {
+      setStatus('Nothing to send');
+      return;
+    }
+    // An armed modifier would fold the first character into a control code.
+    setArmedModifier(null);
+    const sent = sendInput(secret);
+    setStatus(sent ? 'Inserted password' : 'Connect a session first');
+    inputDialogElement.close();
+  };
+  send.addEventListener('click', submit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      submit();
+    }
+  });
+  // Whatever closed it — Send, Cancel, Escape, the backdrop — the field does
+  // not keep the secret.
+  inputDialogElement?.addEventListener(
+    'close',
+    () => {
+      input.value = '';
+    },
+    { once: true }
+  );
+
+  form.append(hint, input);
+  showInputDialog('Password', form, [send]);
+  input.focus();
+}
+
+function openCustomKeyDialog() {
+  const form = document.createElement('div');
+  form.className = 'input-dialog-form';
+  const hint = document.createElement('p');
+  hint.className = 'settings-hint';
   hint.textContent =
     'Ctrl+letter, a scroll action, or a sequence (\\e, \\x1b, \\n).';
 
@@ -2695,24 +2875,27 @@ function createCustomKeyForm() {
   type.addEventListener('change', syncFields);
   syncFields();
 
+  const row = document.createElement('div');
+  row.className = 'input-dialog-row';
+  row.append(type, value, scroll);
+  form.append(hint, label, row);
+
   const add = document.createElement('button');
   add.type = 'button';
-  add.className = 'key-panel-action';
-  add.textContent = 'Add custom key';
+  add.textContent = 'Add key';
   add.addEventListener('click', () => {
-    addCustomKey({
+    const added = addCustomKey({
       type: type.value,
       label: label.value,
       value: value.value,
       scroll: scroll.value
     });
+    if (added) {
+      inputDialogElement.close();
+    }
   });
-
-  const row = document.createElement('div');
-  row.className = 'key-panel-custom-key-row';
-  row.append(type, value, scroll);
-  details.append(summary, hint, label, row, add);
-  return details;
+  showInputDialog('Custom key', form, [add]);
+  label.focus();
 }
 
 /**
@@ -2892,19 +3075,19 @@ async function uploadDeviceFile(file) {
  * footer; here the same list has the panel's whole width.
  */
 function renderKeyPanelPaste(page) {
-  const list = document.createElement('div');
-  list.className = 'key-panel-list';
+  const sources = document.createElement('div');
+  sources.className = 'key-panel-list';
 
   // The system clipboard cannot be previewed on iOS without reading it, and a
   // read needs a user gesture. A tap is its own gesture, so this row stays
   // unlabelled until then.
-  list.append(
+  sources.append(
     createKeyPanelPasteItem('Clipboard', 'read on tap', 'Paste', () => {
       setKeyPanelOpen(false);
       void pasteClipboard();
     })
   );
-  list.append(
+  sources.append(
     createKeyPanelPasteItem(
       'Upload from device',
       'photo or file, pasted as a path',
@@ -2912,14 +3095,36 @@ function renderKeyPanelPaste(page) {
       openDeviceUploadPicker
     )
   );
-  for (const entry of pasteHistory.entries()) {
-    const preview = formatPasteEntryPreview(entry.text);
-    list.append(
-      createKeyPanelPasteItem(preview.label, preview.detail, 'Paste', () => {
-        setKeyPanelOpen(false);
-        insertPastedText(entry.text);
-      })
-    );
+  sources.append(
+    createKeyPanelPasteItem(
+      'Password',
+      'from your password manager',
+      'Fill',
+      openPasswordFillDialog
+    )
+  );
+
+  // Three ways to paste something new, then the things already pasted. They
+  // read as one list otherwise, and the first history entry looks like a fourth
+  // source.
+  const body = document.createElement('div');
+  body.className = 'key-panel-groups';
+  body.append(keyPanelGroupLabel('Paste from'), sources);
+
+  const history = pasteHistory.entries();
+  if (history.length > 0) {
+    const list = document.createElement('div');
+    list.className = 'key-panel-list';
+    for (const entry of history) {
+      const preview = formatPasteEntryPreview(entry.text);
+      list.append(
+        createKeyPanelPasteItem(preview.label, preview.detail, 'Paste', () => {
+          setKeyPanelOpen(false);
+          insertPastedText(entry.text);
+        })
+      );
+    }
+    body.append(keyPanelGroupLabel('History'), list);
   }
 
   const persisted = pasteHistoryPersistEnabled();
@@ -2937,7 +3142,14 @@ function renderKeyPanelPaste(page) {
         : 'Keep paste history after this tab closes'
     })
   );
-  page.replaceChildren(list, actions);
+  page.replaceChildren(body, actions);
+}
+
+function keyPanelGroupLabel(text) {
+  const label = document.createElement('p');
+  label.className = 'key-panel-group-label';
+  label.textContent = text;
+  return label;
 }
 
 function createKeyPanelPasteItem(label, detail, mode, onTap) {
@@ -3065,8 +3277,11 @@ function stepTerminalFontSize(direction) {
 }
 
 /**
- * Search and Edit close the strip, in that order: the two things that are not
- * keys, after every key.
+ * Search closes the strip: the one thing on it that is not a key.
+ *
+ * Edit was here too, and is not any more — holding any chip opens the editor,
+ * and the panel it opens has an Edit of its own. Three ways in was two too
+ * many for something reached once a month.
  *
  * Search is a fixed chip rather than a configurable shortcut id on purpose.
  * `find` is excluded from the key set in sanitizeShortcutIds, and
@@ -3091,28 +3306,10 @@ function createFooterFindChip() {
   return button;
 }
 
-/**
- * Edit sits last, so scrolling to the end of your keys lands on the way to change
- * them. Inside the scroller rather than beside Paste and Menu, where it would
- * cost permanent bar width for something reached once a month.
- */
-function createFooterEditChip() {
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.id = 'footer-edit-keys';
-  button.className = 'chip-edit';
-  button.textContent = 'Edit';
-  button.title = 'Edit keys';
-  button.addEventListener('click', () => {
-    closeFooterDrawer();
-    openKeyEditor();
-  });
-  return button;
-}
 
 /**
  * Row 1 is the key set: every key it holds, in the order the editor shows them,
- * then Search and Edit at the end of the scroll.
+ * then Search at the end of the scroll.
  *
  * There is no choosing which keys get the space any more. Pinning, the
  * contextual set and the recent ordering all existed to pick ten chips out of
@@ -3129,7 +3326,7 @@ function renderFooterPins() {
       footerPinsElement.append(button);
     }
   }
-  footerPinsElement.append(createFooterFindChip(), createFooterEditChip());
+  footerPinsElement.append(createFooterFindChip());
 }
 
 /** Rebuild the rail only when the foreground command actually moved. */
@@ -6150,6 +6347,9 @@ function renameSessionTheme(fromName, toName) {
 
 const terminalThemeAccentKeys = {
   matrix: 'cursor',
+  sonokai: 'magenta',
+  synthwave: 'magenta',
+  vesper: 'yellow',
   tokyonight: 'blue',
   rosepine: 'magenta',
   oscura: 'blue',
@@ -13144,6 +13344,9 @@ keyPanelTabsElement?.addEventListener('click', (event) => {
   }
 });
 keyPanelKeyboardButton?.addEventListener('click', keyPanelShowKeyboard);
+installDialogBackdropDismiss(inputDialogElement, () => {
+  inputDialogElement.close();
+});
 installDialogBackdropDismiss(settingsDialogElement, () => {
   settingsDialogElement.close();
 });
