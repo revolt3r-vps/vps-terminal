@@ -465,7 +465,6 @@ const defaultShortcutIds = [
 // leaves it unreachable, which is exactly what happened once.
 const terminalThemeLabels = {
   matrix: 'Matrix',
-  groknight: 'Grok Night',
   tokyonight: 'Tokyo Night',
   rosepine: 'Rosé Pine Moon',
   oscura: 'Oscura Midnight',
@@ -503,30 +502,6 @@ const terminalThemes = {
     brightMagenta: '#ff9ac1',
     brightCyan: '#bcaafe',
     brightWhite: '#e6e6e6'
-  },
-  // Inspired by Grok Build default (neutral dark + magenta accent).
-  groknight: {
-    background: '#121214',
-    foreground: '#e8e6ed',
-    cursor: '#7d4bc6',
-    cursorAccent: '#121214',
-    selectionBackground: 'rgba(125, 75, 198, 0.4)',
-    black: '#1c1c1f',
-    red: '#f07178',
-    green: '#7fd962',
-    yellow: '#e5c07b',
-    blue: '#61afef',
-    magenta: '#7d4bc6',
-    cyan: '#56b6c2',
-    white: '#d4d2db',
-    brightBlack: '#5c5c66',
-    brightRed: '#ff7b82',
-    brightGreen: '#95f07a',
-    brightYellow: '#f0d48a',
-    brightBlue: '#7dc0ff',
-    brightMagenta: '#a078e0',
-    brightCyan: '#6fd4e0',
-    brightWhite: '#ffffff'
   },
   tokyonight: {
     background: '#1a1b26',
@@ -6175,7 +6150,6 @@ function renameSessionTheme(fromName, toName) {
 
 const terminalThemeAccentKeys = {
   matrix: 'cursor',
-  groknight: 'magenta',
   tokyonight: 'blue',
   rosepine: 'magenta',
   oscura: 'blue',
