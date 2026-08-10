@@ -607,6 +607,13 @@
           ></div>
           <div
             class="key-panel-page"
+            data-panel-page="debug"
+            role="tabpanel"
+            aria-label="Debug"
+            hidden
+          ></div>
+          <div
+            class="key-panel-page"
             data-panel-page="app"
             role="tabpanel"
             aria-label="App"
@@ -718,6 +725,20 @@
               <circle cx="6.5" cy="8" r="1" />
               <circle cx="10" cy="6" r="1" />
               <circle cx="13.5" cy="8" r="1" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="debug"
+            role="tab"
+            aria-selected="false"
+            title="Debug"
+            aria-label="Debug"
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <rect x="6.5" y="6" width="7" height="9" rx="3.5" />
+              <path d="M4 8.5h2.5M13.5 8.5H16M4 12.5h2.5M13.5 12.5H16M7.5 5l1-1.5M12.5 5l-1-1.5" />
             </svg>
           </button>
           <button

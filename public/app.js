@@ -2131,7 +2131,14 @@ function renderFooterDrawer() {
 
 // Paste leads: it is the tab reached for most, and the one whose rows are all
 // one tap. The order here is the order in the strip.
-const keyPanelTabs = ['paste', 'keys', 'snippets', 'appearance', 'app'];
+const keyPanelTabs = [
+  'paste',
+  'keys',
+  'snippets',
+  'appearance',
+  'debug',
+  'app'
+];
 // Non-zero once a keyboard has actually been seen this session.
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
@@ -2284,6 +2291,7 @@ function loadKeyPanelTab() {
 
 function setKeyPanelKeysMode(mode) {
   keyPanelKeysMode = ['list', 'edit', 'add'].includes(mode) ? mode : 'list';
+  dragDebug(`keys-mode ${keyPanelKeysMode} (rebuilds the grid)`);
   renderKeyPanel();
 }
 
@@ -2392,6 +2400,10 @@ function renderKeyPanel() {
   if (!keyPanelElement || keyPanelElement.hidden) {
     return;
   }
+  // Every tile is replaced here. A rebuild while a finger is down destroys the
+  // node that finger pressed, which is the shape of "it looks like I let go and
+  // pressed again, then the key will not move".
+  dragDebug(`render tab=${keyPanelTab} keysMode=${keyPanelKeysMode}`);
   const page = keyPanelBodyElement?.querySelector(
     `.key-panel-page[data-panel-page="${keyPanelTab}"]`
   );
@@ -2406,6 +2418,8 @@ function renderKeyPanel() {
     renderKeyPanelPaste(page);
   } else if (keyPanelTab === 'appearance') {
     renderKeyPanelAppearance(page);
+  } else if (keyPanelTab === 'debug') {
+    renderKeyPanelDebug(page);
   } else {
     // The App page is static markup rather than something built each time, so
     // it only needs its live parts refreshed.
@@ -2497,7 +2511,6 @@ function renderKeyPanelKeys(page) {
     fitKeyTilesToPanel(grid);
     return;
   }
-  installKeyTileReorder(grid);
   page.replaceChildren(
     heading,
     grid,
@@ -2510,6 +2523,13 @@ function renderKeyPanelKeys(page) {
     )
   );
   fitKeyTilesToPanel(grid);
+  // After the grid is in the page and sized, not before.
+  //
+  // installReorder() may take over a gesture the previous grid could not finish,
+  // and that means measuring slot centres. A detached grid measures every tile as
+  // a zero rect, so the first move read as "below every tile" and threw the key
+  // to the end of the order.
+  installKeyTileReorder(grid);
 }
 
 /**
@@ -2631,7 +2651,24 @@ function createKeyPanelKeyTile(id, def, editing) {
         // sends, and the panel stays put so you can send another.
         renderKeyPanel();
       },
-      onHold: () => setKeyPanelKeysMode('edit')
+      onHold: (pointer) => {
+        // Hold, then keep dragging without lifting, the way a home screen works.
+        // Edit mode rebuilds the grid, so this tile is about to be replaced; the
+        // note tells the grid that replaces it to take the gesture over.
+        if (pointer) {
+          reorderHandover = {
+            id,
+            pointerId: pointer.pointerId,
+            clientX: pointer.clientX,
+            clientY: pointer.clientY,
+            grab: pointer.grab,
+            // A hold has already committed to not being a tap.
+            moved: true,
+            at: window.performance.now()
+          };
+        }
+        setKeyPanelKeysMode('edit');
+      }
     });
     return button;
   }
@@ -2675,6 +2712,75 @@ function createKeyPanelKeyTile(id, def, editing) {
 
 function prefersReducedMotion() {
   return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
+}
+
+/*
+ * ---- A gesture log you can read on the phone ----
+ *
+ * Every reorder fault reported so far has been iOS-only, and the QA browser is
+ * Chromium, so the evidence that settles them is what the device itself did.
+ *
+ * Read it in the panel's Debug tab, which is also where it is switched on. The
+ * home-screen app cannot be given a query string, so a URL flag would have meant
+ * opening the app in Safari to set a storage key and then reopening it — worth
+ * avoiding for something that has to be usable mid-report. `?debug=drag` and
+ * `?debug=off` still work, because the QA suites use them.
+ *
+ * Off by default and one boolean per call, so the log points can stay in the
+ * gesture code rather than being added and removed each time a report comes in.
+ */
+const dragDebugStorageKey = 'vps-terminal.debug.drag';
+const dragDebugMaximumLines = 400;
+const dragDebugLines = [];
+let dragDebugState = null;
+
+function dragDebugActive() {
+  if (dragDebugState === null) {
+    dragDebugState = false;
+    try {
+      const asked = new URLSearchParams(window.location.search).get('debug');
+      if (asked === 'drag') {
+        window.localStorage.setItem(dragDebugStorageKey, '1');
+      } else if (asked === 'off') {
+        window.localStorage.removeItem(dragDebugStorageKey);
+      }
+      dragDebugState =
+        window.localStorage.getItem(dragDebugStorageKey) === '1';
+    } catch {
+      // Private mode with storage denied. Stay off.
+    }
+  }
+  return dragDebugState;
+}
+
+function setDragDebugActive(on) {
+  dragDebugState = on;
+  try {
+    if (on) {
+      window.localStorage.setItem(dragDebugStorageKey, '1');
+    } else {
+      window.localStorage.removeItem(dragDebugStorageKey);
+    }
+  } catch {
+    // Storage denied. It still holds for this session.
+  }
+  // So the QA suites can assert on the gesture rather than only its result.
+  window.__dragDebugDump = on ? () => dragDebugLines.slice() : undefined;
+}
+
+function dragDebug(line) {
+  if (!dragDebugActive()) {
+    return;
+  }
+  if (!window.__dragDebugDump) {
+    window.__dragDebugDump = () => dragDebugLines.slice();
+  }
+  dragDebugLines.push(
+    `${String(Math.round(window.performance.now())).padStart(6)} ${line}`
+  );
+  if (dragDebugLines.length > dragDebugMaximumLines) {
+    dragDebugLines.shift();
+  }
 }
 
 /** One `flipping` timer per root, so overlapping slides extend it rather than racing. */
@@ -2813,6 +2919,20 @@ function reorderWithMotion(root, itemSelector, mutate, options = {}) {
 }
 
 /**
+ * A gesture the previous grid could not finish, waiting for the next one.
+ *
+ * renderKeyPanel() replaces every tile, and it runs for reasons that have nothing
+ * to do with the finger on the glass: entering edit mode from a hold, and the
+ * preferences sync answering a save. On-device the log caught both — a hold that
+ * rebuilt the grid and then never started a drag, and a drag whose tile went
+ * `connected=false` mid-gesture and saved the order of a detached fragment.
+ *
+ * So the gesture is handed across the rebuild instead of dying with the node it
+ * started on.
+ */
+let reorderHandover = null;
+
+/**
  * The pointer half of a reorderable grid: press, drag, drop.
  *
  * Only for something that fits without scrolling. A list that scrolls wants the
@@ -2827,6 +2947,9 @@ function installReorder(container, options) {
   let grabY = 0;
   let startX = 0;
   let startY = 0;
+  /** Where the pointer was last seen, so a handover can pick the gesture up there. */
+  let lastX = 0;
+  let lastY = 0;
   let moved = false;
   /**
    * Slot centres, captured once when the drag begins.
@@ -2844,6 +2967,10 @@ function installReorder(container, options) {
   let slotCentres = [];
   /** The vertical extent of the tiles at press time, top and bottom. */
   let slotSpan = null;
+  /** The order at pointerdown, to go back to if the gesture is taken away. */
+  let orderAtPress = [];
+  /** Whether this drag was picked up from a rebuild rather than started by a press. */
+  let fromHandover = false;
   const items = () => [...container.querySelectorAll(itemSelector)];
 
   /**
@@ -2888,22 +3015,52 @@ function installReorder(container, options) {
     return best;
   }
 
-  container.addEventListener('pointerdown', (event) => {
-    const item = event.target.closest?.(itemSelector);
-    if (
-      !item ||
-      event.button !== 0 ||
-      (ignoreSelector && event.target.closest?.(ignoreSelector))
-    ) {
+  /**
+   * Put the held tile where the finger is.
+   *
+   * Measured after any swap, so the offset is against where the tile now sits
+   * rather than where the drag started.
+   */
+  function trackPointer(clientX, clientY) {
+    if (!dragging) {
       return;
     }
+    dragging.style.transform = '';
+    const box = dragging.getBoundingClientRect();
+    dragging.style.transform =
+      `translate(${Math.round(clientX - grabX - box.left)}px, ` +
+      `${Math.round(clientY - grabY - box.top)}px)`;
+  }
+
+  /**
+   * Take hold of a tile, from a press or from a handover.
+   *
+   * `alreadyMoved` skips the tap tolerance. A gesture that has already been
+   * dragging, or that arrived from a hold, is past the point where it might still
+   * be a tap, and making it re-earn that would lose the first few pixels.
+   */
+  function beginDrag(item, pointerId, clientX, clientY, alreadyMoved, grab) {
+    fromHandover = Boolean(grab);
     const box = item.getBoundingClientRect();
     dragging = item;
-    dragPointerId = event.pointerId;
-    grabX = event.clientX - box.left;
-    grabY = event.clientY - box.top;
-    startX = event.clientX;
-    startY = event.clientY;
+    dragPointerId = pointerId;
+    // Where inside the tile the finger is holding it.
+    //
+    // On a handover this has to be carried over, not recomputed. The grid is
+    // rebuilt from whatever order it now has, so the tile can reappear in a slot
+    // the finger is nowhere near — and `clientX - box.left` would then be the
+    // distance across the grid rather than an offset within a 60px tile. The
+    // transform is `clientX - grabX - box.left`, so that cancels to nearly zero
+    // and the tile sits in its slot while the finger is somewhere else entirely.
+    //
+    // Clamped, because the tile it lands on is not always the size of the one it
+    // left: list-mode tiles and edit-mode tiles are laid out separately.
+    grabX = grab ? Math.min(Math.max(grab.x, 0), box.width) : clientX - box.left;
+    grabY = grab ? Math.min(Math.max(grab.y, 0), box.height) : clientY - box.top;
+    startX = clientX;
+    startY = clientY;
+    lastX = clientX;
+    lastY = clientY;
     moved = false;
     const tiles = items();
     slotCentres = tiles.map((tile) => {
@@ -2922,8 +3079,50 @@ function installReorder(container, options) {
           bottom: Math.max(...tileBounds.map((bounds) => bounds.bottom))
         }
       : null;
+    orderAtPress = tiles.map((tile) => tile.dataset.reorderId);
     item.classList.add('dragging');
-    item.setPointerCapture(event.pointerId);
+    // Deliberately no setPointerCapture.
+    //
+    // It could never be relied on: reordering moves the tile with insertBefore,
+    // and moving a node releases its capture, which is why the move and release
+    // listeners are on the window. Every drag that swaps therefore loses capture
+    // on its first swap and works without it.
+    //
+    // The one drag that kept it is a tile dragged further into the end it is
+    // already at. Nearest-centre answers with the slot it is already in, nothing
+    // calls insertBefore, and the capture survived the whole gesture. Measured on
+    // the leftmost tile dragged left: gotpointercapture with no matching
+    // lostpointercapture, where a middle tile shows both. That is also the one
+    // drag reported as snapping back mid-gesture on iOS.
+    //
+    // Not taking it makes that drag take the same path as every drag that works.
+    // Touch pointers are still captured implicitly by the browser, which is not
+    // something a page can decline — but that is uniform across all of them.
+    moved = Boolean(alreadyMoved);
+    if (grab) {
+      // Straight onto the finger, without waiting for the next move. The grid was
+      // rebuilt from the last saved order, so the tile can reappear rows away from
+      // where the finger left it — measured at 323px — and a frame of it parked
+      // there reads as the key having been dropped.
+      trackPointer(clientX, clientY);
+    }
+  }
+
+  container.addEventListener('pointerdown', (event) => {
+    const item = event.target.closest?.(itemSelector);
+    if (
+      !item ||
+      event.button !== 0 ||
+      (ignoreSelector && event.target.closest?.(ignoreSelector))
+    ) {
+      dragDebug(
+        `drag-down IGNORED item=${Boolean(item)} button=${event.button} ` +
+          `onBadge=${Boolean(ignoreSelector && event.target.closest?.(ignoreSelector))}`
+      );
+      return;
+    }
+    dragDebug(`drag-down ${item.dataset.reorderId} p=${event.pointerId}`);
+    beginDrag(item, event.pointerId, event.clientX, event.clientY, false);
   });
 
   // On the window, not the container.
@@ -2933,8 +3132,19 @@ function installReorder(container, options) {
   // crossed the edge — and the whole point is that it follows the finger anywhere.
   // Pointer capture does not save it either: reordering moves the tile with
   // insertBefore, and moving a node releases its capture.
-  window.addEventListener('pointermove', (event) => {
+  const onPointerMove = (event) => {
     if (!dragging || event.pointerId !== dragPointerId) {
+      return;
+    }
+    lastX = event.clientX;
+    lastY = event.clientY;
+    // A rebuild of the grid replaces every tile, so the one being held is now a
+    // node in a document fragment nobody can see. Reordering it would rearrange
+    // that fragment and then save the result — measured on-device as
+    // `drag-start connected=false` followed by a save nobody asked for.
+    if (!dragging.isConnected || !container.isConnected) {
+      dragDebug('drag-abandoned the grid was rebuilt under the gesture');
+      abandon();
       return;
     }
     event.preventDefault();
@@ -2947,11 +3157,19 @@ function installReorder(container, options) {
     ) {
       return;
     }
+    if (!moved) {
+      // Whether the held node is still the one in the document. A grid rebuilt
+      // mid-gesture leaves this false, and the tile then cannot move.
+      dragDebug(
+        `drag-start ${dragging.dataset.reorderId} connected=${dragging.isConnected}`
+      );
+    }
     moved = true;
     const order = items();
     const currentIndex = order.indexOf(dragging);
     const targetIndex = slotIndexAt(event.clientX, event.clientY);
     if (targetIndex >= 0 && currentIndex >= 0 && targetIndex !== currentIndex) {
+      dragDebug(`swap ${currentIndex}->${targetIndex}`);
       // The reference node comes from the order with the dragged tile removed, so
       // moving right lands after the tile now in that slot rather than before it.
       // Inserting before would leave the index unchanged and repeat the swap on
@@ -2967,21 +3185,107 @@ function installReorder(container, options) {
         { except: dragging }
       );
     }
-    // Measured after any swap, so the offset is against where the item now
-    // sits rather than where the drag started.
-    dragging.style.transform = '';
-    const box = dragging.getBoundingClientRect();
-    dragging.style.transform =
-      `translate(${Math.round(event.clientX - grabX - box.left)}px, ` +
-      `${Math.round(event.clientY - grabY - box.top)}px)`;
-  });
+    trackPointer(event.clientX, event.clientY);
+  };
+  window.addEventListener('pointermove', onPointerMove);
 
-  const drop = () => {
+  /**
+   * Let go of a gesture whose grid no longer exists, and leave a note so the
+   * grid replacing it can pick the gesture up where the finger actually is.
+   */
+  function abandon() {
     if (!dragging) {
       return;
     }
+    reorderHandover = {
+      id: dragging.dataset.reorderId,
+      pointerId: dragPointerId,
+      clientX: lastX,
+      clientY: lastY,
+      // The hold on the tile, so the finger keeps the same grip on it.
+      grab: { x: grabX, y: grabY },
+      // A gesture already past the tap tolerance must not have to earn it again.
+      moved,
+      at: window.performance.now()
+    };
+    dragging.classList.remove('dragging');
+    dragging.style.transform = '';
+    dragging = null;
+    dragPointerId = null;
+    slotCentres = [];
+    slotSpan = null;
+    moved = false;
+  }
+
+  const drop = (event) => {
+    // Only this drag's own pointer ends it. Without the check any pointerup on
+    // the window ended the gesture, so a second finger touching down and lifting
+    // dropped the tile mid-drag.
+    if (!dragging || (event && event.pointerId !== dragPointerId)) {
+      dragDebug(
+        `${event?.type || 'drop'} ignored dragging=${Boolean(dragging)} ` +
+          `p=${event?.pointerId} want=${dragPointerId}`
+      );
+      return;
+    }
     const tile = dragging;
+    // A cancel means the system took the gesture, and that is not a reorder — with
+    // one exception. A handed-over drag was rebuilt on purpose, and some engines
+    // answer a removed pointerdown target with pointercancel: Chromium does,
+    // iOS Safari sends pointerup. Treating our own rebuild's echo as "the user
+    // changed their mind" would throw away the drag they just did.
+    const cancelled = event?.type === 'pointercancel' && !fromHandover;
+    dragDebug(
+      `drop ${tile.dataset.reorderId} via=${event?.type} moved=${moved} ` +
+        `connected=${tile.isConnected}`
+    );
+    const home = orderAtPress;
     tile.classList.remove('dragging');
+    dragging = null;
+    dragPointerId = null;
+    slotCentres = [];
+    slotSpan = null;
+
+    // A gesture the system took away is not a reorder.
+    //
+    // The order was being saved anyway, so a cancelled drag left the key
+    // somewhere it was never dropped — "if I release it might change position".
+    // Going back to the order at the press also makes what is saved agree with
+    // what is drawn, because the tile visibly returns to its slot either way.
+    //
+    // Reverted through reorderWithMotion, and without `except`, so the held tile
+    // is FLIPped along with the rest: it is measured where the finger left it and
+    // slides home from there instead of jumping.
+    if (cancelled && moved) {
+      tile.classList.add('settling');
+      reorderWithMotion(container, itemSelector, () => {
+        const byId = new Map(
+          items().map((item) => [item.dataset.reorderId, item])
+        );
+        for (const id of home) {
+          const item = byId.get(id);
+          if (item) {
+            container.appendChild(item);
+          }
+        }
+      });
+      // reorderWithMotion leaves motion alone under reduced motion, so the drag
+      // offset would stay on the tile.
+      if (prefersReducedMotion()) {
+        tile.style.transform = '';
+        tile.classList.remove('settling');
+        return;
+      }
+      clearMotionAfter(
+        tile,
+        reorderSlideMilliseconds() + reorderSlideGraceMilliseconds,
+        () => {
+          tile.classList.remove('settling');
+        }
+      );
+      return;
+    }
+
     // Settle into the slot rather than teleporting there from under the finger.
     //
     // `settling` keeps the wobble suspended for the trip: removing `dragging`
@@ -2998,10 +3302,6 @@ function installReorder(container, options) {
     } else {
       tile.style.transform = '';
     }
-    dragging = null;
-    dragPointerId = null;
-    slotCentres = [];
-    slotSpan = null;
     // A press that never moved is not a reorder, and saving one would write the
     // order back for nothing.
     if (moved) {
@@ -3012,6 +3312,37 @@ function installReorder(container, options) {
   // tile stays stuck to the finger with no button held.
   window.addEventListener('pointerup', drop);
   window.addEventListener('pointercancel', drop);
+
+  // Pick up a gesture the previous grid could not finish. The finger never went
+  // up, so the tile it is over should be the one it carries on dragging.
+  if (reorderHandover) {
+    const resumed = items().find(
+      (item) => item.dataset.reorderId === reorderHandover.id
+    );
+    const record = reorderHandover;
+    reorderHandover = null;
+    if (resumed) {
+      dragDebug(`handover ${record.id} p=${record.pointerId} moved=${record.moved}`);
+      beginDrag(
+        resumed,
+        record.pointerId,
+        record.clientX,
+        record.clientY,
+        record.moved,
+        record.grab || { x: 0, y: 0 }
+      );
+    }
+  }
+
+  return () => {
+    // Ending the gesture here rather than letting it run on: the container is
+    // about to be replaced, and a drag against a detached grid reorders a
+    // fragment nobody can see and then saves it.
+    abandon();
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', drop);
+    window.removeEventListener('pointercancel', drop);
+  };
 }
 
 /**
@@ -3022,11 +3353,23 @@ function installReorder(container, options) {
  * out of hit testing for the call, so they swap as you cross them rather than
  * on release.
  */
+/**
+ * The reorder installed on the live grid, and the way to take it off again.
+ *
+ * renderKeyPanel() builds a new grid every time, and installReorder() puts three
+ * listeners on the window. Without this they accumulated: on-device one release
+ * logged nineteen `pointerup` lines, one per surviving installation, each holding
+ * a container that had been thrown away.
+ */
+let activeKeyTileReorder = null;
+
 function installKeyTileReorder(grid) {
-  installReorder(grid, {
+  activeKeyTileReorder?.();
+  activeKeyTileReorder = installReorder(grid, {
     itemSelector: '.key-panel-key[data-reorder-id]',
     ignoreSelector: '.key-panel-key-remove',
     onDrop: (order) => {
+      dragDebug(`save ${order.join(',')}`);
       saveShortcutIds(order);
       // Deliberately not refreshKeysUi(): renderKeyPanel() would replace the tile
       // still sliding into its slot. The drag already left the grid in this order,
@@ -3693,6 +4036,63 @@ function createKeyPanelPasteItem(label, detail, mode, onTap) {
  * applies to this session and is remembered for it, exactly as the select it
  * replaces did.
  */
+/**
+ * The Debug page: switch the gesture log on, read it, copy it out.
+ *
+ * The log is what a bug report from a phone can carry back, so the copy button is
+ * the point of the page rather than a convenience on it.
+ */
+function renderKeyPanelDebug(page) {
+  const heading = document.createElement('p');
+  heading.className = 'key-panel-group-label';
+  heading.textContent = 'Gesture log';
+
+  const note = document.createElement('p');
+  note.className = 'key-panel-note';
+  note.textContent = dragDebugActive()
+    ? 'Recording. Reproduce the problem, come back, then Copy.'
+    : 'Off. Turn it on, reproduce the problem, then come back and Copy.';
+
+  const output = document.createElement('pre');
+  output.className = 'key-panel-debug-log';
+  // Selectable so the log can be taken by hand if the clipboard is refused. Not
+  // a field: a field in the panel summons the keyboard the panel stands in for.
+  output.tabIndex = 0;
+  output.textContent = dragDebugLines.length
+    ? dragDebugLines.join('\n')
+    : 'No lines recorded yet.';
+
+  page.replaceChildren(
+    heading,
+    note,
+    output,
+    createKeyPanelActions(
+      keyPanelAction(dragDebugActive() ? 'Stop' : 'Record', () => {
+        setDragDebugActive(!dragDebugActive());
+        renderKeyPanel();
+      }),
+      keyPanelAction('Copy', async () => {
+        const text = dragDebugLines.join('\n');
+        if (!text) {
+          setStatus('Nothing recorded yet');
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(`Copied ${dragDebugLines.length} lines`);
+        } catch {
+          output.focus();
+          setStatus('Clipboard refused — long-press the log to select it');
+        }
+      }),
+      keyPanelAction('Clear', () => {
+        dragDebugLines.length = 0;
+        renderKeyPanel();
+      })
+    )
+  );
+}
+
 function renderKeyPanelAppearance(page) {
   const size = document.createElement('div');
   size.className = 'key-panel-size';
@@ -3855,6 +4255,10 @@ function installChipLongPress(button, { onTap, onHold }) {
   let timer = null;
   let startX = 0;
   let startY = 0;
+  /** Where the pointer is now, so a hold can hand the live gesture on. */
+  let lastX = 0;
+  let lastY = 0;
+  let pointerId = null;
   let longPressFired = false;
   let tracking = false;
 
@@ -3871,17 +4275,37 @@ function installChipLongPress(button, { onTap, onHold }) {
     longPressFired = false;
     startX = event.clientX;
     startY = event.clientY;
+    lastX = event.clientX;
+    lastY = event.clientY;
+    pointerId = event.pointerId;
     clearTimer();
+    dragDebug(
+      `hold-down ${button.dataset.reorderId || button.className} ` +
+        `p=${event.pointerId}`
+    );
     timer = window.setTimeout(() => {
       timer = null;
       longPressFired = true;
-      onHold?.();
+      dragDebug(`hold-fired ${button.dataset.reorderId || ''}`);
+      // The finger is still down. Whatever onHold rebuilds, the gesture carries
+      // on from where the pointer actually is, holding the tile where it holds it
+      // now — the replacement tile can land in a different slot, and a grip
+      // recomputed against that slot would not be a grip on the tile at all.
+      const box = button.getBoundingClientRect();
+      onHold?.({
+        pointerId,
+        clientX: lastX,
+        clientY: lastY,
+        grab: { x: lastX - box.left, y: lastY - box.top }
+      });
     }, chipLongPressMilliseconds);
   });
   button.addEventListener('pointermove', (event) => {
     if (!tracking || timer === null) {
       return;
     }
+    lastX = event.clientX;
+    lastY = event.clientY;
     if (
       Math.hypot(event.clientX - startX, event.clientY - startY) >
       chipLongPressMoveTolerance
@@ -3901,6 +4325,9 @@ function installChipLongPress(button, { onTap, onHold }) {
   button.addEventListener('click', (event) => {
     event.preventDefault();
     event.stopPropagation();
+    dragDebug(
+      `hold-click ${button.dataset.reorderId || ''} afterHold=${longPressFired}`
+    );
     if (longPressFired) {
       longPressFired = false;
       return;

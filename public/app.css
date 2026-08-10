@@ -2791,8 +2791,23 @@ body.files-view #key-panel {
   line-height: 1;
 }
 
-/* Lifted, and out of the animation so it does not wobble under the finger. */
-.key-panel-key.dragging {
+/*
+ * Lifted, and out of the animation so it does not wobble under the finger.
+ *
+ * The selector has to name `.editing`, and that is the whole point of it. The
+ * wobble is set by `.key-panel-keys.editing .key-panel-key` — three classes — and
+ * `.key-panel-key.dragging` is two, so `animation: none` lost and the wobble kept
+ * running on the held tile. A running animation on transform outranks an inline
+ * one, so the drag's inline translate rendered as pure rotation and the tile sat
+ * in its slot while the finger moved away from it.
+ *
+ * It looked intermittent because `.key-panel-keys.flipping .key-panel-key` does
+ * beat the wobble, so the tile followed the finger for the length of a slide after
+ * each swap and stopped again once it ended. A drag across several slots kept
+ * re-triggering that and looked fine; a short one never triggered it and looked
+ * dead.
+ */
+.key-panel-keys.editing .key-panel-key.dragging {
   z-index: 2;
   animation: none;
   cursor: grabbing;
@@ -2814,15 +2829,19 @@ body.files-view #key-panel {
  * Two roots, because the two reorder routes differ. A drag mutates the tiles in
  * place, so the grid is the stable root. The keyboard arrows go through
  * renderKeyPanel(), which replaces the grid, so there it has to be the panel body.
+ *
+ * `.settling` is scoped to `.editing` for the same reason `.dragging` is: on its
+ * own it carries two classes and loses to the wobble, so the trip back into the
+ * slot was swallowed the same way the drag was.
  */
 #key-panel-body.flipping .key-panel-key,
 .key-panel-keys.flipping .key-panel-key,
-.key-panel-key.settling {
+.key-panel-keys.editing .key-panel-key.settling {
   animation: none;
 }
 
 /* Above its neighbours for the trip back into the slot. */
-.key-panel-key.settling {
+.key-panel-keys.editing .key-panel-key.settling {
   z-index: 2;
 }
 
@@ -2833,6 +2852,32 @@ body.files-view #key-panel {
   to {
     transform: rotate(0.9deg);
   }
+}
+
+/* Debug: the gesture log, and what to do with it. */
+.key-panel-note {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: var(--control-font-label);
+}
+
+.key-panel-debug-log {
+  flex: 1 1 auto;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--key-radius);
+  background: var(--surface-deep);
+  color: var(--text);
+  font-family: ui-monospace, monospace;
+  font-size: 11px;
+  line-height: 1.35;
+  /* Long-press to select is the fallback when the clipboard is refused. */
+  user-select: text;
+  -webkit-user-select: text;
+  white-space: pre;
 }
 
 /* Add key: one labelled grid per catalog group, then the custom key form. */
