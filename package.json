@@ -1,6 +1,6 @@
 {
   "name": "vps-terminal",
-  "version": "1.9.3",
+  "version": "1.10.0",
   "private": false,
   "description": "Mobile-first tmux terminal PWA for a Linux host (reverse-proxy auth)",
   "license": "MIT",
@@ -17,7 +17,8 @@
     "start": "node server.js",
     "check": "node --check server.js && node --check diagnostics.js && node --check fs-jail.js && node --check preferences-store.js && node --check public/app.js && node --check public/viewport-init.js",
     "vendor": "bash scripts/vendor-assets.sh",
-    "test": "bash scripts/check.sh"
+    "test": "bash scripts/check.sh",
+    "qa:files-delete": "node qa/files-delete.js"
   },
   "files": [
     "server.js",

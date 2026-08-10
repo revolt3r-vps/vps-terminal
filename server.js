@@ -5,8 +5,10 @@ const fs = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
+const zlib = require('node:zlib');
 const { execFile } = require('node:child_process');
 const { promisify } = require('node:util');
+const gzipAsync = promisify(zlib.gzip);
 const pty = require('node-pty');
 const { WebSocketServer } = require('ws');
 const {
@@ -1327,6 +1329,55 @@ const mimeTypes = new Map([
 ]);
 const preferencesSubjectPlaceholder = '__VPS_PREFERENCES_SUBJECT__';
 const buildIdPlaceholder = '__VPS_BUILD_ID__';
+/**
+ * The same build id, but safe in a query string.
+ *
+ * buildId is `version+base36(mtime)`, and a raw `+` in a query string decodes to
+ * a space — so an asset URL carrying it would never match buildId on the way
+ * back in, and every asset would silently stay no-store. The URLs carry the
+ * encoded form; this placeholder is what puts it there.
+ */
+const buildTagPlaceholder = '__VPS_BUILD_TAG__';
+
+/**
+ * Extensions worth compressing. woff2 is already compressed and svg is small
+ * enough here that the round trip costs more than it saves.
+ */
+const compressibleExtensions = new Set(['.css', '.js', '.json', '.webmanifest']);
+
+/**
+ * Below this, a gzip frame is a rounding error against one TCP round trip.
+ */
+const minimumCompressibleBytes = 1024;
+
+/**
+ * Gzipped bodies, keyed by file identity so a redeploy invalidates them.
+ *
+ * The whole public tree is 1.19 MB raw and 305 KB gzipped, so holding the
+ * compressed copies costs less memory than one session's scrollback. Without
+ * this, every open would re-compress half a megabyte of app.js.
+ */
+const compressedStaticCache = new Map();
+
+async function gzipStaticBody(filePath, stats, body) {
+  const key = `${filePath}:${stats.mtimeMs}:${stats.size}`;
+  const cached = compressedStaticCache.get(key);
+  if (cached) {
+    return cached;
+  }
+  const compressed = await gzipAsync(body);
+  // A file that does not shrink is served as-is rather than padded.
+  if (compressed.length >= body.length) {
+    return null;
+  }
+  compressedStaticCache.set(key, compressed);
+  return compressed;
+}
+
+function acceptsGzip(request) {
+  const header = request.headers['accept-encoding'];
+  return typeof header === 'string' && /\bgzip\b/i.test(header);
+}
 
 /**
  * A short identifier for the running build, shown in Settings.
@@ -1380,7 +1431,11 @@ async function serveStatic(request, response) {
   }
   try {
     let body = await fs.promises.readFile(filePath);
-    if (normalizedPath === '/index.html') {
+    // index.html is the only response carrying a per-user value, and that is the
+    // distinction the two flags below draw. Both files are templated; only one
+    // has an identity in it, and only that one stays uncompressed.
+    const carriesIdentity = normalizedPath === '/index.html';
+    if (carriesIdentity) {
       const email = authenticatedEmail(request);
       body = Buffer.from(
         body
@@ -1389,16 +1444,65 @@ async function serveStatic(request, response) {
             preferencesSubjectPlaceholder,
             email ? preferencesIdentity(email) : ''
           )
-          .replaceAll(buildIdPlaceholder, buildId),
+          .replaceAll(buildIdPlaceholder, buildId)
+          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId)),
+        'utf8'
+      );
+    } else if (path.extname(filePath) === '.css') {
+      // app.css carries the font URLs, and those are the only asset references
+      // outside index.html. Substituting here is what lets them be versioned and
+      // therefore cached, rather than being the one thing refetched every open.
+      body = Buffer.from(
+        body
+          .toString('utf8')
+          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId)),
         'utf8'
       );
     }
     setSecurityHeaders(response);
+    // A request that names this build can be cached forever, because the name
+    // changes when the file does — index.html is served no-store and rewrites
+    // every ?v= on each deploy, so a client can never keep an old asset without
+    // also keeping the old page that asked for it.
+    //
+    // Without a version the answer stays no-store, which keeps a hand-typed URL
+    // and any old cached page honest.
+    if (url.searchParams.get('v') === buildId) {
+      response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
     response.statusCode = 200;
     response.setHeader(
       'Content-Type',
       mimeTypes.get(path.extname(filePath)) || 'application/octet-stream'
     );
+    // Compress the bundle, which is what a phone on a bad connection is actually
+    // waiting for: measured, the critical set is 1.19 MB raw and 305 KB gzipped,
+    // and app.js alone is 496K against 136K. Nothing else about the wait moves
+    // that much for this little.
+    //
+    // index.html is deliberately excluded even though it would compress. It is
+    // the one response with a per-user value substituted into it, and keeping
+    // every response that carries an identity uncompressed means this cannot
+    // become a BREACH-shaped question later. It is 31 KB of the 1.19 MB, so the
+    // exclusion costs almost nothing.
+    //
+    // Vary matters even with no cache in front today: without it, anything that
+    // caches later would hand a gzipped body to a client that never asked.
+    response.setHeader('Vary', 'Accept-Encoding');
+    if (
+      !carriesIdentity &&
+      acceptsGzip(request) &&
+      compressibleExtensions.has(path.extname(filePath)) &&
+      body.length >= minimumCompressibleBytes
+    ) {
+      const stats = await fs.promises.stat(filePath);
+      const compressed = await gzipStaticBody(filePath, stats, body);
+      if (compressed) {
+        response.setHeader('Content-Encoding', 'gzip');
+        response.end(compressed);
+        return;
+      }
+    }
     response.end(body);
   } catch (error) {
     if (error.code === 'ENOENT') {

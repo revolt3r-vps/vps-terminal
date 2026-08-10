@@ -3,7 +3,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/vendor/jetbrains-mono-regular.woff2") format("woff2");
+  src: url("/vendor/jetbrains-mono-regular.woff2?v=__VPS_BUILD_TAG__") format("woff2");
 }
 
 @font-face {
@@ -11,7 +11,7 @@
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("/vendor/jetbrains-mono-semibold.woff2") format("woff2");
+  src: url("/vendor/jetbrains-mono-semibold.woff2?v=__VPS_BUILD_TAG__") format("woff2");
 }
 
 :root {
@@ -573,7 +573,8 @@ body.files-view #files-name-dialog {
   white-space: nowrap;
 }
 
-#files-location-select-wrap {
+#files-location-select-wrap,
+#files-bookmarks-open {
   position: relative;
   flex: 0 1 124px;
   min-width: 72px;
@@ -2075,6 +2076,28 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   color: var(--muted);
 }
 
+/*
+ * The only thing moving while the bundle downloads.
+ *
+ * app.css is a blocking stylesheet and app.js is deferred, so this animation is
+ * running long before any script — which is the point. Measured on emulated slow
+ * 3G, the app shows this screen for 23 of the 27 seconds before it connects, and
+ * a completely static screen for that long reads as broken.
+ *
+ * Opacity only, and no scale: connection-pulse would have done otherwise, and a
+ * line of text breathing in size is not the same effect on a paragraph as it is
+ * on an 8px dot.
+ */
+#empty[data-booting] #empty-message {
+  animation: boot-pulse var(--duration-pulse-slow) ease-in-out infinite;
+}
+
+@keyframes boot-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
 #status {
   position: fixed;
   right: calc(10px + var(--safe-right));
@@ -2137,6 +2160,26 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 #status[data-tone='success']::before {
   content: '\2713';
+}
+
+/*
+ * The determinate bar, for an upload long enough to need one.
+ *
+ * scaleX rather than width, so each progress event costs a composite instead of
+ * a layout — an upload fires a lot of them, on the device least able to absorb
+ * a layout per event. #status is already overflow: hidden, so the bar picks up
+ * the toast's rounded corners without a radius of its own.
+ */
+#status .status-progress {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform var(--duration-quick) var(--ease-out);
 }
 
 /* Anything that needs typing: the same sheet as the settings dialog, sized to
@@ -2488,7 +2531,8 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /* The select takes the room the breadcrumb does not need up here. */
-#files-header-nav #files-location-select-wrap {
+#files-header-nav #files-location-select-wrap,
+#files-header-nav #files-bookmarks-open {
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -3990,7 +4034,8 @@ footer button {
 /* Tablet touch layouts gain a persistent location pane without adopting
  * fine-pointer density or shrinking touch targets. */
 @media (min-width: 700px) and (min-height: 600px) and (pointer: coarse) {
-  #files-location-select-wrap {
+  #files-location-select-wrap,
+  #files-bookmarks-open {
     display: none;
   }
 
@@ -4187,7 +4232,8 @@ footer button {
     padding: 4px 6px 4px 10px;
   }
 
-  #files-location-select-wrap {
+  #files-location-select-wrap,
+  #files-bookmarks-open {
     display: none;
   }
 
@@ -4567,6 +4613,34 @@ header:not(.collapsed) #header-expanded {
   animation: surface-sheet-in var(--duration-panel) var(--ease-out);
 }
 
+/*
+ * A theme change crosses over instead of cutting, for the length of one change.
+ *
+ * The universal selector is the point rather than laziness: a theme rewrites
+ * ~24 custom properties on :root, and what reads them is most of the app. The
+ * terminal comes with it because xterm is loaded here without the canvas or
+ * webgl addon, so it renders to divs and spans whose colours live in a
+ * stylesheet it rewrites — a transition on `color` carries the scrollback across
+ * the same way it carries the chrome.
+ *
+ * Scoped to a class, and not left on permanently, because every property listed
+ * here also changes on press, focus and selection. A 240ms fade on a button
+ * press would make the whole app feel slow.
+ *
+ * box-shadow is deliberately not in the list. It is the most paint-expensive
+ * property here, and only 5 of the stylesheet's 38 shadows are themed at all —
+ * so fading every element's shadow to carry those five is the wrong trade on a
+ * phone. Those five cut rather than fade, and a focus ring changing colour in
+ * one frame is not something anyone will see.
+ */
+.theme-shifting,
+.theme-shifting * {
+  transition: background-color var(--duration-panel) var(--ease-out),
+    border-color var(--duration-panel) var(--ease-out),
+    color var(--duration-panel) var(--ease-out),
+    fill var(--duration-panel) var(--ease-out);
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -4576,4 +4650,87 @@ header:not(.collapsed) #header-expanded {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* The places sheet, which replaced the roots <select> in the Files toolbar. */
+#files-bookmarks-dialog {
+  width: min(420px, calc(100vw - 28px));
+  max-height: min(80dvh, 640px);
+  overflow-y: auto;
+}
+
+.files-bookmarks-open svg {
+  width: 18px;
+  height: 18px;
+}
+
+.files-bookmark-add {
+  width: 100%;
+  min-height: var(--control-size);
+  margin: 4px 0 10px;
+  border: 1px solid var(--control-border);
+  border-radius: var(--control-radius);
+  background: var(--accent-surface);
+  color: var(--accent-text);
+  font-size: var(--control-font-label);
+  font-weight: 650;
+}
+
+.files-bookmark-add:disabled {
+  background: var(--surface-raised);
+  color: var(--muted);
+}
+
+.files-bookmarks-heading {
+  margin: 10px 0 4px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.files-bookmark-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.files-bookmark-go {
+  display: grid;
+  min-height: var(--control-size);
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  text-align: left;
+}
+
+.files-bookmark-name {
+  overflow: hidden;
+  color: var(--text);
+  font-size: var(--control-font-label);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-bookmark-path {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.files-bookmark-remove {
+  width: var(--control-size);
+  min-height: var(--control-size);
+  border: 1px solid var(--border);
+  border-radius: var(--control-radius);
+  background: var(--surface-raised);
+  color: var(--danger);
+  font-size: 18px;
+  line-height: 1;
 }

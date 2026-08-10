@@ -34,6 +34,11 @@ const filesActionDownload = document.querySelector('#files-action-download');
 const filesActionRename = document.querySelector('#files-action-rename');
 const filesActionInsert = document.querySelector('#files-action-insert');
 const filesActionDelete = document.querySelector('#files-action-delete');
+const filesBookmarksOpen = document.querySelector('#files-bookmarks-open');
+const filesBookmarksDialog = document.querySelector('#files-bookmarks-dialog');
+const filesBookmarksList = document.querySelector('#files-bookmarks-list');
+const filesBookmarksClose = document.querySelector('#files-bookmarks-close');
+const filesBookmarkAdd = document.querySelector('#files-bookmark-add');
 const filesPreviewDialog = document.querySelector('#files-preview-dialog');
 const filesPreviewTitle = document.querySelector('#files-preview-title');
 const filesPreviewBody = document.querySelector('#files-preview-body');
@@ -1098,10 +1103,57 @@ function inferStatusTone(message) {
   return 'neutral';
 }
 
+/**
+ * The determinate bar the toast can carry, built once and reused.
+ *
+ * aria-hidden because the message is the accessible channel. #status is
+ * role="status" aria-live="polite", so an announcement per progress event would
+ * queue twenty interruptions for one upload — the bar is for eyes, and the text
+ * changes only at the points worth saying out loud.
+ */
+let statusProgressBarElement = null;
+
+function statusProgressBar() {
+  if (!statusProgressBarElement) {
+    statusProgressBarElement = document.createElement('span');
+    statusProgressBarElement.className = 'status-progress';
+    statusProgressBarElement.setAttribute('aria-hidden', 'true');
+  }
+  return statusProgressBarElement;
+}
+
+function statusProgressTransform(fraction) {
+  const clamped = Math.min(1, Math.max(0, Number(fraction) || 0));
+  return `scaleX(${clamped})`;
+}
+
+/**
+ * Move the bar without rewriting the message.
+ *
+ * Separate from setStatus deliberately: setStatus assigns textContent, which
+ * drops every child, so routing progress through it would re-insert the bar on
+ * each event — and re-inserting an element cancels the transition that smooths
+ * between two progress events. The bar would tick rather than travel.
+ */
+function setStatusProgress(fraction) {
+  if (!statusProgressBarElement?.isConnected) {
+    return;
+  }
+  statusProgressBarElement.style.transform = statusProgressTransform(fraction);
+}
+
 function setStatus(message, options = {}) {
   clearTimeout(statusTimer);
   statusTimer = null;
   statusElement.textContent = message;
+  // After the textContent write, which is what clears the bar for every message
+  // that does not ask for one. The transform is set before the element is in the
+  // document so a bar left at full by the last upload does not rewind on screen.
+  if (typeof options.progress === 'number') {
+    const bar = statusProgressBar();
+    bar.style.transform = statusProgressTransform(options.progress);
+    statusElement.append(bar);
+  }
   statusElement.classList.add('visible');
   statusElement.classList.toggle('sticky', Boolean(options.sticky));
   statusElement.dataset.tone = options.tone || inferStatusTone(message);
@@ -2017,11 +2069,13 @@ function createKeyChipButton(id, options = {}) {
       button.classList.add('active');
     }
   }
-  // Held, a chip opens the panel on the grid it belongs to, already editing.
-  // The same gesture does the same thing there.
+  // No hold on the bar. It used to open the editor, and the bar is the one
+  // surface you rest a thumb on while reading — so the gesture kept firing when
+  // nobody asked for an editor. Editing is reached deliberately, through the
+  // panel. onHold is optional in installChipLongPress, so omitting it leaves the
+  // tap behaviour and the move tolerance exactly as they were.
   installChipLongPress(button, {
-    onTap: () => activateShortcut(id),
-    onHold: () => openKeyEditor()
+    onTap: () => activateShortcut(id)
   });
   return button;
 }
@@ -2448,6 +2502,12 @@ function renderKeyPanelPlaceholder(page, text) {
  * separate editor to open.
  */
 function renderKeyPanelKeys(page) {
+  // Before anything is read or built. Every path below replaces the grid, and
+  // the teardown is what lets a live drag persist the order it has reached — so
+  // it has to run before loadShortcutIds() below, not after. Doing it at install
+  // time, which is where it used to live, saved the order one step too late: the
+  // grid had already been built from the order the drag started with.
+  releaseKeyTileReorder();
   // A held modifier owns the grid: its secondaries are what row 2 would carry,
   // and row 2 is behind the panel. Editing waits until it is released.
   if (footerChordModifier) {
@@ -2880,15 +2940,20 @@ function reorderWithMotion(root, itemSelector, mutate, options = {}) {
     const dx = Math.round(from.left - to.left);
     const dy = Math.round(from.top - to.top);
     if (dx === 0 && dy === 0) {
+      // Hand this one its own transitions back. The `none` above is only there
+      // to stop an in-flight slide interfering with the measurement, and an item
+      // with nothing to play never reaches the loop below that replaces it — so
+      // left alone it keeps every later transition off until something
+      // re-renders the element. The key grid hid that: a drag ends by rebuilding
+      // the grid, which throws the inline style away. Snippets do not rebuild,
+      // and their rows kept a dead `transition: none`.
+      item.style.transition = '';
       continue;
     }
     item.style.transform = `translate(${dx}px, ${dy}px)`;
     moved.push(item);
   }
   if (moved.length === 0) {
-    for (const item of candidates) {
-      item.style.transition = '';
-    }
     return;
   }
 
@@ -3197,6 +3262,14 @@ function installReorder(container, options) {
     if (!dragging) {
       return;
     }
+    // Hand the order over too, not just the grip. The grid that replaces this one
+    // is built from storage, and a drag saves nothing until it drops — so without
+    // this the new grid draws every tile back where the drag started, and the work
+    // the finger has already done disappears for a frame. A press that never moved
+    // has reordered nothing, so there is nothing to carry.
+    if (moved) {
+      options.onAbandon?.(items().map((item) => item.dataset.reorderId));
+    }
     reorderHandover = {
       id: dragging.dataset.reorderId,
       pointerId: dragPointerId,
@@ -3363,11 +3436,33 @@ function installReorder(container, options) {
  */
 let activeKeyTileReorder = null;
 
+/**
+ * Take the reorder off a grid that is about to be replaced.
+ *
+ * Called at the top of renderKeyPanelKeys() rather than from the install below,
+ * because the teardown is also what hands a live drag's order over — and the
+ * render reads that order a few lines later.
+ */
+function releaseKeyTileReorder() {
+  activeKeyTileReorder?.();
+  activeKeyTileReorder = null;
+}
+
 function installKeyTileReorder(grid) {
+  // A no-op on the render path, which has already released. Kept so no caller
+  // can install a second set of window listeners on top of a live one.
   activeKeyTileReorder?.();
   activeKeyTileReorder = installReorder(grid, {
     itemSelector: '.key-panel-key[data-reorder-id]',
     ignoreSelector: '.key-panel-key-remove',
+    // A gesture interrupted by a rebuild: persist where it has got to, so the
+    // grid that replaces this one renders the drag's order rather than the one
+    // from before the finger went down. Only the order — the footer surfaces are
+    // left alone, because the gesture is still running and will drop properly.
+    onAbandon: (order) => {
+      dragDebug(`handover-save ${order.join(',')}`);
+      saveShortcutIds(order);
+    },
     onDrop: (order) => {
       dragDebug(`save ${order.join(',')}`);
       saveShortcutIds(order);
@@ -3763,6 +3858,10 @@ function createKeyPanelSnippetRow(snippet, editing) {
   const item = document.createElement('div');
   item.className = 'key-panel-item';
   item.dataset.snippetId = snippet.id;
+  // The arrows are the only way to reorder a snippet, and edit mode is the only
+  // place they exist — so this is the row reorderWithMotion has to match across
+  // the rebuild. The list-mode row carries it too, but never moves.
+  item.dataset.reorderId = snippet.id;
   item.setAttribute('role', 'listitem');
 
   // The mode is the toggle now. It said Run or Insert and did nothing; a tap
@@ -4166,8 +4265,20 @@ function renderKeyPanelAppearance(page) {
     name.textContent = label;
     card.append(preview, name);
     card.addEventListener('click', () => {
-      applyTerminalTheme(id);
-      renderKeyPanel();
+      // Marking the chosen card rather than calling renderKeyPanel(). A rebuild
+      // replaces every card, and a card that arrives after the theme has already
+      // changed has nothing to fade from — the grid would snap while the header
+      // and terminal around it crossed over. Only .active and aria-pressed
+      // differ between the old grid and a rebuilt one, so this is the whole
+      // difference, and it also stops the panel being replaced under a finger.
+      crossFadeThemeChange(() => {
+        applyTerminalTheme(id);
+        for (const other of grid.querySelectorAll('.key-panel-theme')) {
+          const chosen = other.dataset.themeId === id;
+          other.classList.toggle('active', chosen);
+          other.setAttribute('aria-pressed', String(chosen));
+        }
+      });
     });
     grid.append(card);
   }
@@ -4469,7 +4580,17 @@ async function saveSnippetsToServer(nextList) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ version: 1, snippets: nextList })
   });
-  snippetsList = Array.isArray(saved.snippets) ? saved.snippets : nextList;
+  const settled = Array.isArray(saved.snippets) ? saved.snippets : nextList;
+  // Redrawing content that is already on screen is not free here. moveSnippet
+  // reorders and renders first so its rows can slide, and this answer lands
+  // mid-slide — renderKeyPanel() replaces every row, which drops the transform
+  // in flight and stops the slide part-way. Same shape as the grid being rebuilt
+  // under a finger, and the same answer: do not rebuild when nothing differs.
+  const unchanged = JSON.stringify(settled) === JSON.stringify(snippetsList);
+  snippetsList = settled;
+  if (unchanged) {
+    return snippetsList;
+  }
   renderFooterPins();
   renderKeyPanel();
   return snippetsList;
@@ -4487,10 +4608,25 @@ async function moveSnippet(id, delta) {
   if (next < 0 || next >= snippetsList.length) {
     return;
   }
+  const before = snippetsList;
   const copy = [...snippetsList];
   const [item] = copy.splice(index, 1);
   copy.splice(next, 0, item);
-  await commitSnippets(copy);
+  // The slide runs on the local reorder, not on the server's answer. This is the
+  // one thing that made snippets different from the key grid and pushed them out
+  // of phase 2: saveSnippetsToServer() is a round trip, and a FLIP that starts
+  // after it has nothing left to animate — the row has already been redrawn in
+  // its new place. So move the list, redraw, slide, and let the write catch up.
+  //
+  // The panel body is the root rather than the list, for the same reason the key
+  // arrows use it: renderKeyPanel() replaces the list, so rows are matched across
+  // the rebuild by data-reorder-id.
+  reorderWithMotion(keyPanelBodyElement, '.key-panel-item[data-reorder-id]', () => {
+    snippetsList = copy;
+    renderFooterPins();
+    renderKeyPanel();
+  });
+  await commitSnippets(copy, undefined, { rollbackTo: before });
 }
 
 /**
@@ -4500,7 +4636,7 @@ async function moveSnippet(id, delta) {
  * failed write has to redraw from state, or the panel keeps showing an order
  * the server never accepted.
  */
-async function commitSnippets(next, done) {
+async function commitSnippets(next, done, options = {}) {
   try {
     await saveSnippetsToServer(next);
     if (done) {
@@ -4508,6 +4644,13 @@ async function commitSnippets(next, done) {
     }
     return true;
   } catch (error) {
+    // A caller that moved the list before the write — moveSnippet, so its rows
+    // can slide rather than wait out the round trip — has to hand back what the
+    // list was. Redrawing alone would render the order the server just refused.
+    if (options.rollbackTo) {
+      snippetsList = options.rollbackTo;
+      renderFooterPins();
+    }
     window.alert(error.message);
     renderKeyPanel();
     return false;
@@ -4631,6 +4774,8 @@ async function resetSnippetsToPresets() {
     // becomes defaultSnippetsDocument. Sending { snippets: [] } works.
     await saveSnippetsToServer([]);
     setStatus('Snippets reset');
+    // Same as the keys Reset: finishing a reset is finishing with the editor.
+    setKeyPanelSnippetsMode('list');
   } catch (error) {
     window.alert(error.message);
   }
@@ -4797,6 +4942,11 @@ function resetShortcuts() {
   // Keep custom key definitions; only reset which keys the bar carries.
   armedModifier = null;
   setStatus('Keys reset');
+  // Out of edit mode with it. Reset is the end of an editing session, not a step
+  // in one — staying in edit mode left the wobble running over a grid the user
+  // had just finished with. setKeyPanelKeysMode() renders, so this replaces the
+  // refresh rather than adding one.
+  setKeyPanelKeysMode('list');
   refreshKeysUi();
 }
 
@@ -7511,6 +7661,47 @@ function applyAppTheme(themeName) {
   }
 }
 
+/** Timer that takes the cross-fade class back off, restarted by each change. */
+let themeShiftTimer = null;
+
+/** Slack on that timer, so the class only comes off after the fade has finished. */
+const themeShiftGraceMilliseconds = 120;
+
+/**
+ * Cross-fade a theme change instead of cutting to it.
+ *
+ * This works because the terminal is DOM, not canvas. The plan assumed canvas
+ * and built phase 3 around that; measured here, `#terminal canvas` matches zero
+ * elements, because xterm is loaded with neither the canvas nor the webgl addon
+ * and so falls back to its DOM renderer. Rows are divs, cells are spans, and
+ * their colours come from a stylesheet xterm rewrites when the theme changes —
+ * which a CSS transition on `color` carries across. On a canvas renderer the
+ * terminal would have had to hard-cut while the chrome faded.
+ *
+ * The transition lives on a class for the length of one change rather than on
+ * the elements permanently. Every property in it — background, border, text —
+ * also changes on press, focus and selection, and a 240ms fade on those would
+ * make the whole app feel slow.
+ */
+function crossFadeThemeChange(apply) {
+  if (prefersReducedMotion()) {
+    apply();
+    return;
+  }
+  const root = document.documentElement;
+  root.classList.add('theme-shifting');
+  apply();
+  window.clearTimeout(themeShiftTimer);
+  themeShiftTimer = window.setTimeout(() => {
+    root.classList.remove('theme-shifting');
+    themeShiftTimer = null;
+  }, themeShiftMilliseconds() + themeShiftGraceMilliseconds);
+}
+
+function themeShiftMilliseconds() {
+  return Number.parseFloat(readMotionToken('--duration-panel', '240ms')) || 240;
+}
+
 function applyTerminalTheme(name, options = {}) {
   const persist = options.persist !== false;
   const resolved = resolveThemeName(name);
@@ -8774,6 +8965,199 @@ function navigateFilesParent() {
   return true;
 }
 
+/**
+ * Places: the roots, plus folders you asked to keep.
+ *
+ * This replaced a <select> of the three roots in the toolbar. Three fixed
+ * entries is not a list worth a picker, and the folders actually worth
+ * returning to are nested inside them — which the select could never offer.
+ *
+ * Local only for now. The preferences document syncs keys, themes and snippets
+ * through the server, and adding a fourth kind means a schema change on both
+ * sides; that is worth doing but is not this change.
+ */
+const filesBookmarksStorageKey = 'vps-terminal-files-bookmarks';
+const maximumFilesBookmarks = 30;
+
+function loadFilesBookmarks() {
+  try {
+    const raw = window.localStorage.getItem(filesBookmarksStorageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed
+      .filter(
+        (entry) =>
+          entry &&
+          typeof entry.root === 'string' &&
+          typeof entry.path === 'string'
+      )
+      .slice(0, maximumFilesBookmarks)
+      .map((entry) => ({ root: entry.root, path: entry.path }));
+  } catch {
+    return [];
+  }
+}
+
+function saveFilesBookmarks(list) {
+  try {
+    window.localStorage.setItem(
+      filesBookmarksStorageKey,
+      JSON.stringify(list.slice(0, maximumFilesBookmarks))
+    );
+  } catch {
+    // A device that cannot store them still navigates; the list just does not
+    // outlive the page.
+  }
+}
+
+/** A bookmark is one folder, so root and path together are its identity. */
+function filesBookmarkKey(root, path) {
+  return `${root}::${path || ''}`;
+}
+
+function currentFolderIsBookmarked() {
+  const key = filesBookmarkKey(filesRootId, filesPath);
+  return loadFilesBookmarks().some(
+    (entry) => filesBookmarkKey(entry.root, entry.path) === key
+  );
+}
+
+function goToFilesLocation(root, path) {
+  closeFilesPreview({ restoreFocus: false });
+  filesRootId = root;
+  filesPath = path || '';
+  filesSelectedName = '';
+  filesSelectedIndex = -1;
+  filesRestoreSelectionName = '';
+  saveFilesNav();
+  renderFilesRoots();
+  void refreshFilesListing();
+}
+
+function renderFilesBookmarks() {
+  if (!filesBookmarksList) {
+    return;
+  }
+  const roots =
+    filesRootsCatalog.length > 0
+      ? filesRootsCatalog
+      : [{ id: 'home', label: 'home' }];
+  const bookmarks = loadFilesBookmarks();
+  const rows = [];
+
+  const heading = (text) => {
+    const label = document.createElement('p');
+    label.className = 'files-bookmarks-heading';
+    label.textContent = text;
+    return label;
+  };
+
+  const row = (label, detail, onOpen, onRemove) => {
+    const item = document.createElement('div');
+    item.className = 'files-bookmark-row';
+    item.setAttribute('role', 'listitem');
+    const open = document.createElement('button');
+    open.type = 'button';
+    open.className = 'files-bookmark-go';
+    const name = document.createElement('span');
+    name.className = 'files-bookmark-name';
+    name.textContent = label;
+    const where = document.createElement('span');
+    where.className = 'files-bookmark-path';
+    where.textContent = detail;
+    open.append(name, where);
+    open.addEventListener('click', onOpen);
+    item.append(open);
+    if (onRemove) {
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'files-bookmark-remove';
+      remove.textContent = '\u00d7';
+      remove.title = `Remove ${label}`;
+      remove.setAttribute('aria-label', `Remove bookmark ${label}`);
+      remove.addEventListener('click', onRemove);
+      item.append(remove);
+    }
+    return item;
+  };
+
+  rows.push(heading('Roots'));
+  for (const root of roots) {
+    rows.push(
+      row(
+        root.label || root.id,
+        root.displayPrefix || '',
+        () => {
+          goToFilesLocation(root.id, '');
+          closeFilesBookmarks();
+        }
+      )
+    );
+  }
+  rows.push(heading(bookmarks.length ? 'Bookmarks' : 'No bookmarks yet'));
+  for (const entry of bookmarks) {
+    const name = entry.path ? entry.path.split('/').pop() : entry.root;
+    rows.push(
+      row(
+        name,
+        filesDisplayPath(entry.root, entry.path),
+        () => {
+          goToFilesLocation(entry.root, entry.path);
+          closeFilesBookmarks();
+        },
+        () => {
+          const key = filesBookmarkKey(entry.root, entry.path);
+          saveFilesBookmarks(
+            loadFilesBookmarks().filter(
+              (kept) => filesBookmarkKey(kept.root, kept.path) !== key
+            )
+          );
+          renderFilesBookmarks();
+        }
+      )
+    );
+  }
+  filesBookmarksList.replaceChildren(...rows);
+  if (filesBookmarkAdd) {
+    const already = currentFolderIsBookmarked();
+    filesBookmarkAdd.disabled = already;
+    filesBookmarkAdd.textContent = already
+      ? 'This folder is bookmarked'
+      : 'Bookmark this folder';
+  }
+}
+
+function openFilesBookmarks() {
+  if (!filesBookmarksDialog) {
+    return;
+  }
+  renderFilesBookmarks();
+  if (!filesBookmarksDialog.open) {
+    filesBookmarksDialog.showModal();
+  }
+}
+
+function closeFilesBookmarks() {
+  if (filesBookmarksDialog?.open) {
+    filesBookmarksDialog.close();
+  }
+}
+
+function addCurrentFolderBookmark() {
+  if (currentFolderIsBookmarked()) {
+    return;
+  }
+  const next = [
+    ...loadFilesBookmarks(),
+    { root: filesRootId, path: filesPath || '' }
+  ];
+  saveFilesBookmarks(next);
+  setStatus('Pinned this folder');
+  renderFilesBookmarks();
+}
+
 function activateFilesEntry(entry, options = {}) {
   const target = filesEntryTarget(entry);
   if (!target) {
@@ -9066,6 +9450,25 @@ function renderFilesRoots() {
     button.title = root.displayPrefix || root.label || root.id;
     button.addEventListener('click', () => {
       switchFilesRoot(root.id);
+    });
+    filesRootsElement.append(button);
+  }
+  // Bookmarks live here too on wide layouts. The toolbar button is hidden where
+  // the sidebar shows — that is the "no duplicate location control" rule the
+  // layout has always had — so without this, desktop would have no way to reach
+  // a bookmark at all.
+  for (const entry of loadFilesBookmarks()) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'files-root-bookmark';
+    button.textContent = entry.path ? entry.path.split('/').pop() : entry.root;
+    button.title = filesDisplayPath(entry.root, entry.path);
+    button.classList.toggle(
+      'active',
+      filesRootId === entry.root && (filesPath || '') === (entry.path || '')
+    );
+    button.addEventListener('click', () => {
+      goToFilesLocation(entry.root, entry.path);
     });
     filesRootsElement.append(button);
   }
@@ -10070,9 +10473,97 @@ async function deleteFilesTarget(target) {
   });
   await api(`/api/fs/entry?${query.toString()}`, { method: 'DELETE' });
   setStatus(`Deleted ${target.name}`);
+  // Take the row out now rather than when the refresh lands. The server has
+  // already removed the file, so this is reporting what happened, not guessing
+  // ahead of it — and the row was staying on screen for the whole listing round
+  // trip, which is long enough to see.
+  //
+  // That window is what produced the vertical line: closeFilesActions() returns
+  // focus to the list, the list's focus handler selects row 0 when nothing is
+  // selected, and `#files-list:focus-visible li[aria-selected='true']` draws
+  // `box-shadow: inset 3px 0 0 var(--accent)` down that row's left edge. So the
+  // deleted row got re-selected and drew a line, then vanished. Clearing the
+  // selection first does not help — the focus handler simply puts it back.
+  //
+  // Setting the restore index here means the neighbour is selected exactly as
+  // the refresh would have done, so with files left this is invisible; with none
+  // left there is no row to select and no line to draw.
+  if (filesListing && Array.isArray(filesListing.entries)) {
+    filesListing.entries = filesListing.entries.filter(
+      (entry) => entry.name !== target.name
+    );
+    filesRestoreSelectionIndex = Math.max(0, deletedIndex);
+    renderFilesListing(filesListing);
+  }
   closeFilesActions();
   await refreshFilesListingAfterMutation(target.root, targetDirectory, {
     index: Math.max(0, deletedIndex)
+  });
+}
+
+/**
+ * POST a file and report how much of it has gone out.
+ *
+ * The one place in the app that reaches for XMLHttpRequest, and it has to:
+ * fetch cannot report upload progress at all — there is no event for a request
+ * body — so the 20 MB limit meant up to minutes of a sticky toast that never
+ * changed. api() stays fetch; only this one call needs the older object.
+ *
+ * Two other things change with it, both improvements rather than side effects:
+ *
+ * - The file is sent as-is instead of through file.arrayBuffer(). Reading it
+ *   first held the whole 20 MB in memory a second time and bought nothing.
+ * - The X-File-Name header is gone. It was a fallback the server only reads
+ *   when the filename query parameter is absent, and it is never absent here —
+ *   but a header value is a ByteString, so any name outside Latin-1 threw a
+ *   TypeError before the request was sent. Measured: both `new Headers()` and
+ *   setRequestHeader reject one code point over 255, so the old fetch path had
+ *   the same bug. The query parameter is percent-encoded and carries it fine.
+ */
+function uploadFileWithProgress(path, file, onProgress) {
+  return new Promise((resolve, reject) => {
+    const request = new XMLHttpRequest();
+    request.open('POST', path);
+    request.setRequestHeader('Content-Type', 'application/octet-stream');
+    request.upload.addEventListener('progress', (event) => {
+      // A bar that guesses is worse than no bar, so a total the browser cannot
+      // see leaves the caller's indeterminate message alone.
+      if (event.lengthComputable && event.total > 0) {
+        onProgress(event.loaded / event.total);
+      }
+    });
+    request.addEventListener('error', () => reject(new Error('Upload failed')));
+    request.addEventListener('abort', () =>
+      reject(new Error('Upload cancelled'))
+    );
+    request.addEventListener('load', () => {
+      // The same read api() makes: the proxy answers an expired session with its
+      // login page, so a response that is not JSON means the session is gone.
+      // There is no opaqueredirect case to test for — XHR follows the redirect
+      // itself and lands on that page, which this catches by content type.
+      const type = request.getResponseHeader('content-type') || '';
+      if (!type.includes('application/json')) {
+        window.location.reload();
+        reject(new Error('Authentication expired'));
+        return;
+      }
+      let value;
+      try {
+        value = JSON.parse(request.responseText);
+      } catch {
+        reject(new Error('Upload failed'));
+        return;
+      }
+      if (request.status < 200 || request.status >= 300) {
+        const error = new Error(value.error || 'Request failed');
+        error.status = request.status;
+        error.payload = value;
+        reject(error);
+        return;
+      }
+      resolve(value);
+    });
+    request.send(file);
   });
 }
 
@@ -10092,21 +10583,28 @@ async function uploadFilesSelected(fileList) {
   const uploadRootId = filesRootId;
   const uploadPath = filesPath || '';
   try {
-    setStatus(`Uploading ${file.name}…`, { sticky: true });
-    const buffer = await file.arrayBuffer();
+    setStatus(`Uploading ${file.name}…`, { sticky: true, progress: 0 });
     const query = new URLSearchParams({
       root: uploadRootId,
       path: uploadPath,
       filename: file.name
     });
-    await api(`/api/fs/upload?${query.toString()}`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/octet-stream',
-        'X-File-Name': file.name
-      },
-      body: buffer
-    });
+    let finishing = false;
+    await uploadFileWithProgress(
+      `/api/fs/upload?${query.toString()}`,
+      file,
+      (fraction) => {
+        setStatusProgress(fraction);
+        // The last byte handed to the socket is not the file written to disk.
+        // The server still has to receive and store it, and on a fast link that
+        // tail is most of the wait — so a full bar still saying "Uploading" is
+        // the silence this whole change exists to remove. Say what is happening.
+        if (fraction >= 1 && !finishing) {
+          finishing = true;
+          setStatus(`Finishing ${file.name}…`, { sticky: true, progress: 1 });
+        }
+      }
+    );
     setStatus(`Uploaded ${file.name}`);
     await refreshFilesListingAfterMutation(uploadRootId, uploadPath, {
       name: file.name
@@ -10130,6 +10628,26 @@ async function uploadFilesSelected(fileList) {
  * deployed build the page is stale — which otherwise looks exactly like a deploy
  * that did not land.
  */
+/**
+ * Take the placeholder off its loading text, now that there is a script to act.
+ *
+ * index.html ships "Starting…" with a pulse, because that markup is the entire
+ * screen for as long as the bundle takes — 23 of the 27 seconds to first
+ * connection on emulated slow 3G. Its old text invited the user to pick a
+ * session, which is only true once this file is running, and until then read as
+ * an app sitting idle rather than one still arriving.
+ */
+function markAppLoaded() {
+  if (!emptyElement) {
+    return;
+  }
+  emptyElement.removeAttribute('data-booting');
+  const message = emptyElement.querySelector('#empty-message');
+  if (message) {
+    message.textContent = 'Select or create a session from the session bar.';
+  }
+}
+
 function renderAppBuildId() {
   const target = document.querySelector('#app-build-id');
   if (!target) {
@@ -13954,6 +14472,10 @@ filesListElement?.addEventListener('focus', () => {
 filesActionsClose?.addEventListener('click', () => {
   closeFilesActions();
 });
+filesBookmarksOpen?.addEventListener('click', () => openFilesBookmarks());
+filesBookmarksClose?.addEventListener('click', () => closeFilesBookmarks());
+filesBookmarkAdd?.addEventListener('click', () => addCurrentFolderBookmark());
+installDialogBackdropDismiss(filesBookmarksDialog, () => closeFilesBookmarks());
 filesActionPreview?.addEventListener('click', () => {
   if (!filesActionTarget) {
     return;
@@ -14328,6 +14850,7 @@ preferencesSyncRetryButton?.addEventListener('click', () => {
     void loadPreferencesFromServer();
   }
 });
+markAppLoaded();
 applyTerminalTheme(terminalThemeName, { persist: false });
 resetPreferencesIfSchemaChanged();
 loadKeySet();

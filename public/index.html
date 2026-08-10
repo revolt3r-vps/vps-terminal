@@ -17,15 +17,15 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VPS Terminal">
     <title>VPS Terminal</title>
-    <script src="/viewport-init.js"></script>
-    <link rel="icon" href="/terminal.svg" type="image/svg+xml">
-    <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="/vendor/xterm.css">
-    <link rel="stylesheet" href="/app.css">
-    <script src="/vendor/xterm.js" defer></script>
-    <script src="/vendor/addon-fit.js" defer></script>
-    <script src="/vendor/addon-search.js" defer></script>
-    <script src="/app.js" defer></script>
+    <script src="/viewport-init.js?v=__VPS_BUILD_TAG__"></script>
+    <link rel="icon" href="/terminal.svg?v=__VPS_BUILD_TAG__" type="image/svg+xml">
+    <link rel="manifest" href="/manifest.webmanifest?v=__VPS_BUILD_TAG__">
+    <link rel="stylesheet" href="/vendor/xterm.css?v=__VPS_BUILD_TAG__">
+    <link rel="stylesheet" href="/app.css?v=__VPS_BUILD_TAG__">
+    <script src="/vendor/xterm.js?v=__VPS_BUILD_TAG__" defer></script>
+    <script src="/vendor/addon-fit.js?v=__VPS_BUILD_TAG__" defer></script>
+    <script src="/vendor/addon-search.js?v=__VPS_BUILD_TAG__" defer></script>
+    <script src="/app.js?v=__VPS_BUILD_TAG__" defer></script>
   </head>
   <body>
     <header id="app-header">
@@ -138,8 +138,12 @@
     </header>
 
     <main>
-      <div id="empty">
-        <p>Select or create a session from the session bar.</p>
+      <!-- "Starting…" rather than the real message on purpose: this markup is the
+           whole screen until app.js runs, which is 23 seconds on emulated slow 3G,
+           and a sentence about picking a session reads as idle rather than as
+           still loading. app.js swaps in the real text once it is here. -->
+      <div id="empty" data-booting>
+        <p id="empty-message">Starting…</p>
       </div>
       <div id="files-panel" hidden>
         <div id="files-toolbar">
@@ -155,13 +159,23 @@
               <path d="M5 12h14M11 6l-6 6 6 6" />
             </svg>
           </button>
-          <label
-            id="files-location-select-wrap"
-            title="Switch file location"
+          <!-- Was a <select> of the three roots. Three fixed places is not a
+               list worth a picker, and the folders you actually return to are
+               nested inside them — so this opens the places sheet instead, which
+               carries the roots and whatever you have bookmarked. -->
+          <button
+            id="files-bookmarks-open"
+            class="files-toolbar-button files-bookmarks-open"
+            type="button"
+            title="Places and bookmarks"
+            aria-label="Places and bookmarks"
+            aria-haspopup="dialog"
           >
-            <span class="sr-only">File location</span>
-            <select id="files-location-select" aria-label="File location"></select>
-          </label>
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M7 3.5h10v17l-5-3.8-5 3.8z" />
+            </svg>
+            <span id="files-bookmarks-label">Places</span>
+          </button>
           <nav id="files-breadcrumb" aria-label="Path" aria-live="polite"></nav>
           <div id="files-toolbar-actions" aria-label="Folder actions">
             <button
@@ -334,6 +348,22 @@
           <button type="button" data-session-launcher="grok">Grok</button>
           <button type="button" data-session-launcher="claude">Claude</button>
         </div>
+      </dialog>
+      <dialog id="files-bookmarks-dialog" aria-labelledby="files-bookmarks-title">
+        <div class="files-dialog-head">
+          <h2 id="files-bookmarks-title">Places</h2>
+          <button
+            id="files-bookmarks-close"
+            class="icon-button"
+            type="button"
+            title="Close"
+            aria-label="Close places"
+          >&#215;</button>
+        </div>
+        <button id="files-bookmark-add" class="files-bookmark-add" type="button">
+          Bookmark this folder
+        </button>
+        <div id="files-bookmarks-list" role="list"></div>
       </dialog>
       <dialog id="files-name-dialog" aria-labelledby="files-name-title">
         <form id="files-name-form">
