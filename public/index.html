@@ -349,20 +349,27 @@
           <button type="button" data-session-launcher="claude">Claude</button>
         </div>
       </dialog>
-      <dialog id="files-bookmarks-dialog" aria-labelledby="files-bookmarks-title">
-        <div class="files-dialog-head">
-          <h2 id="files-bookmarks-title">Places</h2>
+      <dialog
+        id="files-bookmarks-dialog"
+        aria-labelledby="files-bookmarks-title"
+        tabindex="-1"
+      >
+        <div class="settings-heading">
+          <strong id="files-bookmarks-title">Places</strong>
           <button
             id="files-bookmarks-close"
             class="icon-button"
             type="button"
             title="Close"
             aria-label="Close places"
-          >&#215;</button>
+          >
+            &#215;
+          </button>
         </div>
-        <button id="files-bookmark-add" class="files-bookmark-add" type="button">
-          Bookmark this folder
-        </button>
+        <p id="files-bookmarks-here" class="settings-hint"></p>
+        <div class="files-actions-buttons">
+          <button id="files-bookmark-add" type="button">Bookmark this folder</button>
+        </div>
         <div id="files-bookmarks-list" role="list"></div>
       </dialog>
       <dialog id="files-name-dialog" aria-labelledby="files-name-title">

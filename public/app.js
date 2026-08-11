@@ -39,6 +39,8 @@ const filesBookmarksDialog = document.querySelector('#files-bookmarks-dialog');
 const filesBookmarksList = document.querySelector('#files-bookmarks-list');
 const filesBookmarksClose = document.querySelector('#files-bookmarks-close');
 const filesBookmarkAdd = document.querySelector('#files-bookmark-add');
+const filesBookmarksHere = document.querySelector('#files-bookmarks-here');
+const filesBookmarksLabel = document.querySelector('#files-bookmarks-label');
 const filesPreviewDialog = document.querySelector('#files-preview-dialog');
 const filesPreviewTitle = document.querySelector('#files-preview-title');
 const filesPreviewBody = document.querySelector('#files-preview-body');
@@ -50,7 +52,11 @@ const filesPreviewPaneClose = document.querySelector('#files-preview-pane-close'
 const filesHeaderNav = document.querySelector('#files-header-nav');
 const filesToolbarElement = document.querySelector('#files-toolbar');
 const filesUpNavButton = document.querySelector('#files-up-nav');
-const filesLocationWrap = document.querySelector('#files-location-select-wrap');
+// The Places button stands where the roots <select> used to, including being
+// the thing that moves into the header in portrait. Pointing this at the old id
+// after the select was removed left it null, and syncFilesNavPlacement() returned
+// early — so the header nav quietly stopped being populated at all.
+const filesLocationWrap = document.querySelector('#files-bookmarks-open');
 const filesOptionsDialog = document.querySelector('#files-options-dialog');
 const filesOptionsClose = document.querySelector('#files-options-close');
 const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
@@ -9049,12 +9055,12 @@ function renderFilesBookmarks() {
 
   const heading = (text) => {
     const label = document.createElement('p');
-    label.className = 'files-bookmarks-heading';
+    label.className = 'files-bookmarks-group';
     label.textContent = text;
     return label;
   };
 
-  const row = (label, detail, onOpen, onRemove) => {
+  const row = (label, detail, onOpen, onRemove, isHere) => {
     const item = document.createElement('div');
     item.className = 'files-bookmark-row';
     item.setAttribute('role', 'listitem');
@@ -9068,6 +9074,13 @@ function renderFilesBookmarks() {
     where.className = 'files-bookmark-path';
     where.textContent = detail;
     open.append(name, where);
+    open.classList.toggle(
+      'active',
+      isHere === true
+    );
+    if (isHere) {
+      open.setAttribute('aria-current', 'location');
+    }
     open.addEventListener('click', onOpen);
     item.append(open);
     if (onRemove) {
@@ -9092,7 +9105,9 @@ function renderFilesBookmarks() {
         () => {
           goToFilesLocation(root.id, '');
           closeFilesBookmarks();
-        }
+        },
+        null,
+        filesRootId === root.id && !(filesPath || '')
       )
     );
   }
@@ -9115,11 +9130,16 @@ function renderFilesBookmarks() {
             )
           );
           renderFilesBookmarks();
-        }
+        },
+        filesRootId === entry.root &&
+          (filesPath || '') === (entry.path || '')
       )
     );
   }
   filesBookmarksList.replaceChildren(...rows);
+  if (filesBookmarksHere) {
+    filesBookmarksHere.textContent = filesDisplayPath(filesRootId, filesPath);
+  }
   if (filesBookmarkAdd) {
     const already = currentFolderIsBookmarked();
     filesBookmarkAdd.disabled = already;
@@ -9528,7 +9548,27 @@ function switchFilesRoot(rootId) {
   return true;
 }
 
+/**
+ * Name the current folder on the Places button.
+ *
+ * In Files the header's left side is empty — #header-summary, #connection-dot
+ * and #header-expanded are all display:none there — and in portrait this button
+ * moves into that space. So it stands exactly where the session name stands in
+ * Term, and should answer the same question: where am I, and tap to go
+ * somewhere else.
+ */
+function updateFilesPlacesLabel() {
+  if (!filesBookmarksLabel) {
+    return;
+  }
+  const segments = String(filesPath || '').split('/').filter(Boolean);
+  const root = filesRootsCatalog.find((entry) => entry.id === filesRootId);
+  filesBookmarksLabel.textContent =
+    segments.at(-1) || root?.label || filesRootId || 'Places';
+}
+
 function renderFilesBreadcrumb(listing) {
+  updateFilesPlacesLabel();
   if (!filesBreadcrumbElement) {
     return;
   }

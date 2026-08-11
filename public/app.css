@@ -1035,7 +1035,8 @@ body.files-view #files-name-dialog {
 #files-actions-dialog,
 #files-options-dialog,
 #files-session-dialog,
-#files-name-dialog {
+#files-name-dialog,
+#files-bookmarks-dialog {
   width: min(92vw, 360px);
   padding: 12px;
   border: 1px solid var(--border);
@@ -1268,7 +1269,8 @@ body.files-view #terminal-link-chip {
 
 #files-actions-dialog::backdrop,
 #files-preview-dialog::backdrop,
-#files-name-dialog::backdrop {
+#files-name-dialog::backdrop,
+#files-bookmarks-dialog::backdrop {
   background: rgba(4, 7, 11, 0.62);
   backdrop-filter: blur(2px);
 }
@@ -4652,9 +4654,14 @@ header:not(.collapsed) #header-expanded {
   }
 }
 
-/* The places sheet, which replaced the roots <select> in the Files toolbar. */
+/*
+ * The places sheet. Sized and headed like the other Files dialogs — same
+ * .settings-heading, same .files-actions-buttons — so it reads as one of them
+ * rather than as its own thing.
+ */
+/* Only what differs from the shared files-dialog box above: this one is a list
+   and can get long, so it scrolls. */
 #files-bookmarks-dialog {
-  width: min(420px, calc(100vw - 28px));
   max-height: min(80dvh, 640px);
   overflow-y: auto;
 }
@@ -4664,56 +4671,47 @@ header:not(.collapsed) #header-expanded {
   height: 18px;
 }
 
-.files-bookmark-add {
-  width: 100%;
-  min-height: var(--control-size);
-  margin: 4px 0 10px;
-  border: 1px solid var(--control-border);
-  border-radius: var(--control-radius);
-  background: var(--accent-surface);
-  color: var(--accent-text);
-  font-size: var(--control-font-label);
-  font-weight: 650;
-}
-
-.files-bookmark-add:disabled {
-  background: var(--surface-raised);
-  color: var(--muted);
-}
-
-.files-bookmarks-heading {
-  margin: 10px 0 4px;
+.files-bookmarks-group {
+  margin: 14px 0 6px;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
+/* One row is a place plus, for a bookmark, the way to forget it. */
 .files-bookmark-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-  margin-bottom: 4px;
+  gap: 8px;
+  margin-bottom: 8px;
 }
 
 .files-bookmark-go {
   display: grid;
-  min-height: var(--control-size);
-  padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
+  gap: 1px;
+  min-height: 44px;
+  padding: 6px 12px;
+  border-radius: 10px;
   text-align: left;
+}
+
+.files-bookmark-go.active {
+  border-color: var(--accent);
+  background: var(--accent-surface);
 }
 
 .files-bookmark-name {
   overflow: hidden;
   color: var(--text);
-  font-size: var(--control-font-label);
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.files-bookmark-go.active .files-bookmark-name {
+  color: var(--accent-text);
 }
 
 .files-bookmark-path {
@@ -4725,11 +4723,9 @@ header:not(.collapsed) #header-expanded {
 }
 
 .files-bookmark-remove {
-  width: var(--control-size);
-  min-height: var(--control-size);
-  border: 1px solid var(--border);
-  border-radius: var(--control-radius);
-  background: var(--surface-raised);
+  width: 44px;
+  min-height: 44px;
+  border-radius: 10px;
   color: var(--danger);
   font-size: 18px;
   line-height: 1;
