@@ -193,6 +193,12 @@
             <span id="files-bookmarks-label">Places</span>
           </button>
           <nav id="files-breadcrumb" aria-label="Path" aria-live="polite"></nav>
+          <div id="files-select-bar" hidden>
+            <span id="files-select-count" aria-live="polite">0 selected</span>
+            <button id="files-select-all" type="button">Select all</button>
+            <button id="files-select-delete" type="button" class="files-action-danger">Delete</button>
+            <button id="files-select-done" type="button">Done</button>
+          </div>
           <div id="files-toolbar-actions" aria-label="Folder actions">
             <button
               id="files-new-folder-desktop"
@@ -337,6 +343,7 @@
         </div>
         <div class="files-actions-buttons">
           <button id="files-option-new-folder" type="button">New folder</button>
+          <button id="files-option-select" type="button">Select files</button>
           <label class="files-checkbox-control">
             <input id="files-option-hidden" type="checkbox">
             <span>Show hidden files</span>

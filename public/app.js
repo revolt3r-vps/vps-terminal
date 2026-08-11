@@ -18,6 +18,11 @@ const filesRootsElement = document.querySelector('#files-roots');
 const filesListElement = document.querySelector('#files-list');
 const filesEmptyHintElement = document.querySelector('#files-empty-hint');
 const filesStatusbarElement = document.querySelector('#files-statusbar');
+const filesSelectBar = document.querySelector('#files-select-bar');
+const filesSelectCount = document.querySelector('#files-select-count');
+const filesSelectAll = document.querySelector('#files-select-all');
+const filesSelectDelete = document.querySelector('#files-select-delete');
+const filesSelectDone = document.querySelector('#files-select-done');
 const filesUploadInput = document.querySelector('#files-upload');
 const filesUploadDesktopInput = document.querySelector('#files-upload-desktop');
 const filesUploadTriggers = document.querySelectorAll(
@@ -3471,7 +3476,15 @@ function installKeyTileReorder(grid) {
     // left alone, because the gesture is still running and will drop properly.
     onAbandon: (order) => {
       dragDebug(`handover-save ${order.join(',')}`);
-      saveShortcutIds(order);
+      // Interim: the gesture is still running, and the drop is what the user
+      // finished. Marking this durable is what made the sync rebuild the grid
+      // mid-drag, over and over.
+      preferencesInterimWrite = true;
+      try {
+        saveShortcutIds(order);
+      } finally {
+        preferencesInterimWrite = false;
+      }
     },
     onDrop: (order) => {
       dragDebug(`save ${order.join(',')}`);
@@ -8250,9 +8263,24 @@ function adoptPreferencesSyncIdentity(identity) {
   savePreferencesSyncMetadata();
 }
 
+/**
+ * True while a gesture writes an interim order that the user has not finished
+ * making. Local only: it must not start a sync.
+ *
+ * Without this the handover save fed itself. saveShortcutIds() marks
+ * preferences dirty, the sync answers, the answer re-renders the panel, the
+ * re-render abandons the live drag, and abandoning it saves again — a loop that
+ * rebuilt the grid under the finger every few hundred milliseconds. Invisible
+ * with sync off, which is every environment the suites run in, and obvious in
+ * one device log: `render` / `handover-save` / `handover`, over and over,
+ * through the whole drag.
+ */
+let preferencesInterimWrite = false;
+
 function noteDurablePreferencesChange() {
   if (
     qaShellMode ||
+    preferencesInterimWrite ||
     preferencesApplying ||
     !preferencesTrackingReady
   ) {
@@ -9222,6 +9250,123 @@ function addCurrentFolderBookmark() {
   renderFilesBookmarks();
 }
 
+/**
+ * Selecting several files at once, to delete them in one go.
+ *
+ * A mode rather than a modifier, because the product is a thumb on a phone:
+ * there is no ctrl-click, and a long press is already the actions sheet.
+ *
+ * Names rather than indices, because the listing is refetched underneath — an
+ * index would silently come to mean a different file after a refresh.
+ */
+let filesSelectMode = false;
+const filesCheckedNames = new Set();
+
+function setFilesSelectMode(on) {
+  filesSelectMode = Boolean(on);
+  if (!filesSelectMode) {
+    filesCheckedNames.clear();
+  }
+  if (filesSelectBar) {
+    filesSelectBar.hidden = !filesSelectMode;
+  }
+  document.body.classList.toggle('files-selecting', filesSelectMode);
+  if (filesListing) {
+    renderFilesListing(filesListing);
+  }
+  updateFilesSelectBar();
+}
+
+function toggleFilesChecked(name) {
+  if (filesCheckedNames.has(name)) {
+    filesCheckedNames.delete(name);
+  } else {
+    filesCheckedNames.add(name);
+  }
+  const row = [...(filesListElement?.children || [])].find(
+    (item) => item.dataset.name === name
+  );
+  if (row) {
+    row.dataset.checked = String(filesCheckedNames.has(name));
+  }
+  updateFilesSelectBar();
+}
+
+function updateFilesSelectBar() {
+  if (!filesSelectMode) {
+    return;
+  }
+  const total = filesVisibleEntries.length;
+  const chosen = filesCheckedNames.size;
+  if (filesSelectCount) {
+    filesSelectCount.textContent = `${chosen} of ${total} selected`;
+  }
+  if (filesSelectAll) {
+    filesSelectAll.textContent =
+      chosen === total && total > 0 ? 'Select none' : 'Select all';
+    filesSelectAll.disabled = total === 0;
+  }
+  if (filesSelectDelete) {
+    filesSelectDelete.disabled = chosen === 0 || !filesWritable;
+  }
+}
+
+/**
+ * Delete everything chosen, and say exactly what happened.
+ *
+ * Every item is attempted and reported rather than the selection being refused
+ * up front, because the server has no recursive remove — a directory only goes
+ * if it is empty. Refusing the whole set because one folder has something in it
+ * would make the common case (a pile of files and one stray folder) unusable,
+ * and a single "failed" would hide which ones went. So: one request each, a
+ * count of what went, and the names of what did not.
+ */
+async function deleteCheckedFiles() {
+  const names = [...filesCheckedNames];
+  if (names.length === 0) {
+    return;
+  }
+  if (
+    !window.confirm(
+      names.length === 1
+        ? `Delete ${names[0]}? This can\u2019t be undone.`
+        : `Delete ${names.length} items? This can\u2019t be undone.`
+    )
+  ) {
+    return;
+  }
+  const root = filesRootId;
+  const directory = filesPath || '';
+  let removed = 0;
+  const refused = [];
+  for (const name of names) {
+    const query = new URLSearchParams({
+      root,
+      path: directory ? `${directory}/${name}` : name
+    });
+    try {
+      await api(`/api/fs/entry?${query.toString()}`, { method: 'DELETE' });
+      removed += 1;
+      filesCheckedNames.delete(name);
+    } catch {
+      refused.push(name);
+    }
+  }
+  setFilesSelectMode(false);
+  await refreshFilesListingAfterMutation(root, directory, { index: 0 });
+  if (refused.length === 0) {
+    setStatus(`Deleted ${removed} item${removed === 1 ? '' : 's'}`);
+    return;
+  }
+  // Sticky, and it names them: "some failed" is not something you can act on.
+  setStatus(
+    `Deleted ${removed}, could not delete ${refused.length}: ` +
+      `${refused.slice(0, 3).join(', ')}` +
+      `${refused.length > 3 ? '\u2026' : ''} (folders must be empty)`,
+    { sticky: true }
+  );
+}
+
 function activateFilesEntry(entry, options = {}) {
   const target = filesEntryTarget(entry);
   if (!target) {
@@ -9708,6 +9853,17 @@ function renderFilesListing(listing) {
       }
     }
   }
+  // A refresh can remove a name that was ticked; forget those rather than keep
+  // counting them.
+  if (filesSelectMode) {
+    const present = new Set(entries.map((entry) => entry.name));
+    for (const name of [...filesCheckedNames]) {
+      if (!present.has(name)) {
+        filesCheckedNames.delete(name);
+      }
+    }
+    updateFilesSelectBar();
+  }
   const selectionName = filesRestoreSelectionName || filesSelectedName;
   const selectionIndex = filesRestoreSelectionIndex;
   filesRestoreSelectionName = '';
@@ -9721,6 +9877,9 @@ function renderFilesListing(listing) {
     item.setAttribute('aria-selected', 'false');
     item.dataset.name = entry.name;
     item.dataset.type = entry.type;
+    if (filesSelectMode) {
+      item.dataset.checked = String(filesCheckedNames.has(entry.name));
+    }
     const icon = document.createElement('span');
     icon.className = `files-entry-icon ${entry.type === 'dir' ? 'dir' : 'file'}`;
     icon.setAttribute('aria-hidden', 'true');
@@ -9802,6 +9961,13 @@ function renderFilesListing(listing) {
         delete item.dataset.longPressActivated;
         item.dataset.lastPointerType = '';
         event.preventDefault();
+        return;
+      }
+      if (filesSelectMode) {
+        // A tap picks the row rather than opening it. Nothing else in the list
+        // changes meaning, so leaving in the mode is one tap on Done.
+        event.preventDefault();
+        toggleFilesChecked(entry.name);
         return;
       }
       setFilesSelection(index, {
@@ -14684,6 +14850,30 @@ filesActionInsert?.addEventListener('click', () => {
   }
   insertFilesPath(filesActionTarget);
 });
+document.querySelector('#files-option-select')?.addEventListener('click', () => {
+  closeFilesOptions();
+  setFilesSelectMode(true);
+});
+filesSelectAll?.addEventListener('click', () => {
+  const total = filesVisibleEntries.length;
+  if (filesCheckedNames.size === total) {
+    filesCheckedNames.clear();
+  } else {
+    for (const entry of filesVisibleEntries) {
+      filesCheckedNames.add(entry.name);
+    }
+  }
+  if (filesListing) {
+    renderFilesListing(filesListing);
+  }
+  updateFilesSelectBar();
+});
+filesSelectDelete?.addEventListener('click', () => {
+  void deleteCheckedFiles().catch((error) => {
+    setStatus(error.message || FILES_DELETE_FAILED_MESSAGE, { sticky: true });
+  });
+});
+filesSelectDone?.addEventListener('click', () => setFilesSelectMode(false));
 filesActionBookmark?.addEventListener('click', () => {
   if (!filesActionTarget || filesActionTarget.type !== 'dir') {
     return;
