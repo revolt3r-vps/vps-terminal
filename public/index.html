@@ -139,12 +139,17 @@
     <!-- The Files counterpart of #header-expanded: same slot, same gesture,
          same popup under the bar. Sessions answer "which session"; this
          answers "which place". -->
-    <div id="files-places" hidden>
+    <div id="files-places" tabindex="-1" hidden>
       <p id="files-bookmarks-here" class="settings-hint"></p>
-      <div class="files-actions-buttons">
-        <button id="files-bookmark-add" type="button">Bookmark this folder</button>
-      </div>
       <div id="files-bookmarks-list" role="list"></div>
+      <!-- Paired the way the session picker pairs New session and Close: the
+           create action and the way out, at the end of the panel. -->
+      <div class="files-places-actions">
+        <button id="files-bookmark-add" type="button">Bookmark this folder</button>
+        <button id="files-places-close" type="button" aria-label="Close places">
+          Close
+        </button>
+      </div>
     </div>
     <div id="files-places-scrim" hidden></div>
 

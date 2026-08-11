@@ -4693,6 +4693,26 @@ header:not(.collapsed) #header-expanded {
   animation: surface-picker-in var(--duration-quick) var(--ease-out);
 }
 
+/* The create action and the way out, mirroring #header-picker-actions. */
+.files-places-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.files-places-actions button {
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+#files-places-close {
+  color: var(--muted);
+}
+
 /* Its own scrim rather than #picker-scrim, which files-view hides outright. */
 #files-places-scrim {
   position: fixed;

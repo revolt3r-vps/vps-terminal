@@ -40,6 +40,7 @@ const filesPlacesPanel = document.querySelector('#files-places');
 const filesPlacesScrim = document.querySelector('#files-places-scrim');
 const filesBookmarksList = document.querySelector('#files-bookmarks-list');
 const filesBookmarkAdd = document.querySelector('#files-bookmark-add');
+const filesPlacesClose = document.querySelector('#files-places-close');
 const filesBookmarksHere = document.querySelector('#files-bookmarks-here');
 const filesBookmarksLabel = document.querySelector('#files-bookmarks-label');
 const filesPreviewDialog = document.querySelector('#files-preview-dialog');
@@ -9172,6 +9173,11 @@ function setFilesPlacesOpen(open) {
     filesPlacesScrim.hidden = !open;
   }
   filesBookmarksOpen?.setAttribute('aria-expanded', String(open));
+  if (open) {
+    // Focus follows the panel, or a keyboard is left on the button while the
+    // list it just opened is unreachable.
+    filesPlacesPanel.focus({ preventScroll: true });
+  }
   if (!open && filesPlacesPanel.contains(document.activeElement)) {
     // Never leave focus on something that just became display:none.
     filesBookmarksOpen?.focus({ preventScroll: true });
@@ -14564,6 +14570,7 @@ filesPlacesScrim?.addEventListener('pointerdown', (event) => {
   closeFilesBookmarks();
 });
 filesBookmarkAdd?.addEventListener('click', () => addCurrentFolderBookmark());
+filesPlacesClose?.addEventListener('click', () => closeFilesBookmarks());
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape' && filesPlacesOpen()) {
     event.preventDefault();
