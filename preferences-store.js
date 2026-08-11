@@ -9,6 +9,10 @@ const maximumSessionPreferenceCount = 128;
 const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const profileIdPattern = /^(?:shell|profile-[a-z0-9]{8,48})$/;
 const themeNamePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const maximumBookmarkCount = 30;
+/** Same shape the file API accepts for a root id. */
+const bookmarkRootPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const maximumBookmarkPathLength = 512;
 
 function plainObject(value) {
   return Boolean(value && typeof value === 'object' && !Array.isArray(value));
@@ -39,6 +43,49 @@ function sanitizeRecord(value, valuePattern) {
   return result;
 }
 
+/**
+ * Saved folders, so Places is the same on every device.
+ *
+ * Paths are checked for shape only — no `..`, no leading slash, no NUL, and a
+ * length ceiling — because this store has no idea which roots exist or what is
+ * on disk. The file API resolves and jails every path it is given, so a
+ * bookmark that no longer resolves fails there the same way a hand-typed path
+ * would, rather than being trusted because it came from storage.
+ */
+function sanitizeBookmarks(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const seen = new Set();
+  const bookmarks = [];
+  for (const entry of value) {
+    if (!plainObject(entry)) {
+      continue;
+    }
+    const root = typeof entry.root === 'string' ? entry.root : '';
+    const bookmarkPath = typeof entry.path === 'string' ? entry.path : '';
+    if (
+      !bookmarkRootPattern.test(root) ||
+      bookmarkPath.length > maximumBookmarkPathLength ||
+      bookmarkPath.includes('\u0000') ||
+      bookmarkPath.startsWith('/') ||
+      bookmarkPath.split('/').includes('..')
+    ) {
+      continue;
+    }
+    const key = root + '::' + bookmarkPath;
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    bookmarks.push({ root, path: bookmarkPath });
+    if (bookmarks.length >= maximumBookmarkCount) {
+      break;
+    }
+  }
+  return bookmarks;
+}
+
 function sanitizePreferences(value) {
   if (
     !plainObject(value) ||
@@ -61,7 +108,8 @@ function sanitizePreferences(value) {
       profileIdPattern
     ),
     theme,
-    sessionThemes: sanitizeRecord(value.sessionThemes, themeNamePattern)
+    sessionThemes: sanitizeRecord(value.sessionThemes, themeNamePattern),
+    bookmarks: sanitizeBookmarks(value.bookmarks)
   };
 }
 

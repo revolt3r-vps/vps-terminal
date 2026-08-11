@@ -8295,7 +8295,8 @@ function durablePreferencesSnapshot() {
     // server sanitizes it and older browsers still read it.
     sessionProfiles: {},
     theme: rememberedTerminalThemeName(),
-    sessionThemes: loadSessionThemes()
+    sessionThemes: loadSessionThemes(),
+    bookmarks: loadFilesBookmarks()
   };
 }
 
@@ -8304,7 +8305,8 @@ function freshPreferencesSnapshot() {
     keyProfiles: keySetToPreferences(defaultKeySet()),
     sessionProfiles: {},
     theme: 'matrix',
-    sessionThemes: {}
+    sessionThemes: {},
+    bookmarks: []
   };
 }
 
@@ -8446,6 +8448,11 @@ function applySharedPreferences(preferences) {
     } catch {
       // The in-memory setup still works when browser storage is unavailable.
     }
+    // Places follows the account, not the device. Written before the theme work
+    // below so a failure there still leaves the bookmarks applied.
+    saveFilesBookmarks(
+      Array.isArray(preferences.bookmarks) ? preferences.bookmarks : []
+    );
     const cleanSessionThemes = saveSessionThemes(preferences.sessionThemes);
     const nextTheme =
       (activeSession && cleanSessionThemes[activeSession]) ||
@@ -8456,6 +8463,10 @@ function applySharedPreferences(preferences) {
   }
   renderSessions();
   refreshKeysUi();
+  renderFilesRoots();
+  if (filesPlacesOpen()) {
+    renderFilesBookmarks();
+  }
 }
 
 function adoptSavedSharedPreferences(saved, mutationVersionAtStart) {
@@ -9009,6 +9020,10 @@ function loadFilesBookmarks() {
 }
 
 function saveFilesBookmarks(list) {
+  // Same shape as saveKeySet: mark the change durable and let the sync decide
+  // when to flush. noteDurablePreferencesChange() no-ops while preferences are
+  // being applied, which is what stops the server's own answer looping back.
+  noteDurablePreferencesChange();
   try {
     window.localStorage.setItem(
       filesBookmarksStorageKey,
