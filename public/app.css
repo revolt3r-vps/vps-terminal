@@ -4791,3 +4791,21 @@ header:not(.collapsed) #header-expanded {
   font-size: 18px;
   line-height: 1;
 }
+
+/* Inline image preview. Contained rather than cropped: a preview that cannot
+   show the whole picture is not previewing it. */
+#files-preview-image,
+#files-preview-pane-image {
+  display: block;
+  max-width: 100%;
+  max-height: min(70dvh, 560px);
+  margin: 0 auto;
+  object-fit: contain;
+  background: var(--surface-deep);
+  border-radius: 8px;
+}
+
+#files-preview-image[hidden],
+#files-preview-pane-image[hidden] {
+  display: none;
+}

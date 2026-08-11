@@ -46,6 +46,8 @@ const filesBookmarksLabel = document.querySelector('#files-bookmarks-label');
 const filesPreviewDialog = document.querySelector('#files-preview-dialog');
 const filesPreviewTitle = document.querySelector('#files-preview-title');
 const filesPreviewBody = document.querySelector('#files-preview-body');
+const filesPreviewImage = document.querySelector('#files-preview-image');
+const filesPreviewPaneImage = document.querySelector('#files-preview-pane-image');
 const filesPreviewClose = document.querySelector('#files-preview-close');
 const filesPreviewPane = document.querySelector('#files-preview-pane');
 const filesPreviewPaneTitle = document.querySelector('#files-preview-pane-title');
@@ -10049,6 +10051,7 @@ function closeFilesActions(options = {}) {
 
 function closeFilesPreview(options = {}) {
   filesPreviewRequestId += 1;
+  clearFilesPreviewImage();
   filesPreviewTargetName = '';
   filesPreviewRequestedName = '';
   for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
@@ -10445,6 +10448,50 @@ const FILES_PREVIEW_FAILED_MESSAGE = 'Preview failed';
 const FILES_DOWNLOAD_FAILED_MESSAGE = 'Download failed';
 const FILES_DELETE_FAILED_MESSAGE = 'Delete failed';
 
+/**
+ * The types the preview shows as a picture. Matches the server's inline list —
+ * it decides what it will serve inline, this decides what to ask for, and a
+ * disagreement just means a text preview of a binary rather than a broken image.
+ */
+const previewableImagePattern = /\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i;
+
+function showFilesPreviewImage(target) {
+  const query = new URLSearchParams({
+    root: target.root,
+    path: target.path,
+    inline: '1'
+  });
+  const source = `/api/fs/download?${query.toString()}`;
+  for (const image of [filesPreviewImage, filesPreviewPaneImage]) {
+    if (image) {
+      image.src = source;
+      image.alt = target.name;
+      image.hidden = false;
+    }
+  }
+  for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
+    if (body) {
+      body.textContent = '';
+      body.hidden = true;
+    }
+  }
+}
+
+function clearFilesPreviewImage() {
+  for (const image of [filesPreviewImage, filesPreviewPaneImage]) {
+    if (image) {
+      image.hidden = true;
+      // Dropped, not just hidden, so a closed preview stops holding the bytes.
+      image.removeAttribute('src');
+    }
+  }
+  for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
+    if (body) {
+      body.hidden = false;
+    }
+  }
+}
+
 async function previewFilesTarget(target) {
   const targetDirectory = target.path
     .split('/')
@@ -10456,6 +10503,18 @@ async function previewFilesTarget(target) {
   });
   const requestId = ++filesPreviewRequestId;
   filesPreviewRequestedName = target.name;
+  if (previewableImagePattern.test(target.name)) {
+    for (const title of [filesPreviewTitle, filesPreviewPaneTitle]) {
+      if (title) {
+        title.textContent = target.name;
+      }
+    }
+    showFilesPreviewImage(target);
+    filesPreviewTargetName = target.name;
+    openFilesPreviewSurface();
+    return;
+  }
+  clearFilesPreviewImage();
   let preview;
   try {
     preview = await api(`/api/fs/read?${query.toString()}`);
@@ -10484,6 +10543,11 @@ async function previewFilesTarget(target) {
     }
   }
   filesPreviewTargetName = target.name;
+  openFilesPreviewSurface();
+}
+
+/** Docked pane on a wide fine-pointer layout, modal everywhere else. */
+function openFilesPreviewSurface() {
   closeFilesActions({ restoreFocus: false });
   if (
     filesPrimaryPointerIsFine() &&

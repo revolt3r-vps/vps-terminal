@@ -1346,6 +1346,24 @@ const buildTagPlaceholder = '__VPS_BUILD_TAG__';
 const compressibleExtensions = new Set(['.css', '.js', '.json', '.webmanifest']);
 
 /**
+ * Types the Files preview will render inline instead of handing over as a
+ * download. Kept to a fixed list rather than sniffing: an inline Content-Type is
+ * an instruction to the browser to render, so it has to be one this server is
+ * willing to be responsible for. Nothing scriptable is in it — no SVG, which
+ * renders as a document and can carry script.
+ */
+const inlineImageTypes = new Map([
+  ['.png', 'image/png'],
+  ['.jpg', 'image/jpeg'],
+  ['.jpeg', 'image/jpeg'],
+  ['.gif', 'image/gif'],
+  ['.webp', 'image/webp'],
+  ['.avif', 'image/avif'],
+  ['.bmp', 'image/bmp'],
+  ['.ico', 'image/x-icon']
+]);
+
+/**
  * Below this, a gzip frame is a rounding error against one TCP round trip.
  */
 const minimumCompressibleBytes = 1024;
@@ -1709,10 +1727,22 @@ const server = http.createServer(async (request, response) => {
       );
       setSecurityHeaders(response);
       response.statusCode = 200;
-      response.setHeader('Content-Type', 'application/octet-stream');
+      // Inline only for a known image type, and only when asked. Everything else
+      // stays an octet-stream attachment, which is what makes a file the browser
+      // does not understand a download rather than something it tries to render.
+      const inlineType = inlineImageTypes.get(
+        path.extname(file.fileName).toLowerCase()
+      );
+      const serveInline = url.searchParams.get('inline') === '1' && inlineType;
+      response.setHeader(
+        'Content-Type',
+        serveInline ? inlineType : 'application/octet-stream'
+      );
       response.setHeader(
         'Content-Disposition',
-        `attachment; filename="${file.fileName.replace(/"/g, '')}"`
+        serveInline
+          ? 'inline'
+          : `attachment; filename="${file.fileName.replace(/"/g, '')}"`
       );
       response.setHeader('Content-Length', String(file.size));
       const stream = fs.createReadStream(file.absolutePath);
