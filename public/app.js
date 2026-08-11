@@ -34,10 +34,11 @@ const filesActionDownload = document.querySelector('#files-action-download');
 const filesActionRename = document.querySelector('#files-action-rename');
 const filesActionInsert = document.querySelector('#files-action-insert');
 const filesActionDelete = document.querySelector('#files-action-delete');
+const filesActionBookmark = document.querySelector('#files-action-bookmark');
 const filesBookmarksOpen = document.querySelector('#files-bookmarks-open');
-const filesBookmarksDialog = document.querySelector('#files-bookmarks-dialog');
+const filesPlacesPanel = document.querySelector('#files-places');
+const filesPlacesScrim = document.querySelector('#files-places-scrim');
 const filesBookmarksList = document.querySelector('#files-bookmarks-list');
-const filesBookmarksClose = document.querySelector('#files-bookmarks-close');
 const filesBookmarkAdd = document.querySelector('#files-bookmark-add');
 const filesBookmarksHere = document.querySelector('#files-bookmarks-here');
 const filesBookmarksLabel = document.querySelector('#files-bookmarks-label');
@@ -9149,20 +9150,40 @@ function renderFilesBookmarks() {
   }
 }
 
-function openFilesBookmarks() {
-  if (!filesBookmarksDialog) {
+function filesPlacesOpen() {
+  return Boolean(filesPlacesPanel && !filesPlacesPanel.hidden);
+}
+
+/**
+ * Open and close like the session picker, because it is the same thing for a
+ * different noun: a panel under the bar with a scrim behind it, dismissed by
+ * tapping away or pressing Escape. A modal would have been a heavier answer to
+ * "which folder", and would not have matched the control beside it.
+ */
+function setFilesPlacesOpen(open) {
+  if (!filesPlacesPanel) {
     return;
   }
-  renderFilesBookmarks();
-  if (!filesBookmarksDialog.open) {
-    filesBookmarksDialog.showModal();
+  if (open) {
+    renderFilesBookmarks();
+  }
+  filesPlacesPanel.hidden = !open;
+  if (filesPlacesScrim) {
+    filesPlacesScrim.hidden = !open;
+  }
+  filesBookmarksOpen?.setAttribute('aria-expanded', String(open));
+  if (!open && filesPlacesPanel.contains(document.activeElement)) {
+    // Never leave focus on something that just became display:none.
+    filesBookmarksOpen?.focus({ preventScroll: true });
   }
 }
 
+function openFilesBookmarks() {
+  setFilesPlacesOpen(true);
+}
+
 function closeFilesBookmarks() {
-  if (filesBookmarksDialog?.open) {
-    filesBookmarksDialog.close();
-  }
+  setFilesPlacesOpen(false);
 }
 
 function addCurrentFolderBookmark() {
@@ -9937,6 +9958,18 @@ function openFilesActions(target, anchor, options = {}) {
   if (filesActionRename) {
     filesActionRename.hidden = !filesWritable;
   }
+  if (filesActionBookmark) {
+    // Folders only: a bookmark is somewhere to go back to, and a file is not a
+    // place. Long press is the natural way to reach it — you can bookmark a
+    // folder from the list without first walking into it, which is the one thing
+    // the Places sheet's own button cannot do.
+    filesActionBookmark.hidden = target.type !== 'dir';
+    const saved = filesBookmarkKey(target.root, target.path);
+    const already = loadFilesBookmarks().some(
+      (entry) => filesBookmarkKey(entry.root, entry.path) === saved
+    );
+    filesActionBookmark.textContent = already ? 'Remove bookmark' : 'Bookmark';
+  }
   if (filesActionPreview) {
     filesActionPreview.hidden = target.type !== 'file';
   }
@@ -10037,22 +10070,33 @@ function filesNavBelongsInHeader() {
   );
 }
 
+/**
+ * Only Places goes up. The parent button stays with the path.
+ *
+ * Both used to move, on the grounds that the Files header row was blank while
+ * the toolbar below it was crowded. But the parent button acts *on* the path —
+ * it is the path's own control — and splitting them put the action in one row
+ * and the thing it acts on in another.
+ *
+ * What the header slot is for is the other question: which place am I in, and
+ * how do I get to a different one. That is what #header-summary answers in Term,
+ * in exactly this position, so Places is the thing that belongs there.
+ */
 function syncFilesNavPlacement() {
   if (!filesHeaderNav || !filesToolbarElement || !filesUpNavButton || !filesLocationWrap) {
     return;
   }
-  const inHeader = filesNavBelongsInHeader();
-  if (inHeader) {
-    if (filesUpNavButton.parentElement !== filesHeaderNav) {
-      filesHeaderNav.append(filesUpNavButton, filesLocationWrap);
+  if (filesNavBelongsInHeader()) {
+    if (filesLocationWrap.parentElement !== filesHeaderNav) {
+      filesHeaderNav.append(filesLocationWrap);
     }
     filesHeaderNav.hidden = false;
     return;
   }
-  if (filesUpNavButton.parentElement === filesHeaderNav) {
-    // Back to the front of the toolbar, ahead of the breadcrumb, which is where
-    // they started.
-    filesToolbarElement.prepend(filesUpNavButton, filesLocationWrap);
+  if (filesLocationWrap.parentElement === filesHeaderNav) {
+    // Back to the front of the toolbar, after the parent button, which never
+    // left it.
+    filesUpNavButton.after(filesLocationWrap);
   }
   filesHeaderNav.hidden = true;
 }
@@ -14512,10 +14556,20 @@ filesListElement?.addEventListener('focus', () => {
 filesActionsClose?.addEventListener('click', () => {
   closeFilesActions();
 });
-filesBookmarksOpen?.addEventListener('click', () => openFilesBookmarks());
-filesBookmarksClose?.addEventListener('click', () => closeFilesBookmarks());
+filesBookmarksOpen?.addEventListener('click', () => {
+  setFilesPlacesOpen(!filesPlacesOpen());
+});
+filesPlacesScrim?.addEventListener('pointerdown', (event) => {
+  event.preventDefault();
+  closeFilesBookmarks();
+});
 filesBookmarkAdd?.addEventListener('click', () => addCurrentFolderBookmark());
-installDialogBackdropDismiss(filesBookmarksDialog, () => closeFilesBookmarks());
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape' && filesPlacesOpen()) {
+    event.preventDefault();
+    closeFilesBookmarks();
+  }
+});
 filesActionPreview?.addEventListener('click', () => {
   if (!filesActionTarget) {
     return;
@@ -14543,6 +14597,28 @@ filesActionInsert?.addEventListener('click', () => {
     return;
   }
   insertFilesPath(filesActionTarget);
+});
+filesActionBookmark?.addEventListener('click', () => {
+  if (!filesActionTarget || filesActionTarget.type !== 'dir') {
+    return;
+  }
+  const target = filesActionTarget;
+  const key = filesBookmarkKey(target.root, target.path);
+  const saved = loadFilesBookmarks();
+  const already = saved.some(
+    (entry) => filesBookmarkKey(entry.root, entry.path) === key
+  );
+  if (already) {
+    saveFilesBookmarks(
+      saved.filter((entry) => filesBookmarkKey(entry.root, entry.path) !== key)
+    );
+    setStatus(`Removed ${target.name} from Places`);
+  } else {
+    saveFilesBookmarks([...saved, { root: target.root, path: target.path }]);
+    setStatus(`Pinned ${target.name}`);
+  }
+  renderFilesRoots();
+  closeFilesActions();
 });
 filesActionDelete?.addEventListener('click', () => {
   if (!filesActionTarget) {

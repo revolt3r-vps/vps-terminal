@@ -136,6 +136,17 @@
         </button>
       </div>
     </header>
+    <!-- The Files counterpart of #header-expanded: same slot, same gesture,
+         same popup under the bar. Sessions answer "which session"; this
+         answers "which place". -->
+    <div id="files-places" hidden>
+      <p id="files-bookmarks-here" class="settings-hint"></p>
+      <div class="files-actions-buttons">
+        <button id="files-bookmark-add" type="button">Bookmark this folder</button>
+      </div>
+      <div id="files-bookmarks-list" role="list"></div>
+    </div>
+    <div id="files-places-scrim" hidden></div>
 
     <main>
       <!-- "Starting…" rather than the real message on purpose: this markup is the
@@ -296,6 +307,7 @@
           <button id="files-action-preview" type="button">Preview</button>
           <button id="files-action-download" type="button">Download</button>
           <button id="files-action-rename" type="button">Rename</button>
+          <button id="files-action-bookmark" type="button">Bookmark</button>
           <button id="files-action-insert" type="button">Insert path</button>
           <button id="files-action-delete" type="button" class="files-action-danger">Delete</button>
         </div>
@@ -348,29 +360,6 @@
           <button type="button" data-session-launcher="grok">Grok</button>
           <button type="button" data-session-launcher="claude">Claude</button>
         </div>
-      </dialog>
-      <dialog
-        id="files-bookmarks-dialog"
-        aria-labelledby="files-bookmarks-title"
-        tabindex="-1"
-      >
-        <div class="settings-heading">
-          <strong id="files-bookmarks-title">Places</strong>
-          <button
-            id="files-bookmarks-close"
-            class="icon-button"
-            type="button"
-            title="Close"
-            aria-label="Close places"
-          >
-            &#215;
-          </button>
-        </div>
-        <p id="files-bookmarks-here" class="settings-hint"></p>
-        <div class="files-actions-buttons">
-          <button id="files-bookmark-add" type="button">Bookmark this folder</button>
-        </div>
-        <div id="files-bookmarks-list" role="list"></div>
       </dialog>
       <dialog id="files-name-dialog" aria-labelledby="files-name-title">
         <form id="files-name-form">
