@@ -1026,7 +1026,66 @@ async function writeFsUpload(rootId, relativeDir, fileName, buffer) {
   };
 }
 
-async function deleteFsEntry(rootId, relativePath) {
+/**
+ * How much is inside a folder, for the confirmation to quote.
+ *
+ * "Delete this and everything in it?" is not a question anyone can answer. "and
+ * the 412 items inside it" is — a count is what stops you when you have tapped
+ * the wrong folder, which is the whole reason recursive delete is guarded rather
+ * than just offered.
+ *
+ * Capped, and says when it stopped: walking a huge tree to produce a number is
+ * the wrong trade when "more than 5000" carries the same warning.
+ */
+const maximumCountedEntries = 5000;
+
+async function countFsEntries(rootId, relativePath) {
+  const root = fsRootFromQuery(rootId);
+  const rel = normalizeRelativePath(relativePath);
+  if (!rel) {
+    const error = new Error('cannot count root');
+    error.statusCode = 400;
+    throw error;
+  }
+  const resolved = await resolveJailedPath(root.rootPath, rel, {
+    mustExist: true
+  });
+  if (!resolved.stats.isDirectory()) {
+    return { total: 0, truncated: false };
+  }
+  let total = 0;
+  let truncated = false;
+  const walk = async (absolutePath) => {
+    if (truncated) {
+      return;
+    }
+    let children;
+    try {
+      children = await fs.promises.readdir(absolutePath, {
+        withFileTypes: true
+      });
+    } catch {
+      // A directory that cannot be read still counts as something inside.
+      return;
+    }
+    for (const child of children) {
+      total += 1;
+      if (total >= maximumCountedEntries) {
+        truncated = true;
+        return;
+      }
+      // Symlinks are counted, never followed: a link out of the jail must not
+      // make this walk leave it either.
+      if (child.isDirectory()) {
+        await walk(path.join(absolutePath, child.name));
+      }
+    }
+  };
+  await walk(resolved.absolutePath);
+  return { total, truncated };
+}
+
+async function deleteFsEntry(rootId, relativePath, options = {}) {
   const root = fsRootFromQuery(rootId);
   if (!root.writable) {
     const error = new Error('root is read-only');
@@ -1043,8 +1102,17 @@ async function deleteFsEntry(rootId, relativePath) {
     mustExist: true
   });
   if (resolved.stats.isDirectory()) {
-    // Only empty directories — no recursive rm.
-    await fs.promises.rmdir(resolved.absolutePath);
+    // Recursive only when the caller asks in so many words. A plain DELETE still
+    // takes empty directories only, so nothing that predates this — or reaches
+    // it by accident — can remove a tree.
+    if (options.recursive === true) {
+      await fs.promises.rm(resolved.absolutePath, {
+        recursive: true,
+        force: false
+      });
+    } else {
+      await fs.promises.rmdir(resolved.absolutePath);
+    }
   } else if (resolved.stats.isFile()) {
     await fs.promises.unlink(resolved.absolutePath);
   } else {
@@ -1702,6 +1770,18 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    if (request.method === 'GET' && url.pathname === '/api/fs/count') {
+      sendJson(
+        response,
+        200,
+        await countFsEntries(
+          url.searchParams.get('root'),
+          url.searchParams.get('path') || ''
+        )
+      );
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/fs/list') {
       const listing = await listFsDirectory(
         url.searchParams.get('root'),
@@ -1797,7 +1877,8 @@ const server = http.createServer(async (request, response) => {
       }
       const result = await deleteFsEntry(
         url.searchParams.get('root'),
-        url.searchParams.get('path') || ''
+        url.searchParams.get('path') || '',
+        { recursive: url.searchParams.get('recursive') === '1' }
       );
       sendJson(response, 200, result);
       return;

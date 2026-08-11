@@ -10789,8 +10789,40 @@ async function deleteFilesTarget(target) {
   // The server only ever removes an empty directory (no recursive rm), so
   // there is no extra "and its contents" consequence to describe here —
   // both files and directories get the same plain, undoable-consequence text.
+  // A folder is asked about by weight, not by name. "Delete this and everything
+  // in it?" is not a question anyone can answer; "and the 412 items inside it"
+  // is, and it is what stops you when you have tapped the wrong folder. The
+  // count is also how the recursive path announces itself — an empty folder
+  // still reads as an ordinary delete.
+  let inside = null;
+  if (target.type === 'dir') {
+    try {
+      inside = await api(
+        `/api/fs/count?${new URLSearchParams({
+          root: target.root,
+          path: target.path
+        }).toString()}`
+      );
+    } catch {
+      // Unknown weight is not a reason to refuse, but it is a reason to say so.
+      inside = null;
+    }
+  }
+  const where = filesDisplayPath(target.root, target.path);
+  const contents =
+    inside === null
+      ? ''
+      : inside.total === 0
+        ? ''
+        : ` and the ${inside.truncated ? 'more than ' : ''}${inside.total} item${
+            inside.total === 1 ? '' : 's'
+          } inside it`;
+  const unknown =
+    target.type === 'dir' && inside === null
+      ? ' and everything inside it (count unavailable)'
+      : '';
   const ok = window.confirm(
-    `Delete ${filesDisplayPath(target.root, target.path)}? This can’t be undone.`
+    `Delete ${where}${contents}${unknown}? This can\u2019t be undone.`
   );
   if (!ok) {
     return;
@@ -10806,6 +10838,11 @@ async function deleteFilesTarget(target) {
     root: target.root,
     path: target.path
   });
+  // Only here. Bulk delete stays non-recursive on purpose: the point of
+  // multi-select is speed, and speed plus recursion is how a project goes.
+  if (target.type === 'dir') {
+    query.set('recursive', '1');
+  }
   await api(`/api/fs/entry?${query.toString()}`, { method: 'DELETE' });
   setStatus(`Deleted ${target.name}`);
   // Take the row out now rather than when the refresh lands. The server has
