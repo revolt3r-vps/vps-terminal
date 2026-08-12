@@ -122,6 +122,20 @@
             </svg>
           </button>
         </div>
+        <!-- Desktop only, like the gear beside it. The palette had no pointer
+             route at all: its chord is gated on focus being outside the terminal,
+             which is never where a desktop user is. -->
+        <button
+          id="header-commands"
+          class="icon-button shortcut-icon desktop-header-action"
+          type="button"
+          title="Commands (Ctrl+Shift+P)"
+          aria-label="Commands"
+        >
+          <svg viewBox="0 0 20 20" aria-hidden="true">
+            <path d="M7.5 5.5a2 2 0 1 0-2 2h9a2 2 0 1 0-2-2v9a2 2 0 1 0 2-2h-9a2 2 0 1 0 2 2z" />
+          </svg>
+        </button>
         <button
           id="header-settings"
           class="icon-button shortcut-icon desktop-header-action"

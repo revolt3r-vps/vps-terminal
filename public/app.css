@@ -2601,18 +2601,41 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 }
 
 /*
- * Fine pointers: the footer is display:none there, so the footer is brought back
- * as a fixed strip holding nothing but the panel. Fixed rather than in the grid,
- * because the desktop grid has no footer row — and overlaying keeps the terminal
- * from resizing, the same bargain landscape makes.
+ * Fine pointers: the footer is display:none there, so it is brought back as a
+ * third grid row holding nothing but the panel. The terminal gives up the space
+ * and re-fits.
+ *
+ * This is the one place the plan's "do not reflow the terminal" rule is broken on
+ * purpose, and only for a pointer. On a phone the panel stands in for the soft
+ * keyboard, which was covering those rows anyway, so overlaying costs nothing.
+ * With a mouse nothing was covering them: measured at 1440x900 the fixed strip
+ * this replaces hid 17 of 47 rendered rows, including the prompt with the cursor
+ * in it and the tmux status line. Losing rows you were reading is worse than the
+ * reflow, which is why landscape's bargain is not the right one here.
+ *
+ * setKeyPanelOpen calls scheduleFit() for this case. Its existing guard declines
+ * to fit while a selection is live and retries afterwards, so opening the panel
+ * mid-selection keeps the selection — the reflow cost the plan warns about is
+ * already handled there rather than needing a new rule.
+ *
+ * Specificity, not order, is what makes these win: the desktop block far below
+ * sets `footer { display: none }` and a two-row `body` grid, and every rule here
+ * carries `.key-panel-open` on top of that.
  */
 @media (pointer: fine) {
+  body.key-panel-open {
+    grid-template-rows:
+      calc(var(--header-height) + var(--safe-top))
+      minmax(0, 1fr)
+      auto;
+  }
+
   body.key-panel-open footer {
-    position: fixed;
-    right: 0;
-    bottom: 0;
-    left: 0;
-    z-index: 20;
+    position: relative;
+    inset: auto;
+    grid-row: 3;
+    grid-column: 1;
+    z-index: 25;
     display: flex;
     min-height: 0;
     padding: 0;
@@ -2625,8 +2648,24 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
     display: none !important;
   }
 
+  /*
+   * The slack goes into the panel here, the way portrait puts it into the footer
+   * height.
+   *
+   * Rows are whole and the box that fits them is not, so once the panel is in the
+   * flow there is a remainder between the last row and the panel — dead terminal
+   * background, up to one row tall. syncTerminalSlack already measures it and
+   * decides whether to, by asking whether the panel is in the footer's flow rather
+   * than by guessing from a media query; putting the panel in that flow is what
+   * turned it on here. Only the consumer was portrait-only, so the slack was
+   * measured and then absorbed by nothing. qa:responsive caught it as
+   * keys.panel-seam the moment the panel moved into the grid.
+   *
+   * Growing the panel rather than the terminal is what keeps this from costing a
+   * row: those pixels never held one.
+   */
   body.key-panel-open #key-panel {
-    height: var(--key-panel-height, 320px);
+    height: calc(var(--key-panel-height, 320px) + var(--terminal-slack, 0px));
     margin: 0;
   }
 }
@@ -4138,10 +4177,6 @@ footer button {
     padding: 0;
   }
 
-  header:not(.collapsed) #view-mode {
-    display: none;
-  }
-
   header .view-mode-btn {
     width: var(--header-control);
     min-width: var(--header-control);
@@ -4149,7 +4184,12 @@ footer button {
     padding: 0;
   }
 
-  header.collapsed #header-summary {
+  /*
+   * The header row is styled the same open or shut, because the picker no longer
+   * takes its place — see the overlay block below. Every rule here was
+   * `header.collapsed`-only while the two states were different layouts.
+   */
+  header #header-summary {
     order: initial;
     flex-direction: row;
     justify-content: flex-start;
@@ -4158,7 +4198,7 @@ footer button {
     padding: 0 8px;
   }
 
-  header.collapsed #current-session {
+  header #current-session {
     writing-mode: initial;
     transform: none;
     max-height: none;
@@ -4167,30 +4207,132 @@ footer button {
     letter-spacing: 0;
   }
 
-  header.collapsed .header-chevron {
+  header .header-chevron {
     margin: 0 0 0 auto;
     padding-left: 8px;
     transform: none;
   }
 
-  header.collapsed #connection-dot {
+  header #connection-dot {
     order: initial;
     flex: 0 0 var(--header-control);
     width: var(--header-control);
     margin: 0 2px 0 0;
   }
 
+  /*
+   * The picker drops below the header instead of taking its place.
+   *
+   * It used to be a row of sessions filling the bar, which meant opening it
+   * traded away the session name, the connection state and Term|Files — measured,
+   * `viewModeVisible: false` and `summaryVisible: false` with the picker open. The
+   * bar is 40px and mostly empty here, so there was nothing to gain by it, and a
+   * horizontal list only scrolls sideways once there are enough sessions.
+   *
+   * Same shape as the portrait-coarse menu at the top of this file, and an overlay
+   * for the same reason: absolute inside a `position: relative` header, so nothing
+   * else moves and the terminal cannot reflow. `header:not(.collapsed)` already
+   * sets `overflow: visible` (near the top), which is what lets it escape the bar.
+   */
+  header:not(.collapsed) #header-summary,
+  header:not(.collapsed) #view-mode {
+    display: flex;
+  }
+
+  header:not(.collapsed) .header-chevron svg {
+    transform: rotate(180deg);
+  }
+
   #header-expanded {
-    flex-direction: row;
-    align-items: center;
-    min-height: var(--header-control);
+    position: absolute;
+    top: calc(100% - 3px);
+    left: calc(6px + var(--safe-left));
+    z-index: 60;
+    flex: 0 0 auto;
+    flex-direction: column;
+    align-items: stretch;
+    width: min(320px, calc(100vw - 12px));
+    max-height: calc(100vh - var(--header-height) - var(--safe-top) - 24px);
+    gap: 3px;
+    overflow: hidden;
+    padding: 6px;
+    border: 1px solid var(--control-border);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
   }
 
   #header-expanded nav {
-    flex-direction: row;
-    min-height: auto;
-    overflow-x: auto;
-    overflow-y: hidden;
+    flex: 1 1 auto;
+    flex-direction: column;
+    align-items: stretch;
+    min-height: 0;
+    gap: 3px;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  #header-expanded .session-item {
+    width: 100%;
+  }
+
+  #header-expanded .session {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  #header-picker-actions {
+    flex: 0 0 auto;
+    padding-top: 5px;
+    border-top: 1px solid var(--border);
+  }
+
+  #header-picker-actions .icon-button {
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: auto;
+    padding: 0 10px;
+  }
+
+  #create.header-icon-button {
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--control-border));
+    background: var(--accent-surface);
+    color: var(--accent-text);
+  }
+
+  .header-picker-action-label {
+    display: inline;
+    font-size: 12px;
+  }
+
+  /* The menu covers the terminal, so the dismissing click needs a target. */
+  #picker-scrim:not([hidden]) {
+    display: block;
+  }
+
+  /*
+   * Rename and close are on every row here, not just the active one, and they
+   * appear on hover or keyboard focus. On a phone they are active-only because a
+   * thumb has nothing to hover with and four targets in a row is too many; with a
+   * pointer, closing a background session should not require attaching to it
+   * first.
+   */
+  #header-expanded .session-rename,
+  #header-expanded .session-close {
+    opacity: 0;
+    transition: opacity var(--duration-instant) var(--ease-out);
+  }
+
+  #header-expanded .session-item:hover .session-rename,
+  #header-expanded .session-item:hover .session-close,
+  #header-expanded .session-item:focus-within .session-rename,
+  #header-expanded .session-item:focus-within .session-close,
+  #header-expanded .session-item.active .session-rename,
+  #header-expanded .session-item.active .session-close {
+    opacity: 1;
   }
 
   .desktop-header-action {
@@ -4202,8 +4344,90 @@ footer button {
     min-height: var(--header-control);
   }
 
-  body.files-view .desktop-header-action {
+  /* The gear opens the key panel, and Files hides that panel outright, so the
+     gear has nothing to open there. Commands stays: the palette carries Show
+     Files and Connect to <session>, which are exactly the things worth reaching
+     from Files. */
+  body.files-view #header-settings {
     display: none;
+  }
+
+  /*
+   * Files keeps the session identity, and the picker with it.
+   *
+   * The shared rule hides the name and the connection dot in Files because
+   * sessions are Term chrome and a phone bar has no room for both. On desktop that
+   * bar is empty apart from Term|Files, and hiding them meant you could not see
+   * which session you were attached to, or whether you were still connected, while
+   * looking at files.
+   *
+   * The picker comes too rather than leaving the name as a button that opens
+   * nothing. `syncPickerScrim` had to learn the same thing, since it refused the
+   * scrim in Files on the assumption the picker was never visible there.
+   *
+   * !important throughout because the rules being overridden use it.
+   */
+  body.files-view #header-summary,
+  body.files-view #connection-dot {
+    display: flex !important;
+  }
+
+  body.files-view header:not(.collapsed) #header-expanded {
+    display: flex !important;
+  }
+
+  body.files-view #picker-scrim:not([hidden]) {
+    display: block !important;
+  }
+
+  body.files-view .header-row {
+    justify-content: flex-start;
+  }
+
+  /*
+   * auto-fill with a 1fr max means a wider window gives *narrower* tiles: it packs
+   * as many tracks as fit and then splits the row between all of them. Measured at
+   * 1440 the 13 tiles sat at the 56px floor, ended 621px short of the right edge,
+   * and "Bottom" clipped to "Botto…" — while at 1024 the same tiles were wider and
+   * it fitted. Capping the track keeps a tile tile-sized and packs from the left.
+   */
+  .key-panel-keys-main {
+    grid-template-columns: repeat(auto-fill, minmax(56px, 76px));
+    justify-content: start;
+  }
+
+  /*
+   * The grid takes what it needs instead of the whole page, so Edit sits under the
+   * keys rather than at the far bottom.
+   *
+   * On a phone the keys wrap to two or three rows and fill the panel, so stretching
+   * the grid and pinning Edit below it is right. Here 13 tiles fit in one row and
+   * the panel is taller than they need, which left a ~250px gap between the keys
+   * and the button that edits them — far enough apart to read as two unrelated
+   * things.
+   */
+  .key-panel-page[data-panel-page='keys'] .key-panel-keys-main {
+    flex: 0 0 auto;
+  }
+
+  /* And the action row follows the grid instead of being pushed to the floor by
+     `margin-top: auto`. Shrinking the grid alone left Edit where it was, ~290px
+     under the keys. */
+  .key-panel-page[data-panel-page='keys'] .key-panel-actions {
+    margin-top: 8px;
+  }
+
+  /*
+   * The panel is window-wide and its rows were built for a phone, so a snippet's
+   * name sat at x=20 with its Run/Insert word 1360px away at x=1380, and Paste's
+   * two footer buttons were ~700px each. Keys and Appearance are excluded on
+   * purpose: those are grids that genuinely use the width, and the theme grid
+   * fitting 13 cards across is one of the better things about this panel.
+   */
+  .key-panel-page[data-panel-page='snippets'],
+  .key-panel-page[data-panel-page='paste'],
+  .key-panel-page[data-panel-page='app'] {
+    max-width: 720px;
   }
 
   main {

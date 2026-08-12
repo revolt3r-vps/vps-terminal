@@ -91,6 +91,7 @@ const filesNameCancel = document.querySelector('#files-name-cancel');
 const viewModeElement = document.querySelector('#view-mode');
 const appHeaderElement = document.querySelector('#app-header');
 const headerSettingsButton = document.querySelector('#header-settings');
+const headerCommandsButton = document.querySelector('#header-commands');
 const headerSummaryButton = document.querySelector('#header-summary');
 const headerExpandedElement = document.querySelector('#header-expanded');
 const currentSessionElement = document.querySelector('#current-session');
@@ -1366,12 +1367,29 @@ function headerPickerOpen() {
  * The scrim only exists to take the dismissing tap away from the session, so
  * it appears exactly when the picker overlays a live terminal.
  */
+/**
+ * True where the layout is built for a mouse rather than a thumb.
+ *
+ * One place for the query, because four separate desktop behaviours now depend on
+ * it and they have to agree with the `(pointer: fine)` rules in app.css. Read live
+ * rather than cached: a window can move between displays.
+ */
+function pointerIsFine() {
+  return Boolean(window.matchMedia?.('(pointer: fine)').matches);
+}
+
 function syncPickerScrim() {
   if (!pickerScrimElement) {
     return;
   }
+  // Files hid the picker outright, so a scrim there would have been a dead layer
+  // over the file list. On a fine pointer the picker is an overlay in Files too
+  // (app.css, the desktop header block), so the scrim has to follow it or the
+  // menu has nothing to dismiss it.
   pickerScrimElement.hidden = !(
-    headerPickerOpen() && activeSession && viewMode !== 'files'
+    headerPickerOpen() &&
+    activeSession &&
+    (viewMode !== 'files' || pointerIsFine())
   );
 }
 
@@ -2328,7 +2346,15 @@ function keyPanelHeight() {
   } catch {
     // Fall through to the guess.
   }
-  return Math.round(Math.min(320, (window.innerHeight || 700) * 0.45));
+  const layoutHeight = window.innerHeight || 700;
+  // A fine pointer has no soft keyboard, so there is no keyboard height for the
+  // panel to stand in for and 320px was simply the phone guess reused. It left the
+  // App tab's keyboard-shortcut reference cut off past halfway — measured 614px of
+  // content in a 273px body — so desktop gets the room it has.
+  if (pointerIsFine()) {
+    return Math.round(Math.min(460, layoutHeight * 0.45));
+  }
+  return Math.round(Math.min(320, layoutHeight * 0.45));
 }
 
 /**
@@ -2448,6 +2474,18 @@ function setKeyPanelOpen(open) {
     document.body.classList.remove('key-panel-open');
     document.documentElement.style.removeProperty('--key-panel-height');
     document.documentElement.style.removeProperty('--key-panel-base');
+  }
+  // On a fine pointer the panel takes a third grid row instead of covering the
+  // terminal, so the terminal box just changed size and xterm has to re-fit. This
+  // is the deliberate exception to "do not reflow the terminal": with a mouse
+  // nothing was covering those rows, and hiding 17 of 47 of them — the prompt
+  // among them — is worse than the reflow.
+  //
+  // scheduleFit's own guard declines while a selection is live and retries once it
+  // is gone, so opening the panel mid-selection keeps the selection. That is why
+  // this needs no new guard of its own.
+  if (pointerIsFine()) {
+    scheduleFit();
   }
   scheduleLayoutDebug('key-panel');
 }
@@ -4484,13 +4522,35 @@ const appHelpGestures = [
   ['Tap the connection dot', 'reconnect']
 ];
 
+/*
+ * The same three things for a pointer, which cannot do any of them the same way.
+ *
+ * "Swipe the terminal" was not merely awkward with a mouse, it was false:
+ * installViewSwipeGestures binds `touchstart` and `touchmove` only, so no pointer
+ * route to it exists. The session name is the desktop answer and it is one click
+ * away in the same bar this text is read from.
+ *
+ * A hold does still work with a mouse — installChipLongPress is on pointer events
+ * — but Edit is the route worth naming when it is visible in the tab being
+ * described.
+ */
+const appHelpPointerActions = [
+  ['Edit, in the Keys tab', 'reorder, remove, add'],
+  ['The session name, top left', 'switch session'],
+  ['Click the connection dot', 'reconnect']
+];
+
+function appHelpEntries() {
+  return pointerIsFine() ? appHelpPointerActions : appHelpGestures;
+}
+
 function updateAppHelpPanel() {
   const help = document.querySelector('#app-help-text');
   if (!help) {
     return;
   }
   help.replaceChildren();
-  for (const [gesture, result] of appHelpGestures) {
+  for (const [gesture, result] of appHelpEntries()) {
     const term = document.createElement('dt');
     term.textContent = gesture;
     const detail = document.createElement('dd');
@@ -6569,6 +6629,21 @@ const keybindingTable = compileKeybindings([
     key: 'mod+k',
     command: 'palette.open',
     when: '!terminalFocus && !uiCapture && finePointer'
+  },
+  // The chord that works where a desktop user actually is: focused on the
+  // terminal. `mod+k` has to keep its `!terminalFocus` gate because Ctrl+K is
+  // readline's kill-line, and the result was that the palette had no reachable
+  // route at all — measured, Ctrl+K with the terminal focused does nothing, and
+  // the only palette control in the DOM was its own close button.
+  //
+  // Literally `ctrl+shift+p`, not `mod`: xterm emits nothing for
+  // ctrl+shift+letter, which is the same reason ctrl+shift+c and ctrl+shift+v are
+  // claimed below, and it leaves Cmd+Shift+P alone on Apple where that is a
+  // browser chord.
+  {
+    key: 'ctrl+shift+p',
+    command: 'palette.open',
+    when: '!uiCapture && finePointer'
   },
   {
     key: 'mod+c',
@@ -11221,7 +11296,12 @@ function renderSessions() {
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
     item.append(button);
-    if (isActive) {
+    // Every row carries rename and close on a fine pointer, where they are
+    // revealed on hover or keyboard focus (app.css, the desktop header block).
+    // Active-only is right for a thumb — nothing hovers, and four targets in one
+    // row is too many — but with a pointer it meant closing a background session
+    // required attaching to it first.
+    if (isActive || pointerIsFine()) {
       // Rename sits on the session it renames, next to Delete, rather than in the
       // Menu — the session is the thing being acted on and it is already here.
       // The long-press on the name still works, for every session rather than
@@ -15281,6 +15361,7 @@ function openFooterMenu() {
 }
 document.querySelector('#settings').addEventListener('click', openFooterMenu);
 headerSettingsButton?.addEventListener('click', openFooterMenu);
+headerCommandsButton?.addEventListener('click', () => openCommandPalette());
 keyPanelTabsElement?.addEventListener('click', (event) => {
   const button = event.target.closest('.key-panel-tab[data-panel-tab]');
   if (button) {
