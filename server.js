@@ -1111,7 +1111,20 @@ async function deleteFsEntry(rootId, relativePath, options = {}) {
         force: false
       });
     } else {
-      await fs.promises.rmdir(resolved.absolutePath);
+      try {
+        await fs.promises.rmdir(resolved.absolutePath);
+      } catch (error) {
+        // A folder with something in it is a refusal, not a server fault. It
+        // arrived here as an unhandled 500 logged as "request failed", which is
+        // both the wrong status and noise in the journal — and bulk delete hits
+        // it deliberately for every folder it declines.
+        if (error.code === 'ENOTEMPTY' || error.code === 'EEXIST') {
+          const refusal = new Error('directory is not empty');
+          refusal.statusCode = 409;
+          throw refusal;
+        }
+        throw error;
+      }
     }
   } else if (resolved.stats.isFile()) {
     await fs.promises.unlink(resolved.absolutePath);

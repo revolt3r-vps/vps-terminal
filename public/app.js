@@ -7596,7 +7596,16 @@ function ensureHexColorContrast(
   return target;
 }
 
-function applyAppTheme(themeName) {
+/**
+ * The chrome palette a terminal theme implies.
+ *
+ * Pure and separate from applyAppTheme so test/themes.test.js can exercise the
+ * ratios against every theme. The test slices the colour maths out of this file
+ * and cannot reach anything that touches the DOM, so a derivation left inside
+ * applyAppTheme can only be checked by reading the source for a line — which
+ * passes whether or not the line is right.
+ */
+function chromeTokensForTheme(themeName) {
   const theme = terminalThemes[themeName];
   const accentKey = terminalThemeAccentKeys[themeName] || 'cursor';
   const accent = theme[accentKey] || theme.cursor || theme.foreground;
@@ -7613,13 +7622,28 @@ function applyAppTheme(themeName) {
   const contrastTarget = light ? '#000000' : '#ffffff';
   const danger = theme.brightRed || theme.red;
   const dangerSurface = mixHexColors(theme.background, danger, 0.18);
-  const root = document.documentElement;
-  const variables = {
+  const tokens = {
     '--terminal-bg': theme.background,
     '--surface': theme.background,
     '--surface-raised': raisedSurface,
     '--surface-deep': mixHexColors(theme.background, '#000000', 0.14),
     '--surface-pressed': mixHexColors(theme.background, theme.foreground, 0.15),
+    /*
+     * This was the one chrome token the theme did not own. It kept its :root
+     * value on all 16 themes, and `button:hover` (app.css:1606) is inside
+     * `(hover: hover) and (pointer: fine)` — so on a desktop light theme every
+     * button hovered to a near-black #1f2631. Measured on Pierre Light before
+     * this line: a key tile painted rgb(31,38,49) over a #ffffff surface with its
+     * label at 1.31:1. No phone could show it and no suite looked.
+     *
+     * Hover belongs between raised (0.08) and pressed (0.15). The :root defaults
+     * put it at 0.125 — #1f2631 is 0.125 of the way from #11151b toward that
+     * palette's foreground on all three channels — but 0.125 lands Solarized
+     * Dark's body text at 4.47 on the hover surface. 0.115 is the largest step
+     * that keeps every theme at 4.5, the floor the terminal foreground already
+     * answers to. Both bars are asserted in test/themes.test.js.
+     */
+    '--surface-hover': mixHexColors(theme.background, theme.foreground, 0.115),
     '--border': mixHexColors(theme.background, theme.foreground, 0.18),
     '--control-border': mixHexColors(theme.background, theme.foreground, 0.25),
     '--muted': ensureHexColorContrast(
@@ -7646,8 +7670,11 @@ function applyAppTheme(themeName) {
     ),
     '--danger-surface': dangerSurface,
     '--focus-ring': mixHexColors(accent, contrastTarget, 0.24),
-    // Scrollbars were the one surface a theme did not own, so a light theme still
+    // Scrollbars were a surface a theme did not own, so a light theme still
     // showed a dark thumb. Derived from the same foreground mix as the borders.
+    // This said "the one surface" until --surface-hover turned out to be another;
+    // every colour-valued :root token is derived here now, and a new one that is
+    // not will fail the theme tests rather than sit in the palette unnoticed.
     '--app-scrollbar-thumb': mixHexColors(theme.background, theme.foreground, 0.28),
     '--app-scrollbar-thumb-hover': mixHexColors(
       theme.background,
@@ -7656,6 +7683,13 @@ function applyAppTheme(themeName) {
     ),
     '--app-scrollbar-track': mixHexColors(theme.background, theme.foreground, 0.06)
   };
+  return { tokens, light };
+}
+
+function applyAppTheme(themeName) {
+  const theme = terminalThemes[themeName];
+  const { tokens: variables, light } = chromeTokensForTheme(themeName);
+  const root = document.documentElement;
   for (const [property, value] of Object.entries(variables)) {
     root.style.setProperty(property, value);
   }
