@@ -4878,7 +4878,7 @@ async function commitSnippets(next, done, options = {}) {
       snippetsList = options.rollbackTo;
       renderFooterPins();
     }
-    window.alert(error.message);
+    setStatus(error.message || 'Could not save snippets', { sticky: true });
     renderKeyPanel();
     return false;
   }
@@ -4945,11 +4945,11 @@ function openSnippetDialog(snippet) {
       .replace(/\r\n/g, '\n')
       .replace(/\r/g, '\n');
     if (!cleanLabel) {
-      window.alert('Label is required');
+      setStatus('Label is required', { sticky: true });
       return;
     }
     if (!cleanBody.trim()) {
-      window.alert('Body is required');
+      setStatus('Body is required', { sticky: true });
       return;
     }
     const next = snippet
@@ -5004,7 +5004,7 @@ async function resetSnippetsToPresets() {
     // Same as the keys Reset: finishing a reset is finishing with the editor.
     setKeyPanelSnippetsMode('list');
   } catch (error) {
-    window.alert(error.message);
+    setStatus(error.message || 'Could not reset snippets', { sticky: true });
   }
 }
 
@@ -8954,13 +8954,13 @@ async function enablePreferencesSync() {
     if (error.status === 412) {
       preferencesSyncIdentityConfirmed = false;
       setPreferencesSyncState('offline');
-      setStatus('Login changed; reload shared setup');
+      setStatus('Login changed; reload shared setup', { sticky: true });
     } else if (error.status === 409) {
       await loadPreferencesFromServer();
       setStatus('Loaded the setup enabled in another browser');
     } else {
       setPreferencesSyncState('offline');
-      setStatus('Could not enable shared setup');
+      setStatus('Could not enable shared setup', { sticky: true });
     }
   }
 }
@@ -9015,6 +9015,14 @@ async function replaceSharedPreferences() {
     } else {
       setPreferencesSyncState(error.status === 409 ? 'conflict' : 'offline');
     }
+    // The state pill changing was the only report this had. Replacing the shared
+    // setup is deliberate and destructive, so its failure has to say so.
+    setStatus(
+      error.status === 409
+        ? 'Another browser changed the setup first'
+        : error.message || 'Could not replace shared setup',
+      { sticky: true }
+    );
   }
 }
 
@@ -9643,7 +9651,9 @@ function activateFilesEntry(entry, options = {}) {
   }
   if (filesPrimaryPointerIsFine() && !options.directTouch) {
     void previewFilesTarget(target).catch((error) => {
-      setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
+      setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE, {
+      sticky: true
+    });
     });
     return;
   }
@@ -10672,7 +10682,6 @@ async function startFilesSession(launcher) {
     connect(result.name || name);
   } catch (error) {
     setStatus(error.message || 'Could not start session', { sticky: true });
-    window.alert(error.message);
   }
 }
 
@@ -13372,6 +13381,11 @@ async function createSession() {
   }
   const name = proposed.trim();
   try {
+    // Creating a session is a tmux spawn plus a session list refresh plus a
+    // connect. Three round trips with nothing on screen was the "did that
+    // work" gap the phase 5 checklist asks about; startFilesSession already
+    // did it this way and these three did not.
+    setStatus('Creating session…', { sticky: true });
     await api('/api/sessions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -13380,7 +13394,7 @@ async function createSession() {
     await refreshSessions();
     connect(name);
   } catch (error) {
-    window.alert(error.message);
+    setStatus(error.message || 'Could not create session', { sticky: true });
   }
 }
 
@@ -13392,13 +13406,17 @@ async function killSession(name = activeSession) {
     return;
   }
   try {
+    setStatus(`Deleting ${name}…`, { sticky: true });
     await api(`/api/sessions/${encodeURIComponent(name)}`, {
       method: 'DELETE'
     });
     disconnect();
     await refreshSessions(true);
+    // disconnect() resets the connection state, and its own status text would
+    // otherwise be the last word on an operation the user started here.
+    setStatus(`Deleted ${name}`);
   } catch (error) {
-    window.alert(error.message);
+    setStatus(error.message || 'Could not delete session', { sticky: true });
   }
 }
 
@@ -13415,6 +13433,7 @@ async function renameSession(name) {
     return;
   }
   try {
+    setStatus(`Renaming to ${nextName}…`, { sticky: true });
     const result = await api(`/api/sessions/${encodeURIComponent(name)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -13433,7 +13452,7 @@ async function renameSession(name) {
     await refreshSessions(false, true);
     setStatus(`Renamed to ${renamed}`);
   } catch (error) {
-    window.alert(error.message);
+    setStatus(error.message || 'Could not rename session', { sticky: true });
   }
 }
 
@@ -13867,7 +13886,9 @@ async function openTerminalPathLink(rawPath) {
       type: 'file'
     });
   } catch (error) {
-    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
+    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE, {
+      sticky: true
+    });
     return;
   }
   if (line) {
@@ -14788,7 +14809,9 @@ async function applyClipboardPayload(payload) {
   }
 
   if (error) {
-    setStatus('Clipboard unavailable');
+    // Sticky: the paste did not happen and there is no other signal. An 1800ms
+    // toast for a failed action is the "silent failure" the checklist is about.
+    setStatus('Clipboard unavailable', { sticky: true });
     clientDebug('paste-text-error', { reason: 'clipboard-read-failed' });
     return false;
   }
@@ -15128,7 +15151,9 @@ filesActionPreview?.addEventListener('click', () => {
     return;
   }
   void previewFilesTarget(filesActionTarget).catch((error) => {
-    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE);
+    setStatus(error.message || FILES_PREVIEW_FAILED_MESSAGE, {
+      sticky: true
+    });
   });
 });
 filesActionDownload?.addEventListener('click', () => {

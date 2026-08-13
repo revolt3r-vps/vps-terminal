@@ -4921,6 +4921,49 @@ header:not(.collapsed) #header-expanded {
 }
 
 /*
+ * The three surfaces the phase 5 sweep found still cutting in.
+ *
+ * Measured with getAnimations() rather than by reading the stylesheet: the dialogs,
+ * the picker and the sheet each reported a running animation, and these three
+ * reported none while going from `display: none` to shown. Same fault phase 3 fixed
+ * for the other three, so the same answer — a `from`-only keyframe that runs when the
+ * element becomes displayed, no JavaScript and no support floor.
+ *
+ * The global prefers-reduced-motion override below neuters all of it.
+ */
+@keyframes surface-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* Drops from the top edge, so it borrows the picker's arrival. */
+#find-bar:not([hidden]) {
+  animation: surface-picker-in var(--duration-quick) var(--ease-out);
+}
+
+/*
+ * Opacity only, and quick. This appears and disappears repeatedly while a finger is
+ * moving, so anything with travel in it would read as a flicker rather than an
+ * arrival.
+ */
+#scroll-position:not([hidden]) {
+  animation: surface-fade-in var(--duration-instant) var(--ease-out);
+}
+
+/*
+ * The view swap. A swipe already animates, because finishViewSwipe() translates
+ * `main` inline — it was only the Term|Files tap that cut, so the same change looked
+ * different depending on how it was asked for.
+ *
+ * Safe to fade because #files-panel is `position: absolute; inset: 0`: it overlays
+ * the terminal rather than sharing its flow, so nothing here can reflow the terminal.
+ */
+body.files-view #files-panel:not([hidden]) {
+  animation: surface-fade-in var(--duration-quick) var(--ease-out);
+}
+
+/*
  * A theme change crosses over instead of cutting, for the length of one change.
  *
  * The universal selector is the point rather than laziness: a theme rewrites
