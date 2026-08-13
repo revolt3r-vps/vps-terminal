@@ -2490,6 +2490,150 @@ function setKeyPanelOpen(open) {
   scheduleLayoutDebug('key-panel');
 }
 
+/**
+ * Drag the panel's top edge to set its height. Fine pointers only.
+ *
+ * The panel takes a grid row there, so its height is terminal rows the user gives
+ * up, and the tabs need very different amounts — the Keys tab a fraction of what the
+ * App tab does. A fixed height cannot serve both. Sizing the panel to its content
+ * would, but the height would then change on every tab switch and each change is a
+ * terminal reflow that re-wraps output, so the number is the user's to set instead.
+ *
+ * Writes through the same storage key the measured keyboard height uses, because it
+ * answers the same question — how tall is the panel — and `keyPanelHeight()` already
+ * reads and range-checks it.
+ */
+function installKeyPanelGrip() {
+  const grip = document.querySelector('#key-panel-grip');
+  if (!grip) {
+    return;
+  }
+  // The ceiling is what keyPanelHeight() will *accept back*, not what
+  // clampedKeyPanelHeight() allows for one session — those differ, and the gap was a
+  // real bug: dragging to 548px stored 548, and the next load threw it away because
+  // the read guard rejects anything past 0.55 of the layout height. A grip that
+  // silently forgets is worse than one that stops.
+  const bounds = () => {
+    const layoutHeight =
+      document.documentElement.clientHeight || window.innerHeight || 700;
+    return { min: 160, max: Math.floor(layoutHeight * 0.55) };
+  };
+  /**
+   * The height that was *set*, never the height that is rendered.
+   *
+   * The panel's CSS height is `--key-panel-height + --terminal-slack`, so its rect is
+   * a dozen or so pixels taller than the number driving it. Reading the rect back as
+   * "current" broke this twice over: the stored value came out above the ceiling and
+   * was rejected on the next load, and an arrow step smaller than the slack vanished
+   * into the clamp so the keyboard route did nothing at all.
+   */
+  let panelHeight = null;
+  const currentHeight = () => {
+    if (panelHeight !== null) {
+      return panelHeight;
+    }
+    const set = Number.parseInt(
+      document.documentElement.style.getPropertyValue('--key-panel-height'),
+      10
+    );
+    return Number.isFinite(set) ? set : clampedKeyPanelHeight();
+  };
+
+  const applyHeight = (height) => {
+    const { min, max } = bounds();
+    const next = Math.round(Math.min(max, Math.max(min, height)));
+    panelHeight = next;
+    document.documentElement.style.setProperty(
+      '--key-panel-height',
+      `${next}px`
+    );
+    grip.setAttribute('aria-valuenow', String(next));
+    grip.setAttribute('aria-valuemin', String(min));
+    grip.setAttribute('aria-valuemax', String(max));
+    return next;
+  };
+
+  let pointer = null;
+  let startY = 0;
+  let startHeight = 0;
+
+  grip.addEventListener('pointerdown', (event) => {
+    if (pointer !== null || !pointerIsFine()) {
+      return;
+    }
+    pointer = event.pointerId;
+    startY = event.clientY;
+    startHeight = currentHeight();
+    grip.classList.add('dragging');
+    // The grip is never moved by this, unlike a key tile, so capture is safe and
+    // keeps the drag alive over the terminal.
+    grip.setPointerCapture?.(pointer);
+    event.preventDefault();
+  });
+
+  grip.addEventListener('pointermove', (event) => {
+    if (event.pointerId !== pointer) {
+      return;
+    }
+    // Up is taller: the grip is the panel's top edge.
+    applyHeight(startHeight - (event.clientY - startY));
+    scheduleFit();
+  });
+
+  const end = (event) => {
+    if (event.pointerId !== pointer) {
+      return;
+    }
+    pointer = null;
+    grip.classList.remove('dragging');
+    // Persist what it ended at, not every intermediate frame.
+    storeKeyPanelHeight(currentHeight());
+    scheduleFit();
+  };
+  grip.addEventListener('pointerup', end);
+  grip.addEventListener('pointercancel', end);
+
+  // A separator with a value is arrow-operable, and this is the only way to set the
+  // height without a pointer.
+  grip.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 48 : 16;
+    let next = null;
+    if (event.key === 'ArrowUp') {
+      next = currentHeight() + step;
+    } else if (event.key === 'ArrowDown') {
+      next = currentHeight() - step;
+    } else {
+      return;
+    }
+    event.preventDefault();
+    storeKeyPanelHeight(applyHeight(next));
+    scheduleFit();
+  });
+
+  // Seed from whatever setKeyPanelOpen last set, so the grip's reported value matches
+  // the panel before anyone touches it.
+  applyHeight(currentHeight());
+}
+
+/**
+ * Persist a panel height the user chose.
+ *
+ * Separate from storeKeyboardHeight, which records a *measurement* and also sets
+ * lastKeyboardHeight — that variable means "the keyboard was this tall", and a mouse
+ * drag is not evidence about anyone's keyboard. Same storage key, because
+ * keyPanelHeight() reads it and range-checks it either way.
+ */
+function storeKeyPanelHeight(height) {
+  if (!(height > 0)) {
+    return;
+  }
+  try {
+    window.localStorage.setItem(keyPanelHeightStorageKey, String(height));
+  } catch {
+    // Without persistence the height just does not survive a reload.
+  }
+}
+
 function toggleKeyPanel() {
   setKeyPanelOpen(!keyPanelOpen);
 }
@@ -6977,6 +7121,12 @@ function isHardwareKeyboardUiCaptureTarget(target) {
     return true;
   }
   if (target.closest('dialog')) {
+    return true;
+  }
+  // The panel's resize grip is a separator, and arrows are its whole interaction.
+  // Without this the bridge forwards them to the PTY first — measured, the grip had
+  // focus and ArrowDown resized nothing because the shell got the key instead.
+  if (target.closest('#key-panel-grip')) {
     return true;
   }
   const field = target.closest('input, textarea, select, [contenteditable="true"]');
@@ -15252,6 +15402,7 @@ pasteButton.addEventListener('click', (event) => {
 });
 restorePasteHistoryIfOptedIn();
 installViewSwipeGestures();
+installKeyPanelGrip();
 terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.

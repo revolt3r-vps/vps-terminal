@@ -631,6 +631,17 @@
         does not have — all three keep the settings dialog instead.
       -->
       <div id="key-panel" hidden aria-label="Terminal panel">
+        <!-- Desktop only. The panel takes a grid row on a fine pointer, so its
+             height is real terminal rows and the tabs need very different amounts
+             of it. A separator role rather than a button: it has a value, and the
+             arrow keys move it. -->
+        <div
+          id="key-panel-grip"
+          role="separator"
+          tabindex="0"
+          aria-orientation="horizontal"
+          aria-label="Resize panel"
+        ></div>
         <div id="key-panel-body">
           <div
             class="key-panel-page"

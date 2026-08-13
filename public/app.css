@@ -2600,6 +2600,13 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   display: none !important;
 }
 
+/* Desktop only — see the fine-pointer block. On a phone the panel's height is the
+   keyboard's, which is not the user's to drag, and an 8px target is not a thumb
+   target anyway. */
+#key-panel-grip {
+  display: none;
+}
+
 /*
  * Fine pointers: the footer is display:none there, so it is brought back as a
  * third grid row holding nothing but the panel. The terminal gives up the space
@@ -4415,6 +4422,82 @@ footer button {
      under the keys. */
   .key-panel-page[data-panel-page='keys'] .key-panel-actions {
     margin-top: 8px;
+  }
+
+  /*
+   * A key tile rests below the hover step, so hovering it lifts.
+   *
+   * `.key-panel-key` rests at `--surface-pressed` (0.15 from the background toward
+   * the foreground), and hover is 0.115 — *above* the rest fill, so hovering moved a
+   * tile toward the background and measured as a 1.07 rest-to-hover contrast ratio
+   * against 1.21-1.28 for a control that rests transparent. Barely visible, and in
+   * the wrong direction. The hardcoded `--surface-hover` masked it with a hue shift
+   * until finding 13 derived the token properly.
+   *
+   * Resting at `--surface-raised` (0.08) puts the tile below hover and below its own
+   * `:active`, so rest → hover → press now reads in one direction. Fine pointers
+   * only: on a phone there is no hover, and a tile resting lower would be a quieter
+   * key bar for no gain.
+   */
+  .key-panel-key {
+    background: var(--surface-raised);
+  }
+
+  /*
+   * And press has to go the other way, or it collides with the new rest fill.
+   *
+   * On a phone the order is pressed(0.15) at rest and raised(0.08) on press — a tile
+   * that sinks and loses its shadow. Moving rest down to raised for hover's sake left
+   * `:active` at the same value as rest, so pressing a tile changed nothing at all.
+   * Caught by reading the rule rather than by any check.
+   *
+   * Desktop order is now monotonic: raised 0.08 at rest, hover 0.115, pressed 0.15 on
+   * press. One direction, three distinct steps.
+   */
+  .key-panel-key:active {
+    background: var(--surface-pressed);
+  }
+
+  /*
+   * The resize grip, desktop only.
+   *
+   * The panel takes a grid row here, so its height is terminal rows the user is
+   * giving up — and the Keys tab needs a fraction of what the App tab does. A fixed
+   * height cannot serve both, and a content-sized panel would reflow the terminal on
+   * every tab switch, so the height is the user's to set.
+   *
+   * 8px of grab area with a 2px visible bar, which is enough to hit with a mouse
+   * without the panel looking like it has a border. `row-resize` rather than
+   * `ns-resize`: this moves a horizontal edge.
+   */
+  #key-panel-grip {
+    display: block;
+    flex: 0 0 auto;
+    height: 8px;
+    position: relative;
+    cursor: row-resize;
+    background: transparent;
+  }
+
+  #key-panel-grip::after {
+    content: '';
+    position: absolute;
+    top: 3px;
+    right: 0;
+    left: 0;
+    height: 2px;
+    background: var(--border);
+    transition: background-color var(--duration-instant) var(--ease-out);
+  }
+
+  #key-panel-grip:hover::after,
+  #key-panel-grip.dragging::after {
+    background: var(--accent);
+  }
+
+  #key-panel-grip:focus-visible {
+    outline: 2px solid var(--focus-ring);
+    outline-offset: -2px;
   }
 
   /*
