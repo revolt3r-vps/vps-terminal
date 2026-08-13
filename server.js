@@ -1419,6 +1419,22 @@ const buildIdPlaceholder = '__VPS_BUILD_ID__';
  * encoded form; this placeholder is what puts it there.
  */
 const buildTagPlaceholder = '__VPS_BUILD_TAG__';
+/**
+ * The vendored bundle's own version, so a deploy that changed only app code does
+ * not throw it away.
+ *
+ * Every asset used to share buildId, and buildId is the newest mtime across
+ * app.js, app.css and index.html — so any app change rotated the vendor URLs too
+ * and 619 KB of xterm, its addons and the two woff2 faces came down again for
+ * nothing. Measured: about 189 KB gzipped per deploy, on files that had not
+ * changed since the dependency was last bumped.
+ *
+ * Content, not mtime. `scripts/install-vps-terminal` re-vendors from
+ * node_modules with `install -m 600`, which stamps a fresh mtime on every deploy
+ * whether or not the bytes differ — so an mtime-based tag would rotate exactly as
+ * often as buildId and buy nothing. This is what "a hashed URL" meant.
+ */
+const vendorTagPlaceholder = '__VPS_VENDOR_TAG__';
 
 /**
  * Extensions worth compressing. woff2 is already compressed and svg is small
@@ -1515,6 +1531,56 @@ const buildId = (() => {
   return `${version}+${stamp}`;
 })();
 
+/** Everything under public/vendor/, which is the whole vendored bundle. */
+const vendorRoot = path.join(publicRoot, 'vendor');
+
+// ---- Start of the pure asset-tag block. ----
+/**
+ * A hash of the vendored bytes. Changes when a dependency is re-vendored and at
+ * no other time, which is the whole point — see vendorTagPlaceholder.
+ *
+ * Names go into the hash alongside the contents, so renaming a file is a change
+ * even when the bytes are identical. Sorted, or readdir order would decide the
+ * tag. One pass over 619 KB at boot.
+ *
+ * Returns null when the directory cannot be read, so the caller decides what a
+ * broken install should serve.
+ */
+function hashVendorAssets(directory, io = fs) {
+  try {
+    const hash = crypto.createHash('sha256');
+    for (const name of io.readdirSync(directory).sort()) {
+      hash.update(name);
+      hash.update(io.readFileSync(path.join(directory, name)));
+    }
+    return hash.digest('hex').slice(0, 12);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The version an asset's URL has to carry to be cacheable.
+ *
+ * Two namespaces: the vendored bundle answers to its content hash, everything
+ * else to the deploy's buildId. A URL carrying the wrong one is served no-store,
+ * which is the same answer a hand-typed URL gets.
+ */
+function assetTagForPath(normalizedPath, tags) {
+  return normalizedPath.startsWith('/vendor/') ? tags.vendor : tags.build;
+}
+// ---- End of the pure asset-tag block. ----
+
+// No `+`, so unlike buildId this needs no separate encoded form. A missing vendor
+// directory is a broken install, reported elsewhere; falling back to buildId keeps
+// the URLs valid and merely caches them less well.
+const vendorTag = hashVendorAssets(vendorRoot) || buildId;
+
+function expectedAssetTag(normalizedPath) {
+  return assetTagForPath(normalizedPath, { vendor: vendorTag, build: buildId });
+}
+
+
 async function serveStatic(request, response) {
   const url = new URL(request.url, publicOrigin);
   const requestedPath = url.pathname === '/' ? '/index.html' : url.pathname;
@@ -1544,7 +1610,8 @@ async function serveStatic(request, response) {
             email ? preferencesIdentity(email) : ''
           )
           .replaceAll(buildIdPlaceholder, buildId)
-          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId)),
+          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId))
+          .replaceAll(vendorTagPlaceholder, vendorTag),
         'utf8'
       );
     } else if (path.extname(filePath) === '.css') {
@@ -1554,19 +1621,24 @@ async function serveStatic(request, response) {
       body = Buffer.from(
         body
           .toString('utf8')
-          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId)),
+          .replaceAll(buildTagPlaceholder, encodeURIComponent(buildId))
+          .replaceAll(vendorTagPlaceholder, vendorTag),
         'utf8'
       );
     }
     setSecurityHeaders(response);
-    // A request that names this build can be cached forever, because the name
+    // A request that names its version can be cached forever, because the name
     // changes when the file does — index.html is served no-store and rewrites
     // every ?v= on each deploy, so a client can never keep an old asset without
     // also keeping the old page that asked for it.
     //
-    // Without a version the answer stays no-store, which keeps a hand-typed URL
-    // and any old cached page honest.
-    if (url.searchParams.get('v') === buildId) {
+    // The vendored bundle answers to its content hash rather than to buildId, so a
+    // deploy that only changed app code leaves it cached. Everything else answers
+    // to buildId.
+    //
+    // Without a version, or with the wrong one, the answer stays no-store — which
+    // keeps a hand-typed URL and any old cached page honest.
+    if (url.searchParams.get('v') === expectedAssetTag(normalizedPath)) {
       response.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
     }
     response.statusCode = 200;

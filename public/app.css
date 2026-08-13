@@ -3,7 +3,7 @@
   font-style: normal;
   font-weight: 400;
   font-display: swap;
-  src: url("/vendor/jetbrains-mono-regular.woff2?v=__VPS_BUILD_TAG__") format("woff2");
+  src: url("/vendor/jetbrains-mono-regular.woff2?v=__VPS_VENDOR_TAG__") format("woff2");
 }
 
 @font-face {
@@ -11,7 +11,7 @@
   font-style: normal;
   font-weight: 600;
   font-display: swap;
-  src: url("/vendor/jetbrains-mono-semibold.woff2?v=__VPS_BUILD_TAG__") format("woff2");
+  src: url("/vendor/jetbrains-mono-semibold.woff2?v=__VPS_VENDOR_TAG__") format("woff2");
 }
 
 :root {
