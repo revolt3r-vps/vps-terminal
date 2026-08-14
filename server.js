@@ -160,8 +160,8 @@ const defaultSnippetPresets = [
     run: true
   }
 ];
-const maximumPasteImageBytes = 5 * 1024 * 1024;
-const maximumPasteImageFiles = 40;
+const maximumPasteImageBytes = 10 * 1024 * 1024;
+const maximumPasteImageFiles = 200;
 /**
  * Files roots for the mobile file browser.
  * Defaults: home ($HOME), projects, paste — all under the process user.
@@ -257,8 +257,8 @@ const maximumFsTerminalPathLength = 4096;
 const safeUploadFileNamePattern =
   /^[A-Za-z0-9][A-Za-z0-9._+-]{0,179}$/;
 // Files must live until the AI CLI reads them on send (usually seconds).
-// 30 minutes covers draft/edit without leaving clutter forever.
-const pasteImageTtlMs = 30 * 60 * 1000;
+// 24 hours covers a whole working session without leaving clutter forever.
+const pasteImageTtlMs = 24 * 60 * 60 * 1000;
 const pasteImagePruneIntervalMs = 10 * 60 * 1000;
 const maximumClientDebugEntries = 20;
 const maximumClientDebugLogBytes = 256 * 1024;
@@ -819,18 +819,66 @@ async function resolveFsTerminalPath(sessionName, rawPath) {
   return resolveFsAbsolutePath(candidate);
 }
 
+/**
+ * Rewrite an uploaded name into the allowed set instead of refusing it.
+ *
+ * Phones hand over names with spaces, brackets, and accents. Refusing the
+ * upload for that is a dead end: the file does not exist yet, so there is
+ * nothing for the user to rename. Rewrite it, and let the caller report the
+ * name that was actually written.
+ */
 function safeUploadFileName(name) {
   if (typeof name !== 'string') {
     return null;
   }
   const base = path.basename(name.trim());
-  if (!base || base.length > maximumFsFileNameLength) {
+  if (!base) {
     return null;
   }
-  if (!safeUploadFileNamePattern.test(base)) {
-    return null;
-  }
-  return base;
+  // Drop accents rather than replacing them, so "résumé" stays "resume"
+  // instead of becoming "r-sum-".
+  const flattened = base.normalize('NFD').replace(/\p{M}+/gu, '');
+  // `dot > 0` keeps a leading-dot name whole, so ".bashrc" becomes "bashrc"
+  // rather than an empty stem with a ".bashrc" extension.
+  const dot = flattened.lastIndexOf('.');
+  const hasExtension =
+    dot > 0 && /^\.[A-Za-z0-9]{1,8}$/.test(flattened.slice(dot));
+  const extension = hasExtension ? flattened.slice(dot).toLowerCase() : '';
+  const stem = clampUploadStem(
+    hasExtension ? flattened.slice(0, dot) : flattened,
+    maximumFsFileNameLength - extension.length
+  );
+  const safe = `${stem}${extension}`;
+  // The rewrite is only worth trusting if it lands inside the same rule the
+  // old check enforced, so hold it to that rule rather than assuming.
+  return safeUploadFileNamePattern.test(safe) ? safe : null;
+}
+
+function clampUploadStem(rawStem, room) {
+  const stem = rawStem
+    .replace(/[^A-Za-z0-9._+-]+/g, '-')
+    .replace(/-{2,}/g, '-')
+    .replace(/^[^A-Za-z0-9]+/, '')
+    .replace(/[-._+]+$/, '')
+    .slice(0, Math.max(room, 1))
+    // Slicing can re-expose a separator that was in the middle before.
+    .replace(/[-._+]+$/, '');
+  return stem || 'upload';
+}
+
+/**
+ * Insert `-2`, `-3`, ... before the extension, staying inside the length cap.
+ */
+function uploadNameWithSuffix(name, attempt) {
+  const dot = name.lastIndexOf('.');
+  const hasExtension = dot > 0;
+  const extension = hasExtension ? name.slice(dot) : '';
+  const suffix = `-${attempt}`;
+  const stem = clampUploadStem(
+    hasExtension ? name.slice(0, dot) : name,
+    maximumFsFileNameLength - extension.length - suffix.length
+  );
+  return `${stem}${suffix}${extension}`;
 }
 
 function isProbablyTextBuffer(buffer) {
@@ -996,24 +1044,41 @@ async function writeFsUpload(rootId, relativeDir, fileName, buffer) {
   }
   const safeName = safeUploadFileName(fileName);
   if (!safeName) {
-    const error = new Error(
-      'filename must be 1-180 chars: letters, numbers, . _ + -'
-    );
+    const error = new Error('filename is empty after removing unsafe characters');
     error.statusCode = 400;
     throw error;
   }
+  const requested =
+    typeof fileName === 'string' ? path.basename(fileName.trim()) : '';
+  const renamed = safeName !== requested;
   const dirRel = normalizeRelativePath(relativeDir);
-  const targetRel = dirRel ? `${dirRel}/${safeName}` : safeName;
-  const resolved = await resolveJailedPath(root.rootPath, targetRel, {
+  const toRelative = (name) => (dirRel ? `${dirRel}/${name}` : name);
+
+  // Overwriting a name the user typed is expected. Overwriting one this code
+  // invented is not: two different uploads can rewrite to the same name, and
+  // the user never sees the collision coming. Only step aside when renamed.
+  let finalName = safeName;
+  let resolved = await resolveJailedPath(root.rootPath, toRelative(finalName), {
     mustExist: false
   });
-  if (resolved.exists) {
+  for (let attempt = 2; renamed && resolved.exists && attempt <= 99; attempt += 1) {
     if (resolved.stats.isDirectory()) {
-      const error = new Error('path is a directory');
-      error.statusCode = 409;
-      throw error;
+      // Fall through to the directory error below rather than picking a name
+      // beside a folder the caller did not ask about.
+      break;
     }
+    finalName = uploadNameWithSuffix(safeName, attempt);
+    resolved = await resolveJailedPath(root.rootPath, toRelative(finalName), {
+      mustExist: false
+    });
   }
+
+  if (resolved.exists && resolved.stats.isDirectory()) {
+    const error = new Error('path is a directory');
+    error.statusCode = 409;
+    throw error;
+  }
+  const targetRel = toRelative(finalName);
   await fs.promises.writeFile(resolved.absolutePath, buffer, {
     mode: 0o600,
     flag: 'w'
@@ -1021,6 +1086,8 @@ async function writeFsUpload(rootId, relativeDir, fileName, buffer) {
   return {
     root: root.id,
     path: targetRel,
+    name: finalName,
+    renamed: finalName !== requested,
     displayPath: toDisplayPath(rootDisplayPrefix(root), targetRel),
     size: buffer.length
   };
@@ -1820,7 +1887,7 @@ const server = http.createServer(async (request, response) => {
         buffer = await readBinaryBody(request, maximumPasteImageBytes);
       } catch (error) {
         if (error.statusCode === 413 || /too large/i.test(error.message)) {
-          sendError(response, 413, 'image is too large (max 5 MB)');
+          sendError(response, 413, 'image is too large (max 10 MB)');
           return;
         }
         throw error;

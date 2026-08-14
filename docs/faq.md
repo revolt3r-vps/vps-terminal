@@ -65,7 +65,9 @@ screenshots come through — on desktop the async clipboard API often refuses to
 hand over an image, which would otherwise look like an empty clipboard. Text is
 pasted through the terminal's bracketed-paste path, so a multi-line paste stays
 one block. A copied image is uploaded to `~/paste/` and pasted as a path, which
-is how you hand a screenshot to a program running in the session. Shift+Insert
+is how you hand a screenshot to a program running in the session. Pasted images
+are kept for 24 hours, up to 200 files and 10 MB each; the server deletes the
+rest, oldest first. Shift+Insert
 and the footer Paste button read the clipboard directly instead, which is the
 path that can prompt for permission. A literal `^V` is still available from the
 on-screen Ctrl key.

@@ -250,7 +250,7 @@ const maximumKeyTileHeight = 60;
  */
 let lastKeyTileHeight = 0;
 const preferencesSyncDebounceMs = 650;
-const maximumPasteImageBytes = 5 * 1024 * 1024;
+const maximumPasteImageBytes = 10 * 1024 * 1024;
 const defaultTerminalFontSize = 13;
 const minimumTerminalFontSize = 9;
 const maximumTerminalFontSize = 22;
@@ -4162,11 +4162,11 @@ function openDeviceUploadPicker() {
 /**
  * Name it ourselves rather than trusting the device's.
  *
- * safeUploadFileName on the server rejects anything outside
- * `letters, numbers, . _ + -`, so an iOS "Photo Jun 3, 2025.jpeg" is a 400; and
- * writeFsUpload writes with flag 'w', so two photos both called IMG_0001.jpg
- * would overwrite each other. A random token is the same scheme the clipboard
- * image path already uses, and it stays short enough to read at a prompt.
+ * The server rewrites unsafe names now, so an iOS "Photo Jun 3, 2025.jpeg" no
+ * longer fails — but it is already safe as "IMG_0001.jpg", so it is not
+ * rewritten and writeFsUpload's flag 'w' would let the next photo of that name
+ * replace it. A random token avoids that, and it is the same scheme the
+ * clipboard image path uses, short enough to read at a prompt.
  */
 function deviceUploadFileName(file) {
   const match = /\.([A-Za-z0-9]{1,8})$/.exec(file.name || '');
@@ -11230,7 +11230,7 @@ async function uploadFilesSelected(fileList) {
       filename: file.name
     });
     let finishing = false;
-    await uploadFileWithProgress(
+    const saved = await uploadFileWithProgress(
       `/api/fs/upload?${query.toString()}`,
       file,
       (fraction) => {
@@ -11245,9 +11245,15 @@ async function uploadFilesSelected(fileList) {
         }
       }
     );
-    setStatus(`Uploaded ${file.name}`);
+    // The server rewrites names it cannot store, so the file on disk may not
+    // be the one that was picked. Report the name that was actually written,
+    // and highlight that one in the listing.
+    const savedName = saved?.name || file.name;
+    setStatus(
+      saved?.renamed ? `Uploaded as ${savedName}` : `Uploaded ${savedName}`
+    );
     await refreshFilesListingAfterMutation(uploadRootId, uploadPath, {
-      name: file.name
+      name: savedName
     });
   } catch (error) {
     setStatus(error.message || 'Upload failed', { sticky: true });
@@ -14340,7 +14346,7 @@ async function uploadPasteImage(blob) {
     throw new Error('empty image');
   }
   if (blob.size > maximumPasteImageBytes) {
-    throw new Error('image is too large (max 5 MB)');
+    throw new Error('image is too large (max 10 MB)');
   }
   const contentType =
     blob.type && blob.type.startsWith('image/') ? blob.type : 'image/png';
