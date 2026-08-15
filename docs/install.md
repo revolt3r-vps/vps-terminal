@@ -97,16 +97,38 @@ sudo apt-get install -y \
   tmux
 ```
 
-### Node.js 20 (recommended)
+### Node.js 24 LTS (recommended)
 
-NodeSource example for Ubuntu (check [NodeSource](https://github.com/nodesource/distributions)
-if this ages out):
+Ubuntu 24.04 ships Node 18, which reached end of life in April 2025. Install a
+current release from NodeSource instead. Check
+[NodeSource](https://github.com/nodesource/distributions) if this ages out.
+
+Add the key and the repository explicitly. NodeSource also publishes a
+`curl … | sudo bash` one-liner; the steps below do the same work while letting
+you see the key before root trusts it to sign packages.
 
 ```bash
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
+  -o /tmp/nodesource.key
+gpg --show-keys --with-fingerprint /tmp/nodesource.key
+# Confirm the fingerprint against NodeSource's documentation before continuing.
+
+sudo gpg --dearmor -o /usr/share/keyrings/nodesource.gpg /tmp/nodesource.key
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/nodesource.gpg] https://deb.nodesource.com/node_24.x nodistro main" \
+  | sudo tee /etc/apt/sources.list.d/nodesource.list
+
+sudo apt-get update
 sudo apt-get install -y nodejs
-node -v    # should be v18+ (v20 is fine)
+node -v    # v24.x
 npm -v
+```
+
+This replaces Ubuntu's `nodejs` and `npm` packages along with the `node-*`
+library packages that depend on them. `node-pty` is a native addon, so rebuild
+it after any Node major upgrade:
+
+```bash
+npm ci
 ```
 
 ### systemd user services (so the app restarts after reboot)

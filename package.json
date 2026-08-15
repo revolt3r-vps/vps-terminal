@@ -15,7 +15,7 @@
   "homepage": "https://github.com/revolt3r-vps/vps-terminal#readme",
   "scripts": {
     "start": "node server.js",
-    "check": "node --check server.js && node --check diagnostics.js && node --check fs-jail.js && node --check preferences-store.js && node --check public/app.js && node --check public/viewport-init.js",
+    "check": "bash scripts/check.sh --syntax",
     "vendor": "bash scripts/vendor-assets.sh",
     "test": "bash scripts/check.sh",
     "qa:files-delete": "node qa/files-delete.js"
@@ -45,5 +45,8 @@
   },
   "engines": {
     "node": ">=18"
+  },
+  "devDependencies": {
+    "playwright-core": "1.62.1"
   }
 }

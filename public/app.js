@@ -11294,6 +11294,90 @@ function markAppLoaded() {
   }
 }
 
+// The Debug tab is hidden until asked for.
+//
+// It holds the gesture log, which is a fault-reporting tool, not a feature. On a
+// six-tab strip it was one wrong thumb away at all times and meant nothing to
+// anyone not currently reporting a drag bug. Tapping the build line five times
+// reveals it, the way Android's developer options work — the gesture is
+// familiar, needs no menu of its own, and is impossible to hit by accident.
+//
+// Five more taps hides it again. Android has no way back; this does, because
+// the only way to undo it otherwise would be clearing site data.
+const debugUnlockStorageKey = 'vps-terminal.debug.unlocked';
+const debugUnlockTapsRequired = 5;
+// A tap that arrives later than this starts the count again, which is what
+// "in a row" means and what stops five taps spread over a week counting.
+const debugUnlockTapWindowMs = 3000;
+
+let debugUnlockTaps = 0;
+let debugUnlockLastTapAt = 0;
+
+function debugTabUnlocked() {
+  try {
+    return window.localStorage.getItem(debugUnlockStorageKey) === '1';
+  } catch {
+    // Storage can be denied. Locked is the safer answer, and the tab is still
+    // reachable by tapping again this session.
+    return false;
+  }
+}
+
+function applyDebugTabVisibility() {
+  const tab = document.querySelector(
+    '#key-panel-tabs [data-panel-tab="debug"]'
+  );
+  if (!tab) {
+    return;
+  }
+  const unlocked = debugTabUnlocked();
+  // Hidden, not removed: qa/key-reorder.js and tests/test-vps-terminal both
+  // assert the tab ships, and removing it would also throw away the markup that
+  // has to come back when it is unlocked.
+  tab.hidden = !unlocked;
+  if (!unlocked && keyPanelTab === 'debug') {
+    // Locking while the tab is open would otherwise leave the panel showing a
+    // page whose tab no longer exists.
+    setKeyPanelTab(keyPanelTabs[0]);
+  }
+}
+
+function registerDebugUnlockTap() {
+  const now = Date.now();
+  debugUnlockTaps =
+    now - debugUnlockLastTapAt > debugUnlockTapWindowMs ? 1 : debugUnlockTaps + 1;
+  debugUnlockLastTapAt = now;
+
+  if (debugUnlockTaps < debugUnlockTapsRequired) {
+    // Silent for the first two, so an ordinary double tap says nothing. The
+    // countdown only starts once the taps look deliberate.
+    const remaining = debugUnlockTapsRequired - debugUnlockTaps;
+    if (remaining <= 2) {
+      setStatus(
+        `${remaining} more tap${remaining === 1 ? '' : 's'} to ${
+          debugTabUnlocked() ? 'hide' : 'show'
+        } the Debug tab`
+      );
+    }
+    return;
+  }
+
+  debugUnlockTaps = 0;
+  debugUnlockLastTapAt = 0;
+  const nextUnlocked = !debugTabUnlocked();
+  try {
+    if (nextUnlocked) {
+      window.localStorage.setItem(debugUnlockStorageKey, '1');
+    } else {
+      window.localStorage.removeItem(debugUnlockStorageKey);
+    }
+  } catch {
+    // The tab still changes for this session; it just will not survive a reload.
+  }
+  applyDebugTabVisibility();
+  setStatus(nextUnlocked ? 'Debug tab shown' : 'Debug tab hidden');
+}
+
 function renderAppBuildId() {
   const target = document.querySelector('#app-build-id');
   if (!target) {
@@ -11310,6 +11394,16 @@ function renderAppBuildId() {
   }
   target.hidden = false;
   target.textContent = `Build ${build} — reload to pick up a new one.`;
+  if (target.dataset.tapBound !== '1') {
+    target.dataset.tapBound = '1';
+    // Not a <button>: it is a line of text, and announcing it as a control
+    // would advertise the thing it is meant to keep out of the way.
+    target.addEventListener('click', registerDebugUnlockTap);
+    // Repeated taps on text otherwise start selecting it, which on a phone
+    // raises the selection handles over the panel.
+    target.style.userSelect = 'none';
+    target.style.webkitUserSelect = 'none';
+  }
 }
 
 // Built when the panel renders, copied verbatim by the Copy button. Copying reads
@@ -13940,16 +14034,20 @@ function openTerminalUrlLink(url) {
 
 // xterm asks per buffer row and expects 1-based absolute buffer coordinates,
 // which is the space `collectWrappedTerminalLinkLine` already works in.
-function provideTerminalLinks(bufferLineNumber, callback) {
+/**
+ * Read buffer rows in the shape `collectWrappedTerminalLinkLine` expects.
+ *
+ * One cell object is reused for every column of every row, and a column map is
+ * built only if something in that row is actually resolved to buffer
+ * coordinates.
+ */
+function terminalLinkLineReader() {
   const buffer = terminal?.buffer?.active;
   if (!buffer) {
-    callback(undefined);
-    return;
+    return null;
   }
-  // One cell object reused for every column of every row, and a column map built
-  // only if something in that row is actually resolved to buffer coordinates.
   const reusableCell = buffer.getNullCell?.();
-  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, (index) => {
+  return (index) => {
     const line = buffer.getLine(index);
     if (!line) {
       return undefined;
@@ -13963,7 +14061,77 @@ function provideTerminalLinks(bufferLineNumber, callback) {
         return columnMap;
       }
     };
-  });
+  };
+}
+
+/**
+ * Do two buffer ranges share any cell?
+ *
+ * `Buffer` in the name on purpose. `terminalLinkRangesOverlap` above already
+ * exists and compares string index ranges, which is how a path match is stopped
+ * from swallowing a URL's tail. These are {x, y} cell ranges. Reusing that name
+ * silently replaced it — function declarations hoist and the last one wins — and
+ * `/etc/hosts` quietly stopped being linkified at all.
+ *
+ * Overlap, not equality. The range xterm hands back is where the *old* link was,
+ * and the click landed somewhere inside it; the link now occupying those cells
+ * rarely starts and ends on the same columns. Requiring an exact match meant a
+ * click on a visible link did nothing at all, which is quieter than opening the
+ * wrong file but still wrong.
+ */
+function terminalLinkBufferRangesOverlap(one, other) {
+  if (!one || !other) {
+    return false;
+  }
+  // (row, column) compared as a tuple, so wrapped links spanning rows work.
+  const before = (a, b) => a.y < b.y || (a.y === b.y && a.x < b.x);
+  return !before(one.end, other.start) && !before(other.end, one.start);
+}
+
+/**
+ * Re-read whatever link occupies a range, from the buffer as it is now.
+ *
+ * xterm caches the link objects it was handed and does not re-ask when the
+ * row's content changes underneath them. The cached object keeps the text it
+ * was built with, so after `clear` reused row 1 for a different command,
+ * Ctrl+clicking the path on screen opened the path that used to be there —
+ * silently, and with no error. Two commands that each print one path are enough
+ * to hit it.
+ *
+ * So the captured text is never trusted at activation time. This resolves the
+ * range against the live buffer instead, and returns null when nothing is
+ * linkable there any more. Doing nothing is the right answer then: the thing
+ * that was clicked is gone.
+ */
+function terminalLinkAtRange(range) {
+  const readLine = terminalLinkLineReader();
+  if (!readLine || !range?.start) {
+    return null;
+  }
+  const wrappedLine = collectWrappedTerminalLinkLine(range.start.y, readLine);
+  if (!wrappedLine) {
+    return null;
+  }
+  for (const match of extractTerminalLinks(wrappedLine.text)) {
+    if (
+      terminalLinkBufferRangesOverlap(
+        resolveWrappedTerminalLinkRange(wrappedLine, match),
+        range
+      )
+    ) {
+      return match;
+    }
+  }
+  return null;
+}
+
+function provideTerminalLinks(bufferLineNumber, callback) {
+  const readLine = terminalLinkLineReader();
+  if (!readLine) {
+    callback(undefined);
+    return;
+  }
+  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, readLine);
   if (!wrappedLine) {
     callback(undefined);
     return;
@@ -13978,7 +14146,15 @@ function provideTerminalLinks(bufferLineNumber, callback) {
         pointerCursor: terminalLinkModifierHeld,
         underline: terminalLinkModifierHeld
       },
-      activate: (event, text) => activateTerminalLink(event, text, match.kind),
+      // Re-derived, not the text xterm hands back: that is the cached value and
+      // may name a path that has since scrolled away. See terminalLinkAtRange.
+      activate: (event) => {
+        const current = terminalLinkAtRange(link.range);
+        if (!current) {
+          return;
+        }
+        activateTerminalLink(event, current.text, current.kind);
+      },
       hover: (event) => {
         hoveredTerminalLink = link;
         // This runs before xterm installs its accessors, so writing decorations
@@ -15581,6 +15757,10 @@ applyTerminalTheme(terminalThemeName, { persist: false });
 resetPreferencesIfSchemaChanged();
 loadKeySet();
 keyPanelTab = loadKeyPanelTab();
+// Before the panel is ever shown, so the tab strip never flashes six tabs on a
+// device that has not unlocked the sixth. Also corrects a stored `debug` tab
+// from a build that shipped it visible.
+applyDebugTabVisibility();
 renderFooterPins();
 closeFooterDrawer();
 loadFilesNav();
