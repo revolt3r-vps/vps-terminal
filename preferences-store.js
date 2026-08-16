@@ -109,7 +109,12 @@ function sanitizePreferences(value) {
     ),
     theme,
     sessionThemes: sanitizeRecord(value.sessionThemes, themeNamePattern),
-    bookmarks: sanitizeBookmarks(value.bookmarks)
+    bookmarks: sanitizeBookmarks(value.bookmarks),
+    // Games view. Server side rather than in the browser, so it follows the
+    // person to any device and turning it on leaves every other account alone.
+    // Absent or anything but true reads as off, which is what a record written
+    // before this field existed should mean.
+    gamesView: value.gamesView === true
   };
 }
 

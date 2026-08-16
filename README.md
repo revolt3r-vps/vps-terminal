@@ -102,6 +102,9 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - Hardware keyboard support when focus is on chrome
 - Files workspace with jailed Locations, preview, rename, new folders, and
   folder-scoped Terminal/Codex/Grok/Claude session launch
+- Games view: an optional per-login setting that lists game sessions only, with
+  a Play link and a feedback box for each. It changes what the app shows, not
+  what the shell can do
 - Installable PWA
 
 ---

@@ -548,6 +548,44 @@
       </p>
     </dialog>
 
+    <!-- Feedback on a game goes into the game's own session, where the agent
+         that can act on it is already running. A modal for the same reason
+         #input-dialog is one: the phone keyboard takes the panel's space, and
+         the browser scrolls a modal clear of the keyboard. -->
+    <dialog
+      id="feedback-dialog"
+      aria-labelledby="feedback-dialog-title"
+      tabindex="-1"
+    >
+      <div class="settings-heading">
+        <strong id="feedback-dialog-title">Send feedback</strong>
+        <button
+          id="feedback-close"
+          class="icon-button"
+          type="button"
+          title="Close"
+          aria-label="Close feedback"
+        >
+          ×
+        </button>
+      </div>
+      <p id="feedback-target" class="settings-hint"></p>
+      <textarea
+        id="feedback-text"
+        rows="4"
+        maxlength="1000"
+        spellcheck="true"
+        placeholder="What happened, and what you expected"
+        aria-label="Your feedback"
+      ></textarea>
+      <p class="settings-hint">
+        This types your note into the game's session and presses Enter.
+      </p>
+      <div class="settings-sync-actions">
+        <button id="feedback-send" type="button">Send</button>
+      </div>
+    </dialog>
+
     <footer aria-label="App shortcuts">
       <!-- Term mode footer: drawer lives in #footer-main so landscape can
            swap it into the middle rail (replacing paste/keys/snips scroll). -->
@@ -702,6 +740,36 @@
             hidden
           >
             <p class="key-panel-group-label">App</p>
+            <!-- Hidden unless the server reports a games root, because a toggle
+                 that changes nothing is worse than no toggle. -->
+            <section
+              id="games-view-section"
+              class="settings-sync"
+              aria-labelledby="games-view-title"
+              hidden
+            >
+              <div class="settings-sync-heading">
+                <strong id="games-view-title">Games view</strong>
+              </div>
+              <p class="settings-hint">
+                Lists your game sessions only, opens Files in the games folder,
+                and puts Play and Send feedback on each game. It changes what
+                this app shows you. The shell keeps every command it had.
+              </p>
+              <!-- A switch, not a checkbox: no field may live in this panel,
+                   because the panel stands where the keyboard stands and a
+                   field there asks for the very thing it replaced. -->
+              <button
+                id="games-view-toggle"
+                class="settings-switch"
+                type="button"
+                role="switch"
+                aria-checked="false"
+              >
+                <span class="settings-switch-track" aria-hidden="true"></span>
+                <span>Use Games view</span>
+              </button>
+            </section>
             <section class="settings-sync" aria-labelledby="preferences-sync-title">
               <div class="settings-sync-heading">
                 <strong id="preferences-sync-title">Shared setup</strong>

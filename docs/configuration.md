@@ -33,6 +33,8 @@ Missing `VPS_TERMINAL_ORIGIN` outside `LOCAL_DEV` causes startup failure.
 | `VPS_TERMINAL_STATE_DIR` | app directory | Preferences, snippets, client debug log |
 | `VPS_TERMINAL_FS_HOME` | enabled | Set `0` to disable home FS root |
 | `VPS_TERMINAL_FS_EXTRA` | unset | `id:label:path[:ro][,…]` extra FS roots |
+| `VPS_TERMINAL_GAMES_ROOT` | `$PROJECT_ROOT/games` | Games root; enables the Games view setting |
+| `VPS_TERMINAL_GAME_URL` | unset | Play link template, e.g. `https://{slug}.play.example.com/` |
 | `VPS_TERMINAL_DEV_EMAIL` | `dev@localhost.test` | Identity in LOCAL_DEV only |
 | `VPS_TERMINAL_CLIENT_DEBUG` | disabled | Set `1` for bounded metadata-only client diagnostics |
 | `HOME` | process home | State under `~/.local/share/vps-terminal` |
@@ -50,6 +52,29 @@ root catalog returned by the server for that installation:
   project and paste locations.
 - `VPS_TERMINAL_FS_EXTRA=id:label:path[:ro]` adds an installation-specific
   labeled root; append `:ro` for read-only access.
+
+## Games view
+
+Each directory under `VPS_TERMINAL_GAMES_ROOT` is a game, and the directory
+name is its slug. When that root exists at startup, `/api/config` reports
+`gamesView: true` and each account gets a **Games view** setting under Menu →
+App. It is stored per login, so it follows one person to any browser and
+changes nothing for anyone else.
+
+With it on, the app lists game sessions only, offers the `games` root alone in
+Files, drops the host diagnostics from the snippet library, and puts **Play**
+and **Send feedback** on each game. Play needs `VPS_TERMINAL_GAME_URL`; without
+it the rest of the view still works and no Play link appears.
+
+A session belongs to a game when its working directory — the session's own or
+its active pane's — is inside that game's directory. A session named
+`game-<slug>` counts too, which keeps a game listed while its pane sits
+somewhere else. A session named after a directory that is not there is not a
+game.
+
+**This is a view, not a boundary.** The shell inside it is unchanged: every
+command, every path, and every agent still works exactly as before. Anything
+that needs a real limit needs a separate Unix user running its own instance.
 
 These Locations are filesystem security boundaries, not client-side
 bookmarks. The UI may navigate and remember paths inside them, but it cannot

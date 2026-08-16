@@ -100,6 +100,13 @@ const commandPaletteInput = document.querySelector('#command-palette-input');
 const commandPaletteList = document.querySelector('#command-palette-list');
 const commandPaletteEmpty = document.querySelector('#command-palette-empty');
 const commandPaletteClose = document.querySelector('#command-palette-close');
+const gamesViewSection = document.querySelector('#games-view-section');
+const gamesViewToggle = document.querySelector('#games-view-toggle');
+const feedbackDialog = document.querySelector('#feedback-dialog');
+const feedbackTargetElement = document.querySelector('#feedback-target');
+const feedbackTextElement = document.querySelector('#feedback-text');
+const feedbackSendButton = document.querySelector('#feedback-send');
+const feedbackCloseButton = document.querySelector('#feedback-close');
 const connectionStateLabelElement = document.querySelector(
   '#connection-state-label'
 );
@@ -926,6 +933,87 @@ const terminalThemes = {
 };
 let sessions = [];
 let activeSession = null;
+// Games view. `available` comes from GET /api/config and only says the server
+// has a games root; `enabled` is the per-account setting and is the one that
+// changes what is shown.
+let gamesViewAvailable = false;
+let gamesViewEnabled = false;
+
+/**
+ * The Games view rules.
+ *
+ * Written free of DOM and browser globals so the block can be sliced out of the
+ * shipped bundle and tested, the same way the palette and keybinding blocks are.
+ * Every rule is a filter over a list the app already has: Games view decides
+ * what the app shows, and nothing here restricts what the shell can do.
+ */
+function sessionIsGame(session) {
+  return Boolean(
+    session &&
+      session.game &&
+      typeof session.game.slug === 'string' &&
+      session.game.slug.length > 0
+  );
+}
+
+function gamesViewSessions(list, enabled) {
+  const all = Array.isArray(list) ? list : [];
+  return enabled ? all.filter(sessionIsGame) : all;
+}
+
+/**
+ * Files offers the games root alone. An install with no games root falls back
+ * to every root rather than to none: an empty Files pane looks broken, and the
+ * setting is meant to narrow a list, not empty it.
+ */
+function gamesViewRoots(roots, enabled) {
+  const all = Array.isArray(roots) ? roots : [];
+  if (!enabled) {
+    return all;
+  }
+  const games = all.filter((root) => root && root.id === 'games');
+  return games.length > 0 ? games : all;
+}
+
+// Host diagnostics. Real work for whoever runs the box, noise for whoever came
+// to play a game and write down what broke.
+const gamesViewHiddenSnippetIds = [
+  'uptime',
+  'disk',
+  'mem',
+  'cpu',
+  'tmux-ls',
+  'pastes'
+];
+
+function gamesViewSnippets(list, enabled) {
+  const all = Array.isArray(list) ? list : [];
+  return enabled
+    ? all.filter((snippet) => !gamesViewHiddenSnippetIds.includes(snippet?.id))
+    : all;
+}
+
+/**
+ * A feedback note as one line of terminal input.
+ *
+ * Newlines are collapsed to spaces because the note is typed into a running
+ * agent, where a newline submits: a four-line note would arrive as four
+ * prompts, the first three of them incomplete. Control characters go for the
+ * same reason an escape sequence has no business being replayed into a pane.
+ */
+function gameFeedbackLine(text) {
+  if (typeof text !== 'string') {
+    return '';
+  }
+  return text
+    // Control characters, as escapes so this file stays text.
+    .replace(/[\u0000-\u001f\u007f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 1000);
+}
+// End of the pure Games view block.
+
 let terminal = null;
 let terminalInitialization = null;
 let fitAddon = null;
@@ -4003,7 +4091,11 @@ function openCustomKeyDialog() {
  */
 function renderKeyPanelSnippets(page) {
   const editing = keyPanelSnippetsMode === 'edit';
-  if (snippetsList.length === 0) {
+  // Games view hides the host diagnostics. The snippets themselves are shared
+  // by the whole install and are not touched, so turning the setting off brings
+  // them straight back.
+  const listedSnippets = gamesViewSnippets(snippetsList, gamesViewEnabled);
+  if (listedSnippets.length === 0) {
     keyPanelSnippetsMode = 'list';
     renderKeyPanelPlaceholder(
       page,
@@ -4027,7 +4119,7 @@ function renderKeyPanelSnippets(page) {
     list.setAttribute('role', 'list');
     list.setAttribute('aria-label', 'Snippets, editing');
   }
-  for (const snippet of snippetsList) {
+  for (const snippet of listedSnippets) {
     list.append(createKeyPanelSnippetRow(snippet, editing));
   }
   if (!editing) {
@@ -4750,6 +4842,8 @@ async function loadAppConfig() {
     if (shouldFlushClientDebug) {
       shipClientDebugEntries(clientDebugEntries.slice(-20));
     }
+    gamesViewAvailable = cfg?.gamesView === true;
+    refreshGamesViewUi();
     if (cfg && typeof cfg.appName === 'string' && cfg.appName.trim()) {
       appDisplayName = cfg.appName.trim().slice(0, 64);
       document.title = appDisplayName;
@@ -6435,9 +6529,32 @@ function commandPaletteCommands() {
       run: () => openTerminalSettings()
     }
   ];
+  // The two game actions, for the keyboard route into what the session rows
+  // carry as buttons.
+  const activeGame = sessions.find(
+    (session) => session.name === activeSession && sessionIsGame(session)
+  );
+  if (gamesViewEnabled && activeGame) {
+    if (activeGame.game.url) {
+      commands.push({
+        id: 'game.play',
+        label: `Play ${activeGame.game.slug}`,
+        keywords: 'game open browser play',
+        run: () => {
+          window.open(activeGame.game.url, '_blank', 'noopener,noreferrer');
+        }
+      });
+    }
+    commands.push({
+      id: 'game.feedback',
+      label: 'Send feedback',
+      keywords: 'game note report bug',
+      run: () => void openFeedbackDialog(activeGame.name)
+    });
+  }
   // One entry per other session, so switching is a single action rather than
   // opening the picker and then choosing.
-  for (const session of sessions) {
+  for (const session of visibleSessions()) {
     if (session.name === activeSession) {
       continue;
     }
@@ -8636,7 +8753,8 @@ function durablePreferencesSnapshot() {
     sessionProfiles: {},
     theme: rememberedTerminalThemeName(),
     sessionThemes: loadSessionThemes(),
-    bookmarks: loadFilesBookmarks()
+    bookmarks: loadFilesBookmarks(),
+    gamesView: gamesViewEnabled
   };
 }
 
@@ -8646,7 +8764,8 @@ function freshPreferencesSnapshot() {
     sessionProfiles: {},
     theme: 'matrix',
     sessionThemes: {},
-    bookmarks: []
+    bookmarks: [],
+    gamesView: false
   };
 }
 
@@ -8793,6 +8912,7 @@ function applySharedPreferences(preferences) {
     saveFilesBookmarks(
       Array.isArray(preferences.bookmarks) ? preferences.bookmarks : []
     );
+    gamesViewEnabled = preferences.gamesView === true;
     const cleanSessionThemes = saveSessionThemes(preferences.sessionThemes);
     const nextTheme =
       (activeSession && cleanSessionThemes[activeSession]) ||
@@ -8801,6 +8921,7 @@ function applySharedPreferences(preferences) {
   } finally {
     preferencesApplying = false;
   }
+  refreshGamesViewUi();
   renderSessions();
   refreshKeysUi();
   renderFilesRoots();
@@ -9947,14 +10068,16 @@ function renderFilesRoots() {
     return;
   }
   filesRootsElement.replaceChildren();
-  const roots =
+  const roots = gamesViewRoots(
     filesRootsCatalog.length > 0
       ? filesRootsCatalog
       : [
           { id: 'home', label: 'home' },
           { id: 'projects', label: 'projects' },
           { id: 'paste', label: 'paste' }
-        ];
+        ],
+    gamesViewEnabled
+  );
   if (filesLocationSelect) {
     filesLocationSelect.replaceChildren();
     for (const root of roots) {
@@ -11586,9 +11709,131 @@ function installSessionRenameLongPress(button, sessionName) {
   });
 }
 
+/** The session list as the picker, the palette, and the swipe deck see it. */
+function visibleSessions() {
+  return gamesViewSessions(sessions, gamesViewEnabled);
+}
+
+/**
+ * Put Games view on screen wherever it is not already re-rendered.
+ *
+ * Called after the shared setup is applied and whenever the toggle moves, so
+ * the two paths into the setting — this browser, or another one that synced —
+ * leave the app in the same state.
+ */
+function refreshGamesViewUi() {
+  if (gamesViewSection) {
+    gamesViewSection.hidden = !gamesViewAvailable;
+  }
+  if (gamesViewToggle) {
+    gamesViewToggle.setAttribute('aria-checked', String(gamesViewEnabled));
+  }
+  document.body.classList.toggle('games-view', gamesViewEnabled);
+  // Files may be standing in a root that is no longer offered, which would
+  // leave the location control showing a place with no way back to it.
+  const offered = gamesViewRoots(filesRootsCatalog, gamesViewEnabled);
+  if (offered.length > 0 && !offered.some((root) => root.id === filesRootId)) {
+    switchFilesRoot(offered[0].id);
+  }
+}
+
+function setGamesViewEnabled(value) {
+  const next = value === true;
+  if (next === gamesViewEnabled) {
+    return;
+  }
+  gamesViewEnabled = next;
+  noteDurablePreferencesChange();
+  refreshGamesViewUi();
+  renderSessions();
+  renderFilesRoots();
+  // Turning it on while a non-game session is attached would leave a terminal
+  // on screen that the picker no longer lists. Move to a game if there is one;
+  // if there is none, the session stays, because dropping someone into an empty
+  // app is worse than showing them the session they were already reading.
+  const visible = visibleSessions();
+  if (
+    gamesViewEnabled &&
+    activeSession &&
+    visible.length > 0 &&
+    !visible.some((session) => session.name === activeSession)
+  ) {
+    void connect(visible[0].name);
+  }
+}
+
+/**
+ * Feedback goes to one session, named when the dialog opens.
+ *
+ * Held here rather than read from activeSession at send time: the send is a few
+ * seconds after the tap, and a poll that reconnects in between must not send
+ * someone's note about one game into another.
+ */
+let feedbackTargetSession = null;
+
+async function openFeedbackDialog(sessionName) {
+  const session = sessions.find((entry) => entry.name === sessionName);
+  if (!session) {
+    setStatus('That session is gone');
+    return;
+  }
+  feedbackTargetSession = sessionName;
+  if (activeSession !== sessionName) {
+    // The note is typed into the session's own pane, so it has to be the
+    // attached one before Send can do anything.
+    await connect(sessionName);
+  }
+  if (feedbackTargetElement) {
+    feedbackTargetElement.textContent = `Goes to ${
+      session.game?.slug || sessionName
+    }.`;
+  }
+  if (!feedbackDialog) {
+    return;
+  }
+  setHeaderCollapsed(true);
+  if (!feedbackDialog.open) {
+    feedbackDialog.showModal();
+  }
+  feedbackTextElement?.focus({ preventScroll: true });
+}
+
+function closeFeedbackDialog() {
+  if (feedbackDialog?.open) {
+    feedbackDialog.close();
+  }
+  feedbackTargetSession = null;
+}
+
+function sendGameFeedback() {
+  const line = gameFeedbackLine(feedbackTextElement?.value);
+  if (!line) {
+    setStatus('Write something first');
+    feedbackTextElement?.focus({ preventScroll: true });
+    return;
+  }
+  if (!feedbackTargetSession || activeSession !== feedbackTargetSession) {
+    setStatus('That game is not connected');
+    return;
+  }
+  // CR, not LF, for the reason runSnippet uses CR: an agent reads LF as "add a
+  // newline" and CR as "send it".
+  if (!sendInput(`${line}\r`)) {
+    setStatus('Could not send feedback');
+    return;
+  }
+  if (feedbackTextElement) {
+    feedbackTextElement.value = '';
+  }
+  const target = feedbackTargetSession;
+  closeFeedbackDialog();
+  const session = sessions.find((entry) => entry.name === target);
+  setStatus(`Feedback sent to ${session?.game?.slug || target}`);
+}
+
 function renderSessions() {
   sessionsElement.replaceChildren();
-  for (const session of sessions) {
+  for (const session of visibleSessions()) {
     const item = document.createElement('div');
     item.className = 'session-item';
     const button = document.createElement('button');
@@ -11598,7 +11843,12 @@ function renderSessions() {
     button.className = isActive ? 'session active' : 'session';
     const sessionName = document.createElement('span');
     sessionName.className = 'session-name';
-    sessionName.textContent = session.name;
+    // The slug, not `game-sodium-lamp`: in Games view every row is a game, so
+    // the prefix is the same six characters on every line and says nothing.
+    sessionName.textContent =
+      gamesViewEnabled && sessionIsGame(session)
+        ? session.game.slug
+        : session.name;
     button.append(sessionName);
     button.title =
       `${session.windows} window(s), ${session.attached} client(s). ` +
@@ -11606,6 +11856,41 @@ function renderSessions() {
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
     item.append(button);
+    // Games view swaps the row's actions for the two a player wants: open the
+    // game, and say something about it. Rename and Delete are still reachable —
+    // the long-press renames, and the Menu is where it always was.
+    if (gamesViewEnabled && sessionIsGame(session)) {
+      if (session.game.url) {
+        const playLink = document.createElement('a');
+        playLink.className = 'session-play';
+        playLink.href = session.game.url;
+        playLink.target = '_blank';
+        playLink.rel = 'noopener noreferrer';
+        playLink.textContent = 'Play';
+        playLink.title = `Open ${session.game.slug} in a new tab`;
+        playLink.setAttribute('aria-label', `Play ${session.game.slug}`);
+        playLink.addEventListener('click', (event) => {
+          event.stopPropagation();
+        });
+        item.append(playLink);
+      }
+      const feedbackButton = document.createElement('button');
+      feedbackButton.type = 'button';
+      feedbackButton.className = 'session-feedback';
+      feedbackButton.textContent = 'Feedback';
+      feedbackButton.title = `Send feedback to ${session.game.slug}`;
+      feedbackButton.setAttribute(
+        'aria-label',
+        `Send feedback about ${session.game.slug}`
+      );
+      feedbackButton.addEventListener('click', (event) => {
+        event.stopPropagation();
+        void openFeedbackDialog(session.name);
+      });
+      item.append(feedbackButton);
+      sessionsElement.append(item);
+      continue;
+    }
     // Every row carries rename and close on a fine pointer, where they are
     // revealed on hover or keyboard focus (app.css, the desktop header block).
     // Active-only is right for a thumb — nothing hovers, and four targets in one
@@ -12444,7 +12729,7 @@ function viewSwipeShouldCommit(dx, viewportWidth, hasTarget) {
 
 /** The deck, in the order renderSessions() lays the picker out. */
 function viewSwipeSessionOrder() {
-  return sessions.map((session) => session.name);
+  return visibleSessions().map((session) => session.name);
 }
 
 /**
@@ -12521,7 +12806,12 @@ function beginViewSwipe(fromSession) {
   // Term only. The deck is sessions now, and switching the session you cannot see
   // from a file listing is a change with no feedback; Files has the Term|Files
   // control for getting back and its own horizontal scrollers to protect.
-  if (!main || !fromSession || viewMode !== 'term' || sessions.length < 2) {
+  if (
+    !main ||
+    !fromSession ||
+    viewMode !== 'term' ||
+    visibleSessions().length < 2
+  ) {
     return;
   }
   viewSwipeSettleCleanup?.();
@@ -15945,6 +16235,19 @@ filesPreviewDialog?.addEventListener('cancel', (event) => {
 filesOptionsDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeFilesOptions();
+});
+gamesViewToggle?.addEventListener('click', () => {
+  setGamesViewEnabled(!gamesViewEnabled);
+});
+feedbackSendButton?.addEventListener('click', () => {
+  sendGameFeedback();
+});
+feedbackCloseButton?.addEventListener('click', () => {
+  closeFeedbackDialog();
+});
+feedbackDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeFeedbackDialog();
 });
 filesSessionDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();

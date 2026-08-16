@@ -103,6 +103,27 @@ const homeDirectory = process.env.HOME || os.homedir();
 const projectRoot =
   process.env.VPS_TERMINAL_PROJECT_ROOT ||
   path.join(homeDirectory, 'projects');
+// Games view — a per-user reading of the same server, for someone who plays a
+// game and writes feedback instead of reading eight sessions. A game is a
+// directory under this root; the directory name is the slug.
+const gamesRoot = path.resolve(
+  process.env.VPS_TERMINAL_GAMES_ROOT || path.join(projectRoot, 'games')
+);
+// Where a slug is published. Empty disables the Play link, which is the right
+// default for an install that has no public host per game.
+const gameUrlTemplate = (() => {
+  const template = (process.env.VPS_TERMINAL_GAME_URL || '').trim();
+  if (!template) {
+    return '';
+  }
+  if (!template.includes('{slug}') || !template.startsWith('https://')) {
+    throw new Error(
+      'VPS_TERMINAL_GAME_URL must be an https URL containing {slug}, ' +
+        'e.g. https://{slug}.play.example.com/'
+    );
+  }
+  return template;
+})();
 const publicRoot = path.join(__dirname, 'public');
 const attachSessionPath = path.join(__dirname, 'attach-session');
 // Runtime state — preferences, snippets, pasted images, the client debug log —
@@ -209,6 +230,20 @@ function buildFsRootCatalog() {
     displayPrefix: displayPrefixForPath(path.resolve(projectRoot), 'projects'),
     writable: true
   };
+
+  // Games view offers this root and nothing else, so it has to exist as a root
+  // of its own even though it also sits inside `projects`. Registered only when
+  // the directory is there at boot, the same way `home` is opt-out: an install
+  // with no games should not show an empty root.
+  if (fs.existsSync(gamesRoot)) {
+    catalog.games = {
+      id: 'games',
+      label: 'games',
+      rootPath: gamesRoot,
+      displayPrefix: displayPrefixForPath(gamesRoot, 'games'),
+      writable: true
+    };
+  }
 
   catalog.paste = {
     id: 'paste',
@@ -1283,6 +1318,87 @@ function sanitizedPaneCommand(value) {
   return /^[A-Za-z0-9._-]+$/.test(base) ? base.toLowerCase() : null;
 }
 
+/**
+ * Directory names under the games root, which are the slugs.
+ *
+ * Cached for a few seconds because the session list is polled and a new game
+ * appears about once a week. A read that fails returns an empty list, so a
+ * missing or unreadable root turns Games view off rather than erroring the
+ * session list every poll.
+ */
+const gameSlugPattern = /^[a-z0-9][a-z0-9-]{0,62}$/;
+const gameSlugCacheMs = 5000;
+let gameSlugCache = { readAt: 0, slugs: [] };
+
+async function readGameSlugs() {
+  const now = Date.now();
+  if (now - gameSlugCache.readAt < gameSlugCacheMs) {
+    return gameSlugCache.slugs;
+  }
+  let slugs = [];
+  try {
+    const entries = await fs.promises.readdir(gamesRoot, {
+      withFileTypes: true
+    });
+    slugs = entries
+      .filter((entry) => entry.isDirectory() && gameSlugPattern.test(entry.name))
+      .map((entry) => entry.name)
+      // Longest first, so `night-shift-two` wins over `night-shift` for a
+      // session named after the longer slug.
+      .sort((first, second) => second.length - first.length);
+  } catch {
+    slugs = [];
+  }
+  gameSlugCache = { readAt: now, slugs };
+  return slugs;
+}
+
+function slugForGamePath(candidatePath, slugs) {
+  if (typeof candidatePath !== 'string' || !candidatePath.startsWith('/')) {
+    return null;
+  }
+  const prefix = `${gamesRoot}/`;
+  if (!candidatePath.startsWith(prefix)) {
+    return null;
+  }
+  const first = candidatePath.slice(prefix.length).split('/')[0];
+  return slugs.includes(first) ? first : null;
+}
+
+/**
+ * The game a session belongs to, or null.
+ *
+ * The working directory decides it, because that is what the session is
+ * actually doing: `game-lab` is the studio and sits outside the games root, so
+ * it is not a game, and no name rule could tell that. Two directories are
+ * checked — the session's own and the active pane's — because `new-game` moves
+ * the tree after creating the session, which leaves session_path pointing at
+ * the pre-move directory.
+ *
+ * The name is the fallback, for a session whose pane has been `cd`-ed
+ * somewhere else. Without it a game would drop out of the list mid-play.
+ */
+function gameForSession(session, slugs) {
+  const fromPath =
+    slugForGamePath(session.sessionPath, slugs) ||
+    slugForGamePath(session.panePath, slugs);
+  const slug =
+    fromPath ||
+    (typeof session.name === 'string' && session.name.startsWith('game-')
+      ? slugs.find((candidate) => {
+          const rest = session.name.slice('game-'.length);
+          return rest === candidate || rest.startsWith(`${candidate}-`);
+        }) || null
+      : null);
+  if (!slug) {
+    return null;
+  }
+  return {
+    slug,
+    url: gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null
+  };
+}
+
 async function listSessions() {
   try {
     // Use '|' not tab: tmux 3.3.x can rewrite \t to '_' in -F output, which
@@ -1294,21 +1410,38 @@ async function listSessions() {
         '-F',
         // pane_current_command resolves against the session's active pane, so the
         // footer rail gets the foreground command without a second tmux call.
-        '#{session_name}|#{session_windows}|#{session_attached}|#{pane_current_command}'
+        '#{session_name}|#{session_windows}|#{session_attached}|' +
+          '#{pane_current_command}|#{session_path}|#{pane_current_path}'
       ],
       { timeout: 3000, maxBuffer: 64 * 1024 }
     );
+    const slugs = await readGameSlugs();
     return stdout
       .trim()
       .split('\n')
       .filter(Boolean)
       .map((line) => {
-        const [name, windows, attached, command] = line.split('|');
-        return {
+        const fields = line.split('|');
+        const [name, windows, attached, command] = fields;
+        // A working directory may legally contain '|', which would shift every
+        // field after it. Six exactly means the split is trustworthy; anything
+        // else keeps the session and drops only the paths, so the name rule in
+        // gameForSession decides instead of a misread directory.
+        const trustPaths = fields.length === 6;
+        const session = {
           name,
           windows: Number(windows),
           attached: Number(attached),
-          command: sanitizedPaneCommand(command)
+          command: sanitizedPaneCommand(command),
+          sessionPath: trustPaths ? fields[4] : null,
+          panePath: trustPaths ? fields[5] : null
+        };
+        return {
+          name: session.name,
+          windows: session.windows,
+          attached: session.attached,
+          command: session.command,
+          game: gameForSession(session, slugs)
         };
       })
       .filter((session) => validatedSessionName(session.name));
@@ -1805,7 +1938,10 @@ const server = http.createServer(async (request, response) => {
         appName: appDisplayName,
         appShortName,
         localDev: localDevMode,
-        clientDebug: clientDebugEnabled
+        clientDebug: clientDebugEnabled,
+        // Offering a Games view on a host with no games would be a setting that
+        // does nothing, so the toggle only exists where the root does.
+        gamesView: Object.hasOwn(fsRootCatalog, 'games')
       });
       return;
     }
