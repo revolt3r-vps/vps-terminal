@@ -1918,7 +1918,11 @@ const modifierChordDefinitions = {
     // alphabetical order because it is the interrupt — it has no chip of its own
     // any more, so it has to be in the same place every time and one tap away.
     letters: 'CABDEGKLNPRUWXZ',
-    extras: []
+    // Not a letter, so the alphabet-position rule never reaches it, and the
+    // on-screen keyboard has no other way to send it.
+    extras: [
+      { key: 'slash', label: '/', sequence: '\u001f', name: '/ (undo)' }
+    ]
   },
   shift: {
     label: 'Shift',
@@ -1959,6 +1963,35 @@ const modifierChordDefinitions = {
   }
 };
 
+/*
+ * The Ctrl chords that are not letters.
+ *
+ * `@ [ \ ] ^ _` already fall out of the alphabet-position rule, because their
+ * char codes sit in the same 64-95 run. These three do not, and a terminal still
+ * has a code for each: Ctrl+/ is the readline undo, Ctrl+? is the other delete,
+ * Ctrl+Space is the set-mark NUL.
+ */
+const ctrlNonLetterCodes = {
+  '/': '\u001f',
+  '?': '\u007f',
+  ' ': '\u0000'
+};
+
+/** The byte a Ctrl chord sends, or null when a pty has no code for the key. */
+function ctrlControlCode(character) {
+  if (typeof character !== 'string' || character.length !== 1) {
+    return null;
+  }
+  const code = character.toUpperCase().charCodeAt(0);
+  // 64-95 is `@`, the alphabet, and `[ \ ] ^ _` — the run the C0 codes mirror.
+  if (code >= 64 && code <= 95) {
+    return String.fromCharCode(code - 64);
+  }
+  return Object.prototype.hasOwnProperty.call(ctrlNonLetterCodes, character)
+    ? ctrlNonLetterCodes[character]
+    : null;
+}
+
 /**
  * What a held modifier does to the next thing typed.
  *
@@ -1970,11 +2003,9 @@ function foldModifierInput(modifier, data) {
     return data;
   }
   if (modifier === 'ctrl') {
-    // Ctrl+letter is the letter's alphabet position as a control code. Anything
-    // else passes through, because a pty has no control code for it.
-    return /^[A-Za-z]$/.test(data)
-      ? String.fromCharCode(data.toUpperCase().charCodeAt(0) - 64)
-      : data;
+    // Anything without a control code passes through, because a pty has no byte
+    // to send for it.
+    return ctrlControlCode(data) ?? data;
   }
   if (modifier === 'alt') {
     return `\u001b${data}`;
@@ -7182,11 +7213,11 @@ function hardwareKeySequence(event) {
   }
 
   const esc = '\u001b';
-  // Ctrl+letter → C0 (shell interrupt, etc.). Ignore meta-only browser chords here.
+  // Ctrl+key → C0 (shell interrupt, undo, etc.). Ignore meta-only browser chords.
   if (event.ctrlKey && !event.metaKey && !event.altKey && key.length === 1) {
-    const code = key.toUpperCase().charCodeAt(0);
-    if (code >= 64 && code <= 95) {
-      return String.fromCharCode(code - 64);
+    const control = ctrlControlCode(key);
+    if (control !== null) {
+      return control;
     }
   }
 
