@@ -1781,8 +1781,7 @@ button.active {
 /* Games view row actions. Words, not icons: Play and Feedback have no drawing
    that reads at 14px, and the row has the space because Rename and Delete are
    not on it. */
-.session-play,
-.session-feedback {
+.session-play {
   display: flex;
   flex: 0 0 auto;
   align-items: center;
@@ -1800,15 +1799,12 @@ button.active {
 }
 
 .session-play:hover,
-.session-play:focus-visible,
-.session-feedback:hover,
-.session-feedback:focus-visible {
+.session-play:focus-visible {
   background: color-mix(in srgb, var(--accent-surface) 70%, var(--accent));
   color: var(--text-strong);
 }
 
-.session-play:active,
-.session-feedback:active {
+.session-play:active {
   background: color-mix(in srgb, var(--accent-surface) 55%, var(--accent));
 }
 

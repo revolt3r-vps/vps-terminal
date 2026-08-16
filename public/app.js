@@ -100,8 +100,11 @@ const commandPaletteInput = document.querySelector('#command-palette-input');
 const commandPaletteList = document.querySelector('#command-palette-list');
 const commandPaletteEmpty = document.querySelector('#command-palette-empty');
 const commandPaletteClose = document.querySelector('#command-palette-close');
-const gamesViewSection = document.querySelector('#games-view-section');
 const gamesViewToggle = document.querySelector('#games-view-toggle');
+const gamesViewListElement = document.querySelector('#games-view-list');
+const gamesViewTabButton = document.querySelector(
+  '.key-panel-tab[data-panel-tab="gamelab"]'
+);
 const feedbackDialog = document.querySelector('#feedback-dialog');
 const feedbackTargetElement = document.querySelector('#feedback-target');
 const feedbackTextElement = document.querySelector('#feedback-text');
@@ -938,6 +941,12 @@ let activeSession = null;
 // changes what is shown.
 let gamesViewAvailable = false;
 let gamesViewEnabled = false;
+// Every game on the host, from GET /api/games — not only the ones with a
+// session running, because Files lists folders and a game nobody is working on
+// today is still there.
+let gamesCatalog = [];
+let gamesCatalogLoaded = false;
+let gamesCatalogRequest = null;
 
 /**
  * The Games view rules.
@@ -991,6 +1000,60 @@ function gamesViewSnippets(list, enabled) {
   return enabled
     ? all.filter((snippet) => !gamesViewHiddenSnippetIds.includes(snippet?.id))
     : all;
+}
+
+/**
+ * The Locations strip in Games view: one entry per game, not per root.
+ *
+ * There is only ever one root here, so a strip of roots is a strip of one
+ * button that says `games` and goes where you already are. The games are what
+ * a person is actually choosing between, and the games root is their folder,
+ * so this replaces the roots rather than sitting beside them.
+ */
+function gamesViewLocations(games) {
+  return (Array.isArray(games) ? games : [])
+    .filter((game) => game && typeof game.slug === 'string' && game.slug)
+    .map((game) => ({ id: game.slug, label: game.slug, path: game.slug }));
+}
+
+/**
+ * Saved folders, minus the ones outside the games root.
+ *
+ * A bookmark on `~/paste` is one tap out of the view the setting just drew, and
+ * it would leave the Locations strip with nothing marked. The bookmarks
+ * themselves are untouched and all come back when the setting goes off.
+ */
+function gamesViewBookmarks(bookmarks, enabled) {
+  const all = Array.isArray(bookmarks) ? bookmarks : [];
+  return enabled ? all.filter((entry) => entry?.root === 'games') : all;
+}
+
+/**
+ * Where Files is allowed to go while the view is on: inside the games root.
+ *
+ * The games root is the ceiling. Parent from a game folder lands on the games
+ * root and stops there, because that is the root and `fs-jail.js` has never let
+ * a root be climbed out of. What this adds is the sideways route: a bookmark, a
+ * path clicked in terminal output, or a remembered location from before the
+ * setting was turned on can all name another root. Each is sent to the games
+ * root instead.
+ *
+ * It is still a view. The shell in the next pane can `cd` anywhere it likes.
+ */
+function gamesViewFilesTarget(rootId, currentPath, enabled) {
+  if (!enabled || rootId === 'games') {
+    return { root: rootId, path: currentPath || '' };
+  }
+  return { root: 'games', path: '' };
+}
+
+/** Whether the Files view is standing inside this game's folder. */
+function filesLocationIsGame(rootId, currentPath, slug) {
+  if (rootId !== 'games' || typeof slug !== 'string' || !slug) {
+    return false;
+  }
+  const here = typeof currentPath === 'string' ? currentPath : '';
+  return here === slug || here.startsWith(`${slug}/`);
 }
 
 /**
@@ -2350,6 +2413,7 @@ const keyPanelTabs = [
   'snippets',
   'appearance',
   'debug',
+  'gamelab',
   'app'
 ];
 // Non-zero once a keyboard has actually been seen this session.
@@ -2797,6 +2861,9 @@ function renderKeyPanel() {
     renderKeyPanelAppearance(page);
   } else if (keyPanelTab === 'debug') {
     renderKeyPanelDebug(page);
+  } else if (keyPanelTab === 'gamelab') {
+    // Static markup, like the App page. Only the live parts are refreshed.
+    refreshGamesViewUi();
   } else {
     // The App page is static markup rather than something built each time, so
     // it only needs its live parts refreshed.
@@ -9517,9 +9584,10 @@ function currentFolderIsBookmarked() {
 }
 
 function goToFilesLocation(root, path) {
+  const target = gamesViewFilesTarget(root, path, gamesViewEnabled);
   closeFilesPreview({ restoreFocus: false });
-  filesRootId = root;
-  filesPath = path || '';
+  filesRootId = target.root;
+  filesPath = target.path;
   filesSelectedName = '';
   filesSelectedIndex = -1;
   filesRestoreSelectionName = '';
@@ -10059,6 +10127,14 @@ async function ensureFilesRoots() {
     filesPath = '';
     saveFilesNav();
   }
+  // The remembered location predates the setting, or was saved on a day it was
+  // off. Either way, Games view starts inside the games root.
+  const target = gamesViewFilesTarget(filesRootId, filesPath, gamesViewEnabled);
+  if (target.root !== filesRootId) {
+    filesRootId = target.root;
+    filesPath = target.path;
+    saveFilesNav();
+  }
   renderFilesRoots();
   return filesRootsCatalog;
 }
@@ -10078,38 +10154,72 @@ function renderFilesRoots() {
         ],
     gamesViewEnabled
   );
+  // Games view puts the games in the Locations strip. Until the list arrives —
+  // and on a host where the request failed — the games root button stands in,
+  // so the strip is never empty.
+  const games = gamesViewEnabled ? gamesViewLocations(gamesCatalog) : [];
+  const showGames = games.length > 0;
   if (filesLocationSelect) {
     filesLocationSelect.replaceChildren();
-    for (const root of roots) {
+    for (const entry of showGames ? games : roots) {
       const option = document.createElement('option');
-      option.value = root.id;
-      option.textContent = root.label || root.id;
-      option.title = root.displayPrefix || root.label || root.id;
+      option.value = entry.id;
+      option.textContent = entry.label || entry.id;
+      option.title = showGames
+        ? filesDisplayPath('games', entry.path)
+        : entry.displayPrefix || entry.label || entry.id;
       filesLocationSelect.append(option);
     }
-    filesLocationSelect.value = filesRootId;
-    filesLocationSelect.disabled = roots.length < 2;
+    filesLocationSelect.value = showGames
+      ? games.find((entry) =>
+          filesLocationIsGame(filesRootId, filesPath, entry.id)
+        )?.id || ''
+      : filesRootId;
+    filesLocationSelect.disabled =
+      (showGames ? games.length : roots.length) < 2;
   }
-  for (const root of roots) {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.textContent = root.label || root.id;
-    button.dataset.filesRoot = root.id;
-    button.classList.toggle('active', filesRootId === root.id);
-    if (filesRootId === root.id) {
-      button.setAttribute('aria-current', 'location');
+  if (showGames) {
+    for (const entry of games) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = entry.label;
+      button.dataset.filesGame = entry.id;
+      const here = filesLocationIsGame(filesRootId, filesPath, entry.id);
+      button.classList.toggle('active', here);
+      if (here) {
+        button.setAttribute('aria-current', 'location');
+      }
+      button.title = filesDisplayPath('games', entry.path);
+      button.addEventListener('click', () => {
+        goToFilesLocation('games', entry.path);
+      });
+      filesRootsElement.append(button);
     }
-    button.title = root.displayPrefix || root.label || root.id;
-    button.addEventListener('click', () => {
-      switchFilesRoot(root.id);
-    });
-    filesRootsElement.append(button);
+  } else {
+    for (const root of roots) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.textContent = root.label || root.id;
+      button.dataset.filesRoot = root.id;
+      button.classList.toggle('active', filesRootId === root.id);
+      if (filesRootId === root.id) {
+        button.setAttribute('aria-current', 'location');
+      }
+      button.title = root.displayPrefix || root.label || root.id;
+      button.addEventListener('click', () => {
+        switchFilesRoot(root.id);
+      });
+      filesRootsElement.append(button);
+    }
   }
   // Bookmarks live here too on wide layouts. The toolbar button is hidden where
   // the sidebar shows — that is the "no duplicate location control" rule the
   // layout has always had — so without this, desktop would have no way to reach
   // a bookmark at all.
-  for (const entry of loadFilesBookmarks()) {
+  //
+  // In Games view only the ones inside the games root are offered: a bookmark
+  // on `~/paste` would walk straight out of the view the setting just drew.
+  for (const entry of gamesViewBookmarks(loadFilesBookmarks(), gamesViewEnabled)) {
     const button = document.createElement('button');
     button.type = 'button';
     button.className = 'files-root-bookmark';
@@ -10161,7 +10271,8 @@ function updateFilesHiddenControls() {
 }
 
 function switchFilesRoot(rootId) {
-  const nextRoot = filesRootsCatalog.find((entry) => entry.id === rootId);
+  const allowed = gamesViewFilesTarget(rootId, '', gamesViewEnabled).root;
+  const nextRoot = filesRootsCatalog.find((entry) => entry.id === allowed);
   if (!nextRoot) {
     return false;
   }
@@ -11715,6 +11826,52 @@ function visibleSessions() {
 }
 
 /**
+ * Load the games once, and re-render the Locations strip when they arrive.
+ *
+ * Requests are shared rather than queued: turning the setting on, opening
+ * Files, and a re-render can all ask within the same frame, and one list is
+ * enough for all three.
+ */
+async function ensureGamesCatalog(options = {}) {
+  // Loaded, not length: a host with no games answers with an empty list, and
+  // without this flag every re-render would ask again.
+  if (gamesCatalogLoaded && !options.force) {
+    return gamesCatalog;
+  }
+  if (!gamesCatalogRequest) {
+    gamesCatalogRequest = (async () => {
+      try {
+        const value = await api('/api/games');
+        gamesCatalog = Array.isArray(value.games) ? value.games : [];
+        gamesCatalogLoaded = true;
+      } catch {
+        // Files falls back to the games root button, which still works, and the
+        // next refresh tries again.
+        gamesCatalog = [];
+      } finally {
+        gamesCatalogRequest = null;
+      }
+      renderFilesRoots();
+      renderGamesViewList();
+      return gamesCatalog;
+    })();
+  }
+  return gamesCatalogRequest;
+}
+
+/** Name the games on the GameLab tab, so the setting says what it will show. */
+function renderGamesViewList() {
+  if (!gamesViewListElement) {
+    return;
+  }
+  const named = gamesCatalog
+    .map((game) => game?.slug)
+    .filter(Boolean)
+    .join(', ');
+  gamesViewListElement.textContent = named ? `On this host: ${named}.` : '';
+}
+
+/**
  * Put Games view on screen wherever it is not already re-rendered.
  *
  * Called after the shared setup is applied and whenever the toggle moves, so
@@ -11722,13 +11879,31 @@ function visibleSessions() {
  * leave the app in the same state.
  */
 function refreshGamesViewUi() {
-  if (gamesViewSection) {
-    gamesViewSection.hidden = !gamesViewAvailable;
+  // The tab carries the setting, so a host with no games root has no tab at
+  // all. Hidden rather than removed, the way the Debug tab is: the markup has
+  // to be there to come back.
+  if (gamesViewTabButton) {
+    gamesViewTabButton.hidden = !gamesViewAvailable;
+  }
+  if (!gamesViewAvailable && keyPanelTab === 'gamelab') {
+    setKeyPanelTab(keyPanelTabs[0]);
   }
   if (gamesViewToggle) {
     gamesViewToggle.setAttribute('aria-checked', String(gamesViewEnabled));
   }
+  renderGamesViewList();
   document.body.classList.toggle('games-view', gamesViewEnabled);
+  if (gamesViewAvailable) {
+    // The tab names the games, so it needs the list whether or not the setting
+    // is on. Not awaited: it re-renders when it lands.
+    void ensureGamesCatalog();
+  }
+  if (gamesViewEnabled) {
+    // The Locations strip is the games now, so it needs the list. Not awaited:
+    // the fetch re-renders the strip when it lands, and the games root button
+    // stands in until then.
+    void ensureGamesCatalog();
+  }
   // Files may be standing in a root that is no longer offered, which would
   // leave the location control showing a place with no way back to it.
   const offered = gamesViewRoots(filesRootsCatalog, gamesViewEnabled);
@@ -11856,9 +12031,9 @@ function renderSessions() {
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
     item.append(button);
-    // Games view swaps the row's actions for the two a player wants: open the
-    // game, and say something about it. Rename and Delete are still reachable —
-    // the long-press renames, and the Menu is where it always was.
+    // Games view swaps the row's actions for the one a player wants: open the
+    // game. Rename and Delete are still reachable — the long-press renames, and
+    // the Menu is where it always was.
     if (gamesViewEnabled && sessionIsGame(session)) {
       if (session.game.url) {
         const playLink = document.createElement('a');
@@ -11874,20 +12049,6 @@ function renderSessions() {
         });
         item.append(playLink);
       }
-      const feedbackButton = document.createElement('button');
-      feedbackButton.type = 'button';
-      feedbackButton.className = 'session-feedback';
-      feedbackButton.textContent = 'Feedback';
-      feedbackButton.title = `Send feedback to ${session.game.slug}`;
-      feedbackButton.setAttribute(
-        'aria-label',
-        `Send feedback about ${session.game.slug}`
-      );
-      feedbackButton.addEventListener('click', (event) => {
-        event.stopPropagation();
-        void openFeedbackDialog(session.name);
-      });
-      item.append(feedbackButton);
       sessionsElement.append(item);
       continue;
     }
@@ -14680,6 +14841,18 @@ async function openTerminalPathLink(rawPath) {
     ? resolved.relativePath
     : segments.slice(0, -1).join('/');
 
+  // A path clicked in terminal output is the sideways route out of Games view:
+  // the shell prints paths from anywhere, and this would follow one into
+  // another root. Refused with a word, rather than silently landing somewhere
+  // else, because the click asked for a specific place.
+  if (
+    gamesViewEnabled &&
+    gamesViewFilesTarget(resolved.rootId, directory, true).root !==
+      resolved.rootId
+  ) {
+    setStatus('Games view keeps Files on your games');
+    return;
+  }
   closeFilesPreview({ restoreFocus: false });
   filesRootId = resolved.rootId;
   filesPath = directory;
@@ -16042,6 +16215,14 @@ filesUpButton?.addEventListener('click', () => {
   navigateFilesParent();
 });
 filesLocationSelect?.addEventListener('change', () => {
+  // In Games view the options are games, so the value is a slug under the
+  // games root rather than a root id.
+  const games = gamesViewEnabled ? gamesViewLocations(gamesCatalog) : [];
+  const chosen = games.find((entry) => entry.id === filesLocationSelect.value);
+  if (chosen) {
+    goToFilesLocation('games', chosen.path);
+    return;
+  }
   switchFilesRoot(filesLocationSelect.value);
 });
 filesNewFolderDesktopButton?.addEventListener('click', () => {

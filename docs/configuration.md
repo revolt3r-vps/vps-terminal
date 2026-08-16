@@ -57,14 +57,20 @@ root catalog returned by the server for that installation:
 
 Each directory under `VPS_TERMINAL_GAMES_ROOT` is a game, and the directory
 name is its slug. When that root exists at startup, `/api/config` reports
-`gamesView: true` and each account gets a **Games view** setting under Menu →
-App. It is stored per login, so it follows one person to any browser and
-changes nothing for anyone else.
+`gamesView: true` and each account gets a **Games view** setting. It is stored
+per login, so it follows one person to any browser and changes nothing for
+anyone else.
 
-With it on, the app lists game sessions only, offers the `games` root alone in
-Files, drops the host diagnostics from the snippet library, and puts **Play**
-and **Send feedback** on each game. Play needs `VPS_TERMINAL_GAME_URL`; without
-it the rest of the view still works and no Play link appears.
+The setting lives on its own **GameLab** tab in the panel, which is hidden
+where there is no games root.
+
+With it on, the app lists game sessions only and puts **Play** on each one.
+Files replaces its Locations with the games themselves — one entry per game,
+from `GET /api/games` — and cannot be sent above the games root: a bookmark, a
+remembered location, or a path clicked in terminal output that names another
+root lands on the games root instead. The snippet library drops the host
+diagnostics. Play needs `VPS_TERMINAL_GAME_URL`; without it the rest of the
+view still works and no Play link appears.
 
 A session belongs to a game when its working directory — the session's own or
 its active pane's — is inside that game's directory. A session named

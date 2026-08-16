@@ -1951,6 +1951,22 @@ const server = http.createServer(async (request, response) => {
       return;
     }
 
+    // The games themselves, whether or not one has a session running. Games
+    // view puts these where the Files root buttons normally are, and a game
+    // nobody is working on today is still a game you can open.
+    if (request.method === 'GET' && url.pathname === '/api/games') {
+      const slugs = await readGameSlugs();
+      sendJson(response, 200, {
+        games: [...slugs]
+          .sort((first, second) => first.localeCompare(second))
+          .map((slug) => ({
+            slug,
+            url: gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null
+          }))
+      });
+      return;
+    }
+
     if (request.method === 'GET' && url.pathname === '/api/snippets') {
       sendJson(response, 200, await readSnippetsDocument());
       return;
