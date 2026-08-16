@@ -89,6 +89,10 @@ install -m 600 \
 install -m 600 \
   "${app_source}/public/manifest.webmanifest" \
   "${app_source}/public/terminal.svg" \
+  "${app_source}/public/apple-touch-icon.png" \
+  "${app_source}/public/icon-192.png" \
+  "${app_source}/public/icon-512.png" \
+  "${app_source}/public/icon-maskable-512.png" \
   "${state_root}/public/"
 
 # Vendor assets from the installed node_modules tree.

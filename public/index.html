@@ -15,10 +15,18 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="VPS Terminal">
+    <!-- The home screen label, and the only place it comes from on iOS. Short,
+         because iOS truncates the caption under the icon at about twelve
+         characters. The tab title and the manifest keep the full product name. -->
+    <meta name="apple-mobile-web-app-title" content="Terminal">
     <title>VPS Terminal</title>
     <script src="/viewport-init.js?v=__VPS_BUILD_TAG__"></script>
     <link rel="icon" href="/terminal.svg?v=__VPS_BUILD_TAG__" type="image/svg+xml">
+    <!-- iOS ignores an SVG icon and ignores the manifest icons too. With no PNG
+         here it draws its own tile: the first letter of the title on a flat
+         background. That is what a home screen showed instead of this icon.
+         180 is the 3x size; iOS downsamples it for everything smaller. -->
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png?v=__VPS_BUILD_TAG__">
     <link rel="manifest" href="/manifest.webmanifest?v=__VPS_BUILD_TAG__">
     <link rel="stylesheet" href="/vendor/xterm.css?v=__VPS_VENDOR_TAG__">
     <link rel="stylesheet" href="/app.css?v=__VPS_BUILD_TAG__">
@@ -465,6 +473,15 @@
       aria-label="Open link"
       hidden
     ></button>
+    <!-- Opening is not always what you want: a login URL usually has to reach
+         another device, and the terminal's own selection cannot take a link
+         that the program drew across several rows. -->
+    <button
+      id="terminal-link-copy-chip"
+      type="button"
+      aria-label="Copy link"
+      hidden
+    >Copy</button>
     <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
     <button id="selection-copy-chip" type="button" hidden>Copy</button>
     <!-- Names the session a horizontal swipe is heading for, because one terminal

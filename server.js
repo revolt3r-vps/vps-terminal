@@ -69,6 +69,21 @@ const { host, port } = resolveListenHostAndPort();
 const appDisplayName =
   (process.env.VPS_TERMINAL_APP_NAME || 'VPS Terminal').trim().slice(0, 64) ||
   'VPS Terminal';
+/**
+ * The home screen caption, which is not the tab title.
+ *
+ * iOS truncates the label under an icon at about twelve characters, so a
+ * deployment whose VPS_TERMINAL_APP_NAME is longer than that gets an
+ * unreadable caption if it reuses appDisplayName. Kept separate and short by
+ * default; a deployment that wants its full name on the home screen sets this
+ * to it.
+ *
+ * 12, not 64: a value that cannot fit is a value that will be cut by the phone
+ * instead, and silently.
+ */
+const appShortName =
+  (process.env.VPS_TERMINAL_APP_SHORT_NAME || 'Terminal').trim().slice(0, 12) ||
+  'Terminal';
 const publicOrigin = (() => {
   if (process.env.VPS_TERMINAL_ORIGIN) {
     return process.env.VPS_TERMINAL_ORIGIN;
@@ -273,6 +288,8 @@ const sessionLauncherCommands = Object.freeze({
   grok: 'grok',
   claude: 'claude'
 });
+const sessionLoginShell = process.env.SHELL || '/bin/bash';
+const sessionBrowserOpener = process.env.BROWSER || '';
 const authenticatedEmailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const connections = new Set();
 let pendingConnections = 0;
@@ -1371,7 +1388,11 @@ async function resolvedSessionLauncherCommand(launcher) {
         continue;
       }
       await fs.promises.access(candidate, fs.constants.X_OK);
-      return await fs.promises.realpath(candidate);
+      // Return the entry found on PATH, not what it resolves to. An agent CLI
+      // is usually a symlink into a versioned install directory, and that
+      // directory goes away on the next upgrade. The stat above already
+      // confirmed the link points at an executable file.
+      return candidate;
     } catch {
       // Keep searching. Missing launchers become a safe 503 below.
     }
@@ -1402,6 +1423,18 @@ async function sessionWorkingDirectory(rootId, relativePath) {
   return resolved.absolutePath;
 }
 
+function shellQuote(value) {
+  return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+// tmux runs a pane command with no shell around it, so an agent CLI launched
+// this way inherits none of the shell startup files and dies taking the whole
+// session with it. Run it from a login shell instead, and leave that shell
+// behind when the agent exits.
+function sessionPaneCommand(command) {
+  return `${shellQuote(command)}; exec ${sessionLoginShell} -l`;
+}
+
 async function createSession(name, options = {}) {
   const launcher = validatedSessionLauncher(options.launcher);
   if (!launcher) {
@@ -1421,9 +1454,15 @@ async function createSession(name, options = {}) {
     options.path
   );
   const args = ['new-session', '-d', '-s', name, '-c', workingDirectory];
+  // Web links from an agent CLI belong in the streamed browser workspace. The
+  // shell startup file that exports this only runs for interactive shells, so
+  // pass it to tmux directly rather than hoping the pane inherits it.
+  if (sessionBrowserOpener) {
+    args.push('-e', `BROWSER=${sessionBrowserOpener}`);
+  }
   const command = await resolvedSessionLauncherCommand(launcher);
   if (command) {
-    args.push(command);
+    args.push(sessionPaneCommand(command));
   }
   await execFileAsync(
     'tmux',
@@ -1471,6 +1510,7 @@ const mimeTypes = new Map([
   ['.html', 'text/html; charset=utf-8'],
   ['.js', 'text/javascript; charset=utf-8'],
   ['.json', 'application/manifest+json; charset=utf-8'],
+  ['.png', 'image/png'],
   ['.svg', 'image/svg+xml'],
   ['.webmanifest', 'application/manifest+json; charset=utf-8'],
   ['.woff2', 'font/woff2']
@@ -1763,6 +1803,7 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/config') {
       sendJson(response, 200, {
         appName: appDisplayName,
+        appShortName,
         localDev: localDevMode,
         clientDebug: clientDebugEnabled
       });

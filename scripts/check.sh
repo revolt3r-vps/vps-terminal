@@ -85,6 +85,28 @@ fi
 
 grep -Fq 'name": "vps-terminal"' "${root}/package.json"
 grep -Fq '"name": "VPS Terminal"' "${root}/public/manifest.webmanifest"
+# The home screen caption, which is not the product name. iOS truncates at
+# about twelve characters and Android uses short_name, so both get "Terminal".
+grep -Fq '"short_name": "Terminal"' "${root}/public/manifest.webmanifest"
+grep -Fq 'name="apple-mobile-web-app-title" content="Terminal"' \
+  "${root}/public/index.html"
+
+# iOS reads none of the manifest icons and does not render SVG on the home
+# screen. Without this link and this file it draws a letter tile instead, which
+# is not a visible failure anywhere in CI — so it is asserted here.
+grep -Fq 'rel="apple-touch-icon" href="/apple-touch-icon.png' \
+  "${root}/public/index.html"
+for icon in apple-touch-icon.png icon-192.png icon-512.png \
+  icon-maskable-512.png terminal.svg; do
+  test -s "${root}/public/${icon}" ||
+    fail "public/${icon} is missing or empty"
+done
+# A maskable icon is cropped to the centre 80% circle. Declaring the full-bleed
+# art maskable, which this manifest used to do, loses the glyph's edges on any
+# Android launcher that crops to a circle.
+if grep -Fq '"purpose": "any maskable"' "${root}/public/manifest.webmanifest"; then
+  fail 'no icon may be both any and maskable; ship a separate padded one'
+fi
 test -f "${root}/LICENSE"
 test -f "${root}/SECURITY.md"
 test -f "${root}/README.md"

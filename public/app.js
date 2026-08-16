@@ -110,6 +110,7 @@ const pasteButton = document.querySelector('#paste');
 const selectionCopyChip = document.querySelector('#selection-copy-chip');
 const viewSwipeLabelElement = document.querySelector('#swipe-session-name');
 const terminalLinkChip = document.querySelector('#terminal-link-chip');
+const terminalLinkCopyChip = document.querySelector('#terminal-link-copy-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
 const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
@@ -978,6 +979,12 @@ let documentTouchGestureActive = false;
 let keyboardLayoutLock = null;
 let keyboardDismissing = false;
 let keyboardDismissPollTimer = null;
+// Whether the terminal is currently held at its resting row count, and what that
+// count is. Recorded only from a fit with nothing covering the terminal, so an
+// overlay can never become the new resting size.
+let terminalLiftApplied = false;
+let restingTerminalRows = null;
+let terminalResizeSendTimer = null;
 let holdKeyboardLayoutForSelection = false;
 let scrollPixelAccumulator = 0;
 let nativeDeleteKeyDownAt = Number.NEGATIVE_INFINITY;
@@ -1910,7 +1917,7 @@ const modifierChordDefinitions = {
     // readline and job-control chords plus B for the tmux prefix. C leads out of
     // alphabetical order because it is the interrupt — it has no chip of its own
     // any more, so it has to be in the same place every time and one tap away.
-    letters: 'CABDEGKLNPRUWZ',
+    letters: 'CABDEGKLNPRUWXZ',
     extras: []
   },
   shift: {
@@ -4715,13 +4722,26 @@ async function loadAppConfig() {
     if (cfg && typeof cfg.appName === 'string' && cfg.appName.trim()) {
       appDisplayName = cfg.appName.trim().slice(0, 64);
       document.title = appDisplayName;
-      const apple = document.querySelector('meta[name="apple-mobile-web-app-title"]');
-      if (apple) {
-        apple.setAttribute('content', appDisplayName);
-      }
       const titleEl = document.querySelector('#settings-title');
       if (titleEl) {
         titleEl.textContent = `${appDisplayName} settings`;
+      }
+    }
+    // The home screen caption, which is its own setting and not the tab title.
+    // This used to be written from appName, so a deployment with a long app
+    // name put that under the icon, and the short name in index.html never
+    // survived first paint. iOS reads the live DOM when Add to Home Screen is
+    // tapped, so what is written here is what the phone shows.
+    if (
+      cfg &&
+      typeof cfg.appShortName === 'string' &&
+      cfg.appShortName.trim()
+    ) {
+      const apple = document.querySelector(
+        'meta[name="apple-mobile-web-app-title"]'
+      );
+      if (apple) {
+        apple.setAttribute('content', cfg.appShortName.trim().slice(0, 12));
       }
     }
   } catch {
@@ -13204,10 +13224,305 @@ function installTouchScrolling() {
   );
 }
 
+// ---- Start of the pure terminal cover block. ----
+/**
+ * How many pixels of the terminal box are covered rather than taken.
+ *
+ * This is the whole fix. Refitting the grid smaller is what costs the session
+ * its scrollback: fewer rows means a smaller tmux pane, and Codex answers
+ * SIGWINCH with `ESC[H ESC[2J ESC[3J`. ESC[2J moves the frame it erases into
+ * the scrollback, ESC[3J then erases the scrollback including that copy. A
+ * 70x24 pane holding an 18-line transcript drops to history_size 1 on the first
+ * resize, and Codex only repaints the visible frame — nothing replays what was
+ * deleted. Agents on the alternate screen have no scrollback to lose; Codex is
+ * inline, so it does.
+ *
+ * A keyboard, the key panel and the modifier drawer all hide the bottom of the
+ * terminal. None of them is a smaller terminal. Measuring what they hide lets
+ * the grid keep its rows and slide up instead, so no SIGWINCH is ever sent. A
+ * genuine layout change — rotation, a font size — is not covered by anything,
+ * reports 0 here, and refits exactly as before.
+ *
+ * The keyboard is measured without the 120px floor keyboardHeightFromViewport
+ * applies. That floor stops a collapsing browser toolbar being *stored* as a
+ * keyboard height; here the only question is how many pixels are hidden, and a
+ * toolbar hides them the same way. Keying on the floor is what left the first
+ * 120px of every rise, and the last 120px of every close, refitting normally.
+ *
+ * The panel replaces the keyboard rather than joining it, and targetAppHeight()
+ * already sizes the app to the layout viewport while the panel is open, so a
+ * keyboard still animating away must not be counted twice.
+ */
+function terminalCoverHeight(parts) {
+  const positive = (value) =>
+    Number.isFinite(value) && value > 0 ? value : 0;
+  const drawer = positive(parts?.drawerHeight);
+  if (parts?.panelOpen) {
+    return Math.round(positive(parts?.panelHeight) + drawer);
+  }
+  const layoutHeight = positive(parts?.layoutHeight);
+  // What the app has actually applied to --app-height, which is what sizes the
+  // box. It lags the viewport on the way out: iOS reports the full visual
+  // viewport in one step while pollKeyboardClosed restores --app-height in 50ms
+  // increments. Reading only the live viewport reports no cover in that gap,
+  // drops the pin and refits against a box that is still short — a resize on
+  // every keyboard hide, with the show side working fine.
+  const applied = positive(parts?.appliedCover);
+  // A pinched page reports a smaller visual viewport for a reason that is not an
+  // overlay, so only the applied height counts there.
+  const pinched =
+    Number.isFinite(parts?.scale) && Math.abs(parts.scale - 1) > 0.01;
+  const live = pinched ? 0 : layoutHeight - positive(parts?.viewportHeight);
+  const cover = Math.max(live > 0 ? live : 0, applied);
+  // More than about half the screen is some other viewport change caught
+  // mid-flight, the same bound keyboardHeightFromViewport uses.
+  if (!(cover > 0) || (layoutHeight > 0 && cover > layoutHeight * 0.55)) {
+    return Math.round(drawer);
+  }
+  return Math.round(cover + drawer);
+}
+
+/**
+ * The height to pin the terminal to, and how far to slide it up.
+ *
+ * Rows, not pixels. Giving back exactly the pixels an overlay covers looks
+ * right and is not: `.keyboard-open` also drops --footer-bottom-padding to 4px,
+ * so the chrome shrinks at the same time and box + cover lands taller than the
+ * terminal ever was. Measured, that handed the grid four extra rows on the way
+ * up — a resize in the wrong direction, which erases the scrollback just as
+ * well as a smaller one.
+ *
+ * The row count is the invariant worth holding, so the pin is sized from it.
+ * Ceil, because the fit addon floors: a pin a fraction short of a whole row
+ * would come back one row smaller.
+ *
+ * Null when there is nothing to do — no resting row count yet, no usable cell
+ * height, or a box that already fits the rows.
+ */
+function terminalPinFromRows(restingRows, cellHeight, availableHeight) {
+  if (!Number.isFinite(restingRows) || !(restingRows > 0)) {
+    return null;
+  }
+  if (!Number.isFinite(cellHeight) || !(cellHeight > 1)) {
+    return null;
+  }
+  if (!Number.isFinite(availableHeight) || !(availableHeight > 0)) {
+    return null;
+  }
+  const height = Math.ceil(restingRows * cellHeight);
+  const lift = Math.round(availableHeight - height);
+  if (lift >= 0) {
+    return null;
+  }
+  return { height, lift };
+}
+// ---- End of the pure terminal cover block. ----
+
+/**
+ * The content box `#terminal` is sized against.
+ *
+ * Measured from the parent rather than from the terminal itself, because a
+ * pinned terminal is taller than the space it sits in and would report its own
+ * pinned height back.
+ */
+function terminalBoxSpace() {
+  const parent = terminalElement?.parentElement;
+  if (!parent) {
+    return null;
+  }
+  const style = window.getComputedStyle(parent);
+  const height =
+    parent.clientHeight -
+    (parseFloat(style.paddingTop) || 0) -
+    (parseFloat(style.paddingBottom) || 0);
+  if (!(height > 0)) {
+    return null;
+  }
+  return { height: Math.round(height) };
+}
+
+/**
+ * Only a footer in the terminal's flow takes space from it. Landscape and
+ * desktop lift the footer and panel out and overlay the terminal instead, where
+ * the grid was never shrunk and there is nothing to give back.
+ */
+function footerTakesTerminalSpace() {
+  if (!footerElement || !keyPanelElement) {
+    return false;
+  }
+  return (
+    window.getComputedStyle(footerElement).position !== 'fixed' &&
+    window.getComputedStyle(keyPanelElement).position !== 'fixed'
+  );
+}
+
+/**
+ * The panel only covers rows where it is standing in for a keyboard.
+ *
+ * With a fine pointer there is no keyboard for it to stand in for: it is a pane
+ * the user opened, and `panel.terminal-space` in qa/responsive-matrix.js
+ * requires the terminal to give up the height for it. That check is scoped to
+ * fine pointers for exactly this reason, so the gate here is the same one —
+ * treating the panel as cover everywhere broke it, and left dead terminal
+ * background between the last row and the panel on desktop.
+ *
+ * With a coarse pointer the panel takes the keyboard's place, is sized to the
+ * keyboard's height, and must not cost rows any more than the keyboard does.
+ */
+function keyPanelStandsInForKeyboard() {
+  return (
+    keyPanelOpen && window.matchMedia?.('(pointer: coarse)').matches === true
+  );
+}
+
+function measuredTerminalCover() {
+  const viewport = window.visualViewport;
+  const inFlow = footerTakesTerminalSpace();
+  const drawerShown =
+    inFlow && footerDrawerElement && !footerDrawerElement.hidden;
+  const layoutHeight =
+    document.documentElement.clientHeight || window.innerHeight;
+  return terminalCoverHeight({
+    layoutHeight,
+    // Null while resting, which is 0 cover — the box is the layout viewport.
+    appliedCover: Number.isFinite(lastAppliedViewportHeight)
+      ? layoutHeight - lastAppliedViewportHeight
+      : 0,
+    viewportHeight: viewport?.height,
+    scale: viewport?.scale,
+    panelOpen: inFlow && keyPanelStandsInForKeyboard(),
+    // --key-panel-height, not the panel's rect. The footer is pinned to
+    // --key-panel-base + --key-panel-height, and the base is what the footer
+    // already was, so this custom property is exactly what main gives up. The
+    // rect is larger: it also carries --terminal-slack, and counting that as
+    // cover handed the grid rows it never lost.
+    panelHeight: parseFloat(
+      window
+        .getComputedStyle(document.documentElement)
+        .getPropertyValue('--key-panel-height')
+    ),
+    drawerHeight: drawerShown
+      ? footerDrawerElement.getBoundingClientRect().height
+      : 0
+  });
+}
+
+function setTerminalLift(height, lift) {
+  document.documentElement.style.setProperty(
+    '--terminal-pinned-height',
+    `${height}px`
+  );
+  document.documentElement.style.setProperty('--terminal-lift', `${lift}px`);
+  document.documentElement.classList.add('terminal-lifted');
+  terminalLiftApplied = true;
+}
+
+function clearTerminalLift() {
+  if (!terminalLiftApplied) {
+    return;
+  }
+  document.documentElement.classList.remove('terminal-lifted');
+  document.documentElement.style.removeProperty('--terminal-pinned-height');
+  document.documentElement.style.removeProperty('--terminal-lift');
+  terminalLiftApplied = false;
+}
+
+/** One row's height, taken from the grid that is on screen right now. */
+function terminalCellHeight() {
+  const screen = terminalElement?.querySelector('.xterm-screen');
+  const rows = terminal?.rows;
+  if (!screen || !(rows > 0)) {
+    return 0;
+  }
+  return screen.getBoundingClientRect().height / rows;
+}
+
+/**
+ * Hold the terminal at its resting row count while an overlay covers it.
+ *
+ * The cover itself is measured fresh every time, from the overlays. Only the
+ * row count is remembered, and only from a fit where nothing was covering, so
+ * there is no stored pixel height to drift: an earlier version pinned to a
+ * remembered box height that could only ratchet upwards, and any lasting shrink
+ * froze the fit for the rest of the session.
+ *
+ * Fitting still runs afterwards. That is what keeps a font size change working —
+ * the cover is unchanged, the cell size is not, and the refit sends the new row
+ * count the way it always did.
+ */
+function applyTerminalCover() {
+  const space = terminalBoxSpace();
+  if (!space || measuredTerminalCover() <= 0) {
+    clearTerminalLift();
+    return;
+  }
+  const pin = terminalPinFromRows(
+    restingTerminalRows,
+    terminalCellHeight(),
+    space.height
+  );
+  if (!pin) {
+    clearTerminalLift();
+    return;
+  }
+  setTerminalLift(pin.height, pin.lift);
+}
+
+/**
+ * Send the pane size only once it has stopped moving.
+ *
+ * A keyboard transition is not one layout change, it is a run of them: the
+ * viewport moves, --app-height follows it, `.keyboard-open` swaps
+ * --footer-bottom-padding, and each step fits. The cover keeps the row count
+ * steady across the ones it can measure, but a size that appears for 50ms and
+ * then goes back is still a SIGWINCH, and Codex erases the scrollback on any of
+ * them. Coalescing means an intermediate size that reverts is never sent at all,
+ * whichever step produced it.
+ *
+ * A real resize is delayed by this window and nothing else. Rotation and font
+ * changes settle well inside it.
+ */
+const terminalResizeSettleMilliseconds = 250;
+
+function sendTerminalResize() {
+  terminalResizeSendTimer = null;
+  if (!terminal) {
+    return;
+  }
+  // A size that went away and came back is the same size, so this comparison is
+  // what turns the coalescing into "nothing was sent" rather than "sent late".
+  if (
+    socket?.readyState === WebSocket.OPEN &&
+    (terminal.cols !== lastSentTerminalCols ||
+      terminal.rows !== lastSentTerminalRows)
+  ) {
+    socket.send(
+      JSON.stringify({
+        type: 'resize',
+        cols: terminal.cols,
+        rows: terminal.rows
+      })
+    );
+    lastSentTerminalCols = terminal.cols;
+    lastSentTerminalRows = terminal.rows;
+  }
+}
+
+function scheduleTerminalResizeSend() {
+  window.clearTimeout(terminalResizeSendTimer);
+  terminalResizeSendTimer = window.setTimeout(
+    sendTerminalResize,
+    terminalResizeSettleMilliseconds
+  );
+}
+
 function fit() {
   if (!terminal || terminalElement.hidden) {
     return;
   }
+  // Before the measurement, not instead of it: fitAddon.fit() reads the box this
+  // sets, so the grid is fitted to the terminal as if nothing were over it.
+  applyTerminalCover();
   const previousBuffer = terminal.buffer.active;
   const previousViewportY = previousBuffer.viewportY;
   const atBottom = previousViewportY >= previousBuffer.baseY;
@@ -13223,20 +13538,11 @@ function fit() {
     );
   }
   scheduleTerminalScrollClamp();
-  if (
-    socket?.readyState === WebSocket.OPEN &&
-    (terminal.cols !== lastSentTerminalCols ||
-      terminal.rows !== lastSentTerminalRows)
-  ) {
-    socket.send(
-      JSON.stringify({
-        type: 'resize',
-        cols: terminal.cols,
-        rows: terminal.rows
-      })
-    );
-    lastSentTerminalCols = terminal.cols;
-    lastSentTerminalRows = terminal.rows;
+  scheduleTerminalResizeSend();
+  // Only a fit with nothing over the terminal says what its resting size is.
+  // Taking it while lifted would record the pin back to itself.
+  if (!terminalLiftApplied && terminal.rows > 0) {
+    restingTerminalRows = terminal.rows;
   }
   syncTerminalSlack();
 }
@@ -13276,10 +13582,16 @@ function syncTerminalSlack() {
   // and desktop lift one of the two out of it and overlay the terminal instead,
   // where there is no seam to close. Asked of the layout rather than of a media
   // query, which is a guess at the same thing.
-  const inFooterFlow =
-    Boolean(footerElement) &&
-    window.getComputedStyle(footerElement).position !== 'fixed' &&
-    window.getComputedStyle(keyPanelElement).position !== 'fixed';
+  // A lifted terminal is pinned to the box it would have had with nothing over
+  // it and bottom-aligned inside the smaller one, so the leftover pixels are
+  // clipped off the top instead of left under the last row. There is no seam at
+  // the bottom to close, and a slack value here would only push the grid up by a
+  // row's worth of nothing.
+  if (terminalLiftApplied) {
+    applied(0);
+    return;
+  }
+  const inFooterFlow = footerTakesTerminalSpace();
   if (!keyPanelOpen || !inFooterFlow || !terminal || terminalElement.hidden) {
     applied(0);
     return;
@@ -13565,6 +13877,10 @@ async function renameSession(name) {
 // diagnostics, so a wrong link that navigates somewhere unexpected is worse
 // than a path left as plain text.
 const terminalLinkUrlPattern = /https?:\/\/[^\s"'`<>]+/g;
+// How far a link may be followed across rows that carry no wrap flag. xterm
+// asks for links per row while hovering, so an unbounded walk would re-read the
+// scrollback on every mouse move. A login URL is a few rows; this is far more.
+const terminalDrawnLinkRowLimit = 64;
 // Two alternatives, both deliberately narrow. Underlining half a build log in a
 // terminal-first product is worse than missing `src/Makefile`.
 //
@@ -13741,6 +14057,51 @@ function terminalLineColumnMap(line, reusableCell) {
   return { columns, widths };
 }
 
+/**
+ * Did this row use its last column?
+ *
+ * A row that stops short was broken at a word, which means the text ended
+ * there. A row that runs to the final column was cut mid-token. `length` is the
+ * row's width in cells; without it the width is unknown and the answer has to
+ * be no, which is what keeps string-only callers on the `isWrapped` path alone.
+ */
+function terminalRowFillsWidth(line) {
+  const width = line?.length;
+  if (typeof width !== 'number' || width <= 0) {
+    return false;
+  }
+  const text = line.translateToString(false);
+  return text.length >= width && !text.endsWith(' ');
+}
+
+/**
+ * Does the text so far end part-way through a URL?
+ *
+ * Read from the last space, so it sees the token being written rather than the
+ * whole line.
+ */
+function terminalTailOpensUrl(text) {
+  return /^https?:\/\/\S+$/i.test(text.slice(text.lastIndexOf(' ') + 1));
+}
+
+/**
+ * Does this row run straight into the next one, with no wrap flag to say so?
+ *
+ * A full-screen program draws each row at its own cursor position, so the
+ * terminal never wraps and never sets `isWrapped`. Codex prints its login URL
+ * that way: eight rows, each filling the width, and reading one row gives a
+ * fragment ending mid-parameter. Geometry alone is too loose — a shell line
+ * that happens to be exactly the terminal width would glue to the next one — so
+ * the caller also requires the join to land inside a URL.
+ */
+function terminalRowFlowsIntoNext(line, nextLine) {
+  if (!terminalRowFillsWidth(line)) {
+    return false;
+  }
+  const next = nextLine?.translateToString(false);
+  return typeof next === 'string' && next.length > 0 && !next.startsWith(' ');
+}
+
 // A path longer than the window is stored across several buffer rows flagged
 // `isWrapped`. Reading only the clicked row would truncate the link, so walk
 // back to the row that started the logical line, then forward to its end, and
@@ -13753,23 +14114,59 @@ function collectWrappedTerminalLinkLine(bufferLineNumber, getLine) {
   }
   let startNumber = bufferLineNumber;
   let startLine = anchor;
-  while (startNumber > 1 && startLine.isWrapped) {
+  let flowRows = 0;
+  for (;;) {
+    if (startNumber <= 1) {
+      break;
+    }
     const previous = getLine(startNumber - 2);
     if (!previous) {
-      return null;
+      // Only a wrap flag promises a row above; an unflagged run just stops.
+      return startLine.isWrapped ? null : buildTerminalLinkLine(
+        startNumber,
+        bufferLineNumber,
+        getLine
+      );
+    }
+    if (!startLine.isWrapped) {
+      if (
+        flowRows >= terminalDrawnLinkRowLimit ||
+        !terminalRowFlowsIntoNext(previous, startLine)
+      ) {
+        break;
+      }
+      flowRows += 1;
     }
     startNumber -= 1;
     startLine = previous;
   }
-  const segments = [];
+  return buildTerminalLinkLine(startNumber, bufferLineNumber, getLine);
+}
+
+/**
+ * Join rows from `startNumber` into the logical line holding `anchorNumber`.
+ *
+ * The backward walk above is geometric, so it can start above the anchor's real
+ * line. A run that ends before the anchor is therefore discarded and collection
+ * restarts on the next row, which is why this loops rather than returning at the
+ * first break.
+ */
+function buildTerminalLinkLine(startNumber, anchorNumber, getLine) {
+  let segments = [];
   let nextStartIndex = 0;
+  let accumulated = '';
   let currentNumber = startNumber;
   for (;;) {
     const currentLine = getLine(currentNumber - 1);
     if (!currentLine) {
       break;
     }
-    const continues = getLine(currentNumber)?.isWrapped === true;
+    const nextLine = getLine(currentNumber);
+    const continues =
+      nextLine?.isWrapped === true ||
+      (segments.length < terminalDrawnLinkRowLimit &&
+        terminalRowFlowsIntoNext(currentLine, nextLine) &&
+        terminalTailOpensUrl(accumulated + currentLine.translateToString(false)));
     // Only the final row may be right-trimmed; trimming a continued row would
     // delete padding that is part of the logical line.
     const text = currentLine.translateToString(!continues);
@@ -13785,12 +14182,19 @@ function collectWrappedTerminalLinkLine(bufferLineNumber, getLine) {
       columnSource: currentLine
     });
     nextStartIndex += text.length;
+    accumulated += text;
     if (!continues) {
-      break;
+      if (currentNumber >= anchorNumber) {
+        break;
+      }
+      // That run ended above the anchor, so it was a different logical line.
+      segments = [];
+      nextStartIndex = 0;
+      accumulated = '';
     }
     currentNumber += 1;
   }
-  return { text: segments.map((segment) => segment.text).join(''), segments };
+  return { text: accumulated, segments };
 }
 
 // xterm buffer coordinates are 1-based. Without a column map — a caller that
@@ -14055,6 +14459,10 @@ function terminalLinkLineReader() {
     let columnMap;
     return {
       isWrapped: line.isWrapped,
+      // The row's width in cells. Without it a row cut mid-token cannot be told
+      // from one broken at a word, and a link a full-screen program drew across
+      // rows stays truncated.
+      length: line.length,
       translateToString: (trimRight) => line.translateToString(trimRight),
       get columnMap() {
         columnMap ??= terminalLineColumnMap(line, reusableCell);
@@ -14205,6 +14613,9 @@ function hideTerminalLinkChip() {
   if (terminalLinkChip) {
     terminalLinkChip.hidden = true;
   }
+  if (terminalLinkCopyChip) {
+    terminalLinkCopyChip.hidden = true;
+  }
 }
 
 function terminalLinkAtClientPoint(clientX, clientY) {
@@ -14238,6 +14649,10 @@ function terminalLinkAtClientPoint(clientX, clientY) {
     let columnMap;
     return {
       isWrapped: line.isWrapped,
+      // The row's width in cells. Without it a row cut mid-token cannot be told
+      // from one broken at a word, and a link a full-screen program drew across
+      // rows stays truncated.
+      length: line.length,
       translateToString: (trimRight) => line.translateToString(trimRight),
       get columnMap() {
         columnMap ??= terminalLineColumnMap(line, reusableCell);
@@ -14257,6 +14672,12 @@ function showTerminalLinkChip(match, clientX, clientY) {
   // The chip carries the whole accessible name; the target text is deliberately
   // left out of it, since a path or URL read aloud in full is noise.
   terminalLinkChip.setAttribute('aria-label', label);
+  if (terminalLinkCopyChip) {
+    terminalLinkCopyChip.setAttribute(
+      'aria-label',
+      match.kind === 'url' ? 'Copy link' : 'Copy path'
+    );
+  }
   const margin = 12;
   const x = Math.min(
     Math.max(margin, clientX),
@@ -14273,9 +14694,26 @@ function showTerminalLinkChip(match, clientX, clientY) {
     ? window.visualViewport.offsetTop + window.visualViewport.height
     : window.innerHeight;
   const clampedY = Math.min(y, Math.max(margin, visibleBottom - margin));
-  terminalLinkChip.style.left = `${Math.round(x)}px`;
-  terminalLinkChip.style.top = `${Math.round(clampedY)}px`;
+  // Unhide before measuring: a hidden button has no width, and the pair is
+  // centred on the tap, so both widths have to be known first.
   terminalLinkChip.hidden = false;
+  if (terminalLinkCopyChip) {
+    terminalLinkCopyChip.hidden = false;
+  }
+  const gap = 8;
+  const openWidth = terminalLinkChip.offsetWidth;
+  const copyWidth = terminalLinkCopyChip ? terminalLinkCopyChip.offsetWidth : 0;
+  const totalWidth = openWidth + (copyWidth > 0 ? gap + copyWidth : 0);
+  // Centre the pair, then push it back inside the viewport. Clamping the left
+  // edge after centring keeps both chips reachable near either screen edge.
+  const maximumLeft = Math.max(margin, window.innerWidth - margin - totalWidth);
+  const left = Math.min(Math.max(margin, x - totalWidth / 2), maximumLeft);
+  terminalLinkChip.style.left = `${Math.round(left)}px`;
+  terminalLinkChip.style.top = `${Math.round(clampedY)}px`;
+  if (terminalLinkCopyChip) {
+    terminalLinkCopyChip.style.left = `${Math.round(left + openWidth + gap)}px`;
+    terminalLinkCopyChip.style.top = `${Math.round(clampedY)}px`;
+  }
   // The keyboard's reflow can move viewportY and so fire onScroll, which would
   // retire the chip that the same tap just offered. Ignore scroll-driven hiding
   // briefly; a deliberate scroll after that still dismisses it.
@@ -14320,6 +14758,27 @@ function activateTerminalLinkChip() {
     return;
   }
   openTerminalUrlLink(match.text);
+}
+
+/**
+ * Copy the link the chip is offering.
+ *
+ * Reads the target before hiding, because hiding clears it. The text comes from
+ * the match rather than the terminal's own selection, which cannot cover a link
+ * a full-screen program drew across several rows.
+ */
+async function copyTerminalLinkChip() {
+  const match = terminalLinkChipTarget;
+  hideTerminalLinkChip();
+  if (!match) {
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(match.text);
+    setStatus(match.kind === 'url' ? 'Link copied' : 'Path copied');
+  } catch {
+    setStatus('Clipboard refused — long-press the text to select it');
+  }
 }
 
 function installTerminalLinkModifierTracking() {
@@ -15611,6 +16070,9 @@ restorePasteHistoryIfOptedIn();
 installViewSwipeGestures();
 installKeyPanelGrip();
 terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
+terminalLinkCopyChip?.addEventListener('click', () => {
+  void copyTerminalLinkChip();
+});
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
 selectionCopyChip?.addEventListener(
@@ -15789,6 +16251,14 @@ document.addEventListener('pointerdown', preserveKeyboardState, {
 });
 const resizeObserver = new ResizeObserver(scheduleFit);
 resizeObserver.observe(terminalElement);
+// The box the terminal is sized against, as well as the terminal. A lifted
+// terminal holds its own height by definition, so watching only itself means the
+// keyboard leaving changes nothing it can see — the lift would survive until
+// something else happened to fit. Watching the parent makes the box that
+// actually changed the trigger.
+if (terminalElement.parentElement) {
+  resizeObserver.observe(terminalElement.parentElement);
+}
 const publishFooterHeight = () => {
   if (!footerElement) {
     return;

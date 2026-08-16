@@ -122,6 +122,11 @@
   );
   --app-height: 100dvh;
   --app-top: 0px;
+  /* The terminal's own height and offset while the soft keyboard is up. Only
+   * html.terminal-lifted reads them; these are the resting values it falls back
+   * to between keyboards. See terminalLiftForKeyboard() in app.js. */
+  --terminal-pinned-height: 100%;
+  --terminal-lift: 0px;
   --header-height: var(--header-control);
   --session-rail-width: 0px;
   --terminal-bg: #0b0e13;
@@ -1047,7 +1052,8 @@ body.files-view #files-name-dialog {
 /* Touch link chip. Sized to the product's touch baseline so a one-cell-wide link is
  * still comfortably reachable — the chip is the target, not the glyphs. Positioned
  * from JS at the tap point, clamped to the viewport. */
-#terminal-link-chip {
+#terminal-link-chip,
+#terminal-link-copy-chip {
   position: fixed;
   z-index: 60;
   min-height: 44px;
@@ -1057,30 +1063,42 @@ body.files-view #files-name-dialog {
   background: var(--accent-surface);
   color: var(--accent-text);
   font: var(--control-font);
-  /* Anchored just above the tap so a fingertip is not covering it. */
-  transform: translate(-50%, calc(-100% - 10px));
+  /* Anchored just above the tap so a fingertip is not covering it. The pair is
+   * centred from JS, which needs both left edges to mean the same thing. */
+  transform: translate(0, calc(-100% - 10px));
   box-shadow: 0 6px 18px rgb(0 0 0 / 35%);
   cursor: pointer;
 }
 
-#terminal-link-chip:focus-visible {
+/* Second in the pair, so it reads as the quieter of the two actions. */
+#terminal-link-copy-chip {
+  border-color: var(--border);
+  background: var(--surface);
+  color: var(--text);
+}
+
+#terminal-link-chip:focus-visible,
+#terminal-link-copy-chip:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
-#terminal-link-chip:active {
+#terminal-link-chip:active,
+#terminal-link-copy-chip:active {
   background: var(--surface-pressed);
 }
 
 /* A fine pointer has the modifier gesture and never needs this. */
 @media (pointer: fine) {
-  #terminal-link-chip {
+  #terminal-link-chip,
+  #terminal-link-copy-chip {
     display: none;
   }
 }
 
 /* Files view has no terminal cell for it to describe. Mirrors the Copy chip. */
-body.files-view #terminal-link-chip {
+body.files-view #terminal-link-chip,
+body.files-view #terminal-link-copy-chip {
   display: none !important;
 }
 
@@ -1823,6 +1841,25 @@ body.view-swiping {
 }
 
 /*
+ * Soft keyboard open: the grid holds the height it had before the keyboard, and
+ * slides up by whatever no longer fits. `main` clips, so the rows that leave go
+ * under the header rather than out of the grid.
+ *
+ * The row count is the point. Refitting for the keyboard shrinks the tmux pane,
+ * and Codex answers SIGWINCH by erasing the scrollback — see
+ * terminalLiftForKeyboard() in app.js.
+ *
+ * Behind a class rather than a bare var() fallback so the resting layout is
+ * untouched. `transform` makes an element a containing block for fixed
+ * descendants and a stacking context, and translateY(0) does it just as much as
+ * translateY(-180px) — the resting terminal should not carry either.
+ */
+html.terminal-lifted #terminal {
+  height: var(--terminal-pinned-height);
+  transform: translateY(var(--terminal-lift));
+}
+
+/*
  * Stable full-area scroll target above xterm. Live terminal DOM under the
  * finger cancels iOS swipes; this empty layer does not.
  */
@@ -2541,9 +2578,14 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
  * The keyboard-area panel.
  *
  * Height is set from JS to the last measured keyboard height, so swapping
- * keyboard for panel moves nothing: the terminal keeps the same row count either
- * way. Opening it with the keyboard down costs one reflow, which is the same
- * cost as raising the keyboard and is unavoidable.
+ * keyboard for panel moves nothing.
+ *
+ * The row count no longer depends on that matching. The panel is counted by
+ * terminalCoverHeight() as something covering the terminal rather than shrinking
+ * it, so the grid holds its rows and slides up whether the panel arrives with
+ * the keyboard or on its own. That reflow used to be "the same cost as raising
+ * the keyboard and unavoidable"; it was avoidable, and what it cost was the
+ * session's scrollback.
  *
  * It is a child of <footer>, so publishFooterHeight's ResizeObserver already
  * measures it and --footer-height follows for free.
