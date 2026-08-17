@@ -38,6 +38,25 @@ Untrusted Internet
 └───────────────────────┘
 ```
 
+### The one route with no login on it
+
+`POST /api/control/focus-session` moves an open browser tab to another tmux
+session. It is answered before the identity check, because the caller is a
+process on the host — `vps-terminal-focus`, over the Unix socket — and that path
+never passes through the proxy, so there is no verified login on it to read.
+
+What stands in for the login is the socket itself: reaching the route means
+being able to open `VPS_TERMINAL_SOCKET`. For the service's own Unix user that
+grants nothing new — it can already run `tmux` and start a shell. A separate
+uid given group access to the socket, such as a proxy in a container, is the
+case to think about: it gains "move a tab" without gaining a shell. Share the
+socket with the proxy only, and keep the group empty otherwise.
+
+The route refuses anything that came through the edge: a request carrying
+`X-Vps-Authenticated-Email`, or any `X-Forwarded-*` header, is answered 403. A
+TCP bind with no socket configured refuses it outright. It moves a tab and
+nothing else — it cannot type, read, or name a session that is not running.
+
 ## Hard requirements for production
 
 1. Set `VPS_TERMINAL_ORIGIN` to the exact public HTTPS origin (fail-closed if missing).
@@ -59,6 +78,7 @@ Untrusted Internet
 | Stolen browser cookie | Short auth cookie TTL (e.g. 1h); Google 2FA/passkeys; app WS max lifetime 1h. |
 | Over-broad Google allowlist | Explicit email list; treat each address as an admin of that Unix user. |
 | `LOCAL_DEV` exposed | Skips auth; loopback only; forbidden with `VPS_TERMINAL_SOCKET`. |
+| Tab moved by something local | Socket permissions are the gate; the route refuses any request carrying proxy headers, and moves a tab without typing into it. |
 | Compromised proxy | Compromised shell — isolate host, minimize proxy attack surface. |
 | Lost SSH after firewall change | Keep provider console; open SSH before locking yourself out. |
 

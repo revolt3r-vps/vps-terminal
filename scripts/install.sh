@@ -76,6 +76,14 @@ install -m 600 \
   "${app_source}/preferences-store.js" \
   "${state_root}/preferences-store.js"
 install -m 700 "${app_source}/attach-session" "${state_root}/attach-session"
+# The host command that moves an open browser tab to a session. On PATH rather
+# than in the app directory, because scripts and agents on this host call it by
+# name. It finds the socket itself.
+install -d -m 700 "${HOME}/.local/bin"
+install -m 700 \
+  "${app_source}/bin/vps-terminal-focus" \
+  "${HOME}/.local/bin/vps-terminal-focus"
+node --check "${HOME}/.local/bin/vps-terminal-focus"
 node --check "${state_root}/fs-jail.js"
 node --check "${state_root}/diagnostics.js"
 node --check "${state_root}/preferences-store.js"
@@ -153,6 +161,7 @@ install.sh: PASS
 
 Listening on: ${state_root}/run/terminal.sock
 Origin:       ${origin_required}
+Tab command:  ${HOME}/.local/bin/vps-terminal-focus
 
 The app is private until you put TLS + login in front of the socket.
 

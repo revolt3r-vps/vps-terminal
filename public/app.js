@@ -66,10 +66,6 @@ const filesUpNavButton = document.querySelector('#files-up-nav');
 // after the select was removed left it null, and syncFilesNavPlacement() returned
 // early — so the header nav quietly stopped being populated at all.
 const filesLocationWrap = document.querySelector('#files-bookmarks-open');
-const filesOptionsDialog = document.querySelector('#files-options-dialog');
-const filesOptionsClose = document.querySelector('#files-options-close');
-const filesOptionNewFolder = document.querySelector('#files-option-new-folder');
-const filesOptionHidden = document.querySelector('#files-option-hidden');
 const filesStartSessionButtons = document.querySelectorAll(
   '[data-files-start-session]'
 );
@@ -101,10 +97,9 @@ const commandPaletteList = document.querySelector('#command-palette-list');
 const commandPaletteEmpty = document.querySelector('#command-palette-empty');
 const commandPaletteClose = document.querySelector('#command-palette-close');
 const gamesViewToggle = document.querySelector('#games-view-toggle');
+const newGameSection = document.querySelector('#new-game-section');
+const newGameButton = document.querySelector('#new-game-button');
 const gamesViewListElement = document.querySelector('#games-view-list');
-const gamesViewTabButton = document.querySelector(
-  '.key-panel-tab[data-panel-tab="gamelab"]'
-);
 const feedbackDialog = document.querySelector('#feedback-dialog');
 const feedbackTargetElement = document.querySelector('#feedback-target');
 const feedbackTextElement = document.querySelector('#feedback-text');
@@ -164,6 +159,10 @@ const preferencesSyncRetryButton = document.querySelector(
 );
 const decoder = new TextDecoder();
 const activeSessionStorageKey = 'vps-terminal-active-session';
+// Where you stood in each mode, GameLab on and off. Device-local, beside the
+// active session and the Files location it is made of, not in the account
+// preferences: the setting follows the login, the place is this browser's.
+const modePlacesStorageKey = 'vps-terminal-mode-places';
 const terminalFontSizeStorageKey = 'vps-terminal-font-size';
 const terminalThemeStorageKey = 'vps-terminal-theme';
 // Written by applyAppTheme, read before first paint by viewport-init.js.
@@ -201,6 +200,7 @@ const preferencesBootstrapStorageKey =
   'vps-terminal-preferences-bootstrap-v1';
 const keyPanelHeightStorageKey = 'vps-terminal-key-panel-height';
 const keyPanelTabStorageKey = 'vps-terminal-key-panel-tab';
+const keyPanelFilesTabStorageKey = 'vps-terminal-key-panel-tab-files';
 const pasteHistoryStorageKey = 'vps-terminal-paste-history';
 const pasteHistoryPersistStorageKey = 'vps-terminal-paste-history-keep';
 const viewModeStorageKey = 'vps-terminal-view-mode';
@@ -936,11 +936,17 @@ const terminalThemes = {
 };
 let sessions = [];
 let activeSession = null;
-// Games view. `available` comes from GET /api/config and only says the server
-// has a games root; `enabled` is the per-account setting and is the one that
-// changes what is shown.
+// Games view. The switch, the setting, and the docs call it GameLab Mode; the
+// code, the API, and the stored preference keep the name `gamesView`, because
+// renaming the stored key would drop everybody's saved setting.
+// `available` comes from GET /api/config and only says the server has a games
+// root; `enabled` is the per-account setting and is the one that changes what
+// is shown.
 let gamesViewAvailable = false;
 let gamesViewEnabled = false;
+// Whether this install can start the interview at all: a games root and the
+// studio directory the skill lives in, both reported by GET /api/config.
+let newGameAvailable = false;
 // Every game on the host, from GET /api/games — not only the ones with a
 // session running, because Files lists folders and a game nobody is working on
 // today is still there.
@@ -965,9 +971,44 @@ function sessionIsGame(session) {
   );
 }
 
+/**
+ * A game-studio interview: the session Create-new-game opens. The server marks
+ * it, because the naming is a server setting. Temporary, and not a game — it
+ * holds the questions that come before a game exists.
+ */
+function sessionIsStudio(session) {
+  return session?.studio === true;
+}
+
+/**
+ * Games view lists games, and the interviews that are on their way to being one.
+ * Without the interviews, tapping Create-new-game would attach the app to a
+ * session with no row, and switching to the new game would strand a conversation
+ * still in progress.
+ */
 function gamesViewSessions(list, enabled) {
   const all = Array.isArray(list) ? list : [];
-  return enabled ? all.filter(sessionIsGame) : all;
+  return enabled
+    ? all.filter((session) => sessionIsGame(session) || sessionIsStudio(session))
+    : all;
+}
+
+/**
+ * The rail's label for one row.
+ *
+ * In Games view every row is a game, so the `game-` prefix is the same six
+ * characters on every line and says nothing — the slug carries it. An interview
+ * has no slug yet, and `lab-2` names an implementation detail, so it says what it
+ * is instead.
+ */
+function sessionRowLabel(session, enabled) {
+  if (!enabled) {
+    return session.name;
+  }
+  if (sessionIsGame(session)) {
+    return session.game.slug;
+  }
+  return sessionIsStudio(session) ? 'New game' : session.name;
 }
 
 /**
@@ -982,6 +1023,36 @@ function gamesViewRoots(roots, enabled) {
   }
   const games = all.filter((root) => root && root.id === 'games');
   return games.length > 0 ? games : all;
+}
+
+/**
+ * Where "up" goes from the top of a root, when a root contains it.
+ *
+ * The games root is `~/projects/games`, inside the projects root, so its top
+ * had no parent and the up button was dead there. `parentRoot` comes from the
+ * server and names the containing root and the path of this root's own parent
+ * directory inside it. `name` is this root's folder, so the row you climbed out
+ * of stays selected.
+ *
+ * Pass the roots Files is currently offering, not the whole catalog. That is
+ * what keeps the GameLab Mode ceiling: with the setting on, `projects` is not
+ * offered, so up stops at the games root the way it did before.
+ */
+function filesParentRootTarget(roots, rootId) {
+  const offered = Array.isArray(roots) ? roots.filter(Boolean) : [];
+  const here = offered.find((root) => root.id === rootId);
+  const parent = here && here.parentRoot;
+  if (!parent || typeof parent.id !== 'string' || !parent.id) {
+    return null;
+  }
+  if (!offered.some((root) => root.id === parent.id)) {
+    return null;
+  }
+  return {
+    root: parent.id,
+    path: typeof parent.path === 'string' ? parent.path : '',
+    name: typeof parent.name === 'string' ? parent.name : ''
+  };
 }
 
 // Host diagnostics. Real work for whoever runs the box, noise for whoever came
@@ -1047,6 +1118,86 @@ function gamesViewFilesTarget(rootId, currentPath, enabled) {
   return { root: 'games', path: '' };
 }
 
+/**
+ * A place in the app: the session, the Files location, and which of Terminal
+ * and Files is on screen. One is kept per mode.
+ *
+ * The mode moves people. Turning it on can drop you into the first game and
+ * send Files to the games root; turning it off used to leave you exactly where
+ * the mode had put you, with your own session and folder gone. Each mode now
+ * remembers where you stood when you last left it.
+ *
+ * Read back from storage, so every field is checked rather than trusted. The
+ * patterns are the ones the server already enforces for a session name and a
+ * root id; a path with a `..` segment is dropped whole rather than repaired.
+ */
+function normalizeModePlace(value) {
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  const place = { session: null, files: null, view: null };
+  if (
+    typeof value.session === 'string' &&
+    /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(value.session)
+  ) {
+    place.session = value.session;
+  }
+  const files = value.files;
+  if (
+    files &&
+    typeof files === 'object' &&
+    typeof files.root === 'string' &&
+    /^[a-z][a-z0-9_-]{0,31}$/.test(files.root) &&
+    typeof files.path === 'string' &&
+    files.path.length <= 4096 &&
+    // Backslashes first, the way `fs-jail.js` reads a path. Splitting on `/`
+    // alone let `a\..\..\etc` through a check that says it drops `..`.
+    !files.path.replace(/\\/g, '/').split('/').includes('..')
+  ) {
+    place.files = { root: files.root, path: files.path };
+  }
+  if (value.view === 'files' || value.view === 'term') {
+    place.view = value.view;
+  }
+  return place.session || place.files || place.view ? place : null;
+}
+
+/**
+ * The same place with everything that no longer works taken out.
+ *
+ * A session can be gone, or be one this mode does not list. A root can be one
+ * this mode does not offer. Each part is dropped on its own, so a place with a
+ * dead session still returns you to your folder.
+ */
+function usableModePlace(place, context) {
+  const clean = normalizeModePlace(place);
+  if (!clean) {
+    return null;
+  }
+  const enabled = context?.enabled === true;
+  const usable = { session: null, files: null, view: clean.view };
+  const listed = gamesViewSessions(context?.sessions, enabled);
+  if (clean.session && listed.some((session) => session?.name === clean.session)) {
+    usable.session = clean.session;
+  }
+  if (clean.files) {
+    const offered = gamesViewRoots(context?.roots, enabled);
+    const target = gamesViewFilesTarget(
+      clean.files.root,
+      clean.files.path,
+      enabled
+    );
+    if (
+      offered.some((root) => root.id === clean.files.root) &&
+      target.root === clean.files.root &&
+      target.path === clean.files.path
+    ) {
+      usable.files = clean.files;
+    }
+  }
+  return usable.session || usable.files || usable.view ? usable : null;
+}
+
 /** Whether the Files view is standing inside this game's folder. */
 function filesLocationIsGame(rootId, currentPath, slug) {
   if (rootId !== 'games' || typeof slug !== 'string' || !slug) {
@@ -1077,6 +1228,40 @@ function gameFeedbackLine(text) {
 }
 // End of the pure Games view block.
 
+/**
+ * A control frame, or nothing.
+ *
+ * The server is the only writer on this channel, and the page reads it anyway:
+ * the frame is parsed, the type matched by name, and the session held to the
+ * shape the server accepts for one. Anything else is dropped without a word,
+ * because a message this tab cannot name is not one it should act on.
+ */
+function controlMessageIntent(raw) {
+  if (typeof raw !== 'string' || raw.length > 4096) {
+    return null;
+  }
+  let value = null;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return null;
+  }
+  if (!value || typeof value !== 'object') {
+    return null;
+  }
+  if (value.type !== 'focus-session') {
+    return null;
+  }
+  if (
+    typeof value.session !== 'string' ||
+    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(value.session)
+  ) {
+    return null;
+  }
+  return { type: 'focus-session', session: value.session };
+}
+// End of the pure control channel block.
+
 let terminal = null;
 let terminalInitialization = null;
 let fitAddon = null;
@@ -1087,6 +1272,19 @@ let lastSentTerminalRows = null;
 let reconnectTimer = null;
 // Consecutive failures to establish a socket. Reset the moment one opens.
 let reconnectAttempts = 0;
+// The control channel: a second socket carrying messages from the server to
+// this tab. Nothing is sent on it. It is separate from the terminal socket
+// because that one is a byte pipe running a PTY.
+let controlSocket = null;
+let controlReconnectTimer = null;
+let controlReconnectAttempts = 0;
+// When the tab was last hidden. A phone that suspends a tab can leave the
+// socket reading OPEN with nothing behind it, and the page has no way to ping:
+// the browser answers the server's ping itself and reports nothing. So a tab
+// that was away longer than one server ping round replaces the channel rather
+// than trusting what readyState says.
+let controlHiddenSince = 0;
+const controlStaleAfterMs = 30000;
 // The session a connect() is currently opening a socket for, so a concurrent connect
 // for the same session does not open a second one.
 let connectingSession = null;
@@ -1427,8 +1625,8 @@ function updateTermControlsEnabled() {
   } else if (pasteButton && terminalHasCopyableSelection()) {
     pasteButton.disabled = false;
   }
-  // The gear reaches the panel on a phone and the settings dialog everywhere
-  // else, so it says the one that is actually going to open.
+  // Every gear reaches the panel now — both views have it — so there is one
+  // name to say rather than a branch on which surface is going to open.
   for (const button of [
     document.querySelector('#settings'),
     headerSettingsButton
@@ -1436,12 +1634,8 @@ function updateTermControlsEnabled() {
     if (!button) {
       continue;
     }
-    const opensPanel = keyPanelIsAvailable();
-    button.title = opensPanel ? 'Panel' : 'Settings';
-    button.setAttribute(
-      'aria-label',
-      opensPanel ? 'Open panel' : 'Open settings'
-    );
+    button.title = 'Panel';
+    button.setAttribute('aria-label', 'Open panel');
   }
 }
 
@@ -2405,21 +2599,39 @@ function renderFooterDrawer() {
  * this covers the keyboard, which you were not using anyway.
  */
 
-// Paste leads: it is the tab reached for most, and the one whose rows are all
-// one tap. The order here is the order in the strip.
-const keyPanelTabs = [
-  'paste',
-  'keys',
-  'snippets',
-  'appearance',
-  'debug',
-  'gamelab',
-  'app'
-];
+/**
+ * What each view offers, first entry first.
+ *
+ * These are also the strip order: the markup lists every tab once, in the union
+ * of these two orders, and the strip hides the ones this view does not offer
+ * rather than moving anything.
+ *
+ * Paste leads in Term: it is the tab reached for most, and the one whose rows
+ * are all one tap. Files leads in Files for the same reason.
+ *
+ * Three tabs are in both lists. Appearance sets the app theme as well as the
+ * terminal one — applyTerminalTheme calls applyAppTheme — so Files is coloured
+ * by it too. App is the install button, the build id and preferences sync,
+ * which belong to the app rather than to either view. GameLab decides what
+ * Files opens on and what Term lists, so leaving it out of one would hide the
+ * setting from half the place it acts on.
+ */
+const keyPanelTabsByView = Object.freeze({
+  term: Object.freeze([
+    'paste',
+    'keys',
+    'snippets',
+    'appearance',
+    'debug',
+    'gamelab',
+    'app'
+  ]),
+  files: Object.freeze(['files', 'appearance', 'gamelab', 'app'])
+});
 // Non-zero once a keyboard has actually been seen this session.
 let lastKeyboardHeight = 0;
 let keyPanelOpen = false;
-let keyPanelTab = keyPanelTabs[0];
+let keyPanelTab = keyPanelTabsByView.term[0];
 // What the Keys tab is doing: sending keys, editing them, or picking a new one.
 // Never persisted — an edit mode that survived a reload would be a surprise.
 let keyPanelKeysMode = 'list';
@@ -2430,7 +2642,7 @@ let keyPanelSnippetsMode = 'list';
 let terminalSlack = 0;
 
 /**
- * Anywhere, in Term.
+ * Anywhere, in either view.
  *
  * It takes a different shape in each layout. Portrait puts it in the footer's
  * flow, standing in for the keyboard, so nothing reflows on the swap. Landscape
@@ -2438,7 +2650,92 @@ let terminalSlack = 0;
  * overlays the bottom of the terminal there.
  */
 function keyPanelIsAvailable() {
-  return Boolean(keyPanelElement && viewMode === 'term');
+  return Boolean(keyPanelElement);
+}
+
+/** The tabs this view lists, before any of them are checked for availability. */
+function keyPanelViewTabs() {
+  return keyPanelTabsByView[viewMode === 'files' ? 'files' : 'term'];
+}
+
+/**
+ * Whether a tab has anything to show, apart from which view is up.
+ *
+ * Debug is behind five taps on the build id. GameLab needs a games root on the
+ * server. Both stay in the markup either way, so the answer is asked here
+ * rather than read off the strip.
+ */
+function keyPanelTabAvailable(tab) {
+  // The view decides first. Debug unlocked in Term does not put a Debug tab on
+  // the Files strip, and setKeyPanelTab('debug') from Files must not be taken.
+  if (!keyPanelViewTabs().includes(tab)) {
+    return false;
+  }
+  if (tab === 'debug') {
+    return debugTabUnlocked();
+  }
+  if (tab === 'gamelab') {
+    return gamesViewAvailable;
+  }
+  return true;
+}
+
+/** The tabs actually on the strip right now, in strip order. */
+function keyPanelOfferedTabs() {
+  return keyPanelViewTabs().filter(keyPanelTabAvailable);
+}
+
+/** Where the panel lands when the tab it was on is not offered here. */
+function defaultKeyPanelTab() {
+  return keyPanelOfferedTabs()[0] || keyPanelViewTabs()[0];
+}
+
+/**
+ * Show the tabs this view offers and hide the rest.
+ *
+ * One place decides, because three things gate the strip — the view, the debug
+ * unlock and the games root — and each of them used to hide its own tab. Two
+ * owners of `hidden` on the same button is how a tab comes back on a view
+ * switch after being locked away.
+ */
+function updateKeyPanelTabVisibility() {
+  const offered = new Set(keyPanelOfferedTabs());
+  for (const button of document.querySelectorAll(
+    '#key-panel-tabs [data-panel-tab]'
+  )) {
+    button.hidden = !offered.has(button.dataset.panelTab);
+  }
+  if (keyPanelKeyboardButton) {
+    // Files has no keyboard for it to bring back, and the folder toolbar is
+    // still on screen there, so the way out of the panel is the gear.
+    keyPanelKeyboardButton.hidden = viewMode === 'files';
+  }
+}
+
+/**
+ * Re-scope the strip after a view switch.
+ *
+ * With the panel up, a tab both views offer survives the switch: cross from
+ * Term to Files on Appearance and Appearance is what you are still looking at.
+ *
+ * With the panel down there is nothing to carry, so the view goes back to the
+ * tab it was last opened on. Carrying it anyway was a bug in both directions:
+ * Files opened on Appearance because Term had been there, and the write
+ * underneath threw away what Files actually remembered. Boot hit it every time
+ * — loadKeyPanelTab() reads the Term key, then the first setViewMode('files')
+ * carried that answer straight into the Files one.
+ */
+function syncKeyPanelForView() {
+  updateKeyPanelTabVisibility();
+  if (keyPanelOpen && keyPanelOfferedTabs().includes(keyPanelTab)) {
+    setKeyPanelTab(keyPanelTab);
+    return;
+  }
+  // Restoring what this view already remembers is not a choice of tab, so it
+  // does not write one back.
+  setKeyPanelTab(storedKeyPanelTab() || defaultKeyPanelTab(), {
+    persist: false
+  });
 }
 
 // ---- Start of the pure keyboard height block. ----
@@ -2562,16 +2859,29 @@ function clampedKeyPanelHeight() {
   );
 }
 
-function loadKeyPanelTab() {
+/**
+ * The remembered tab for a view, or null if there is not a usable one.
+ *
+ * A key per view, because the two strips share only three tabs: one key would
+ * make every crossing from Keys to Files overwrite the other view's answer.
+ * Term keeps the original key so an existing install does not forget its tab.
+ */
+function storedKeyPanelTab(view = viewMode) {
+  const files = view === 'files';
+  const key = files ? keyPanelFilesTabStorageKey : keyPanelTabStorageKey;
   try {
-    const stored = window.localStorage.getItem(keyPanelTabStorageKey);
-    if (keyPanelTabs.includes(stored)) {
+    const stored = window.localStorage.getItem(key);
+    if (keyPanelTabsByView[files ? 'files' : 'term'].includes(stored)) {
       return stored;
     }
   } catch {
-    // Default below.
+    // Null below.
   }
-  return keyPanelTabs[0];
+  return null;
+}
+
+function loadKeyPanelTab() {
+  return storedKeyPanelTab() || defaultKeyPanelTab();
 }
 
 function setKeyPanelKeysMode(mode) {
@@ -2585,18 +2895,31 @@ function setKeyPanelSnippetsMode(mode) {
   renderKeyPanel();
 }
 
-function setKeyPanelTab(tab) {
-  keyPanelTab = keyPanelTabs.includes(tab) ? tab : keyPanelTabs[0];
+function setKeyPanelTab(tab, options = {}) {
+  // Against what this view offers, not against every tab there is markup for.
+  // Asking for `keys` in Files, or `debug` while it is locked, lands on the
+  // first tab the strip is actually showing.
+  keyPanelTab = keyPanelTabAvailable(tab) ? tab : defaultKeyPanelTab();
   if (keyPanelTab !== 'keys') {
     keyPanelKeysMode = 'list';
   }
   if (keyPanelTab !== 'snippets') {
     keyPanelSnippetsMode = 'list';
   }
-  try {
-    window.localStorage.setItem(keyPanelTabStorageKey, keyPanelTab);
-  } catch {
-    // The tab just will not survive a reload.
+  // `persist: false` for a tab the app chose rather than the user. Every write
+  // here lands in the current view's key, so a restore that wrote back would
+  // overwrite the other view's answer on the way past.
+  if (options.persist !== false) {
+    try {
+      window.localStorage.setItem(
+        viewMode === 'files'
+          ? keyPanelFilesTabStorageKey
+          : keyPanelTabStorageKey,
+        keyPanelTab
+      );
+    } catch {
+      // The tab just will not survive a reload.
+    }
   }
   for (const button of document.querySelectorAll('.key-panel-tab[data-panel-tab]')) {
     button.setAttribute(
@@ -2658,6 +2981,10 @@ function setKeyPanelOpen(open) {
     // still shrinking, with the footer already carrying the panel.
     keyboardLayoutLock = null;
     clearLockedAppGeometry({ force: true });
+    // The strip is scoped to the view, and this is the moment it becomes
+    // visible. Recomputing here means the panel is never shown carrying the
+    // other view's tabs, whatever route the view changed by.
+    updateKeyPanelTabVisibility();
     setKeyPanelTab(keyPanelTab);
   } else {
     keyPanelElement.hidden = true;
@@ -2851,7 +3178,9 @@ function renderKeyPanel() {
   if (!page) {
     return;
   }
-  if (keyPanelTab === 'keys') {
+  if (keyPanelTab === 'files') {
+    renderKeyPanelFiles(page);
+  } else if (keyPanelTab === 'keys') {
     renderKeyPanelKeys(page);
   } else if (keyPanelTab === 'snippets') {
     renderKeyPanelSnippets(page);
@@ -4511,6 +4840,86 @@ function keyPanelGroupLabel(text) {
   return label;
 }
 
+/**
+ * The switch the panel uses instead of a checkbox.
+ *
+ * No field may live in this panel: it stands where the keyboard stands, and a
+ * field there summons the very thing it replaced. A checkbox does not summon
+ * one, but a switch is what GameLab already uses, and two spellings of the same
+ * control on neighbouring tabs is worse than the extra markup.
+ */
+function keyPanelSwitch(id, label, checked, onToggle) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.id = id;
+  button.className = 'settings-switch';
+  button.setAttribute('role', 'switch');
+  button.setAttribute('aria-checked', String(Boolean(checked)));
+  const track = document.createElement('span');
+  track.className = 'settings-switch-track';
+  track.setAttribute('aria-hidden', 'true');
+  const text = document.createElement('span');
+  text.textContent = label;
+  button.append(track, text);
+  // Read off the element, not off the `checked` this was built with. The state
+  // is patched in place rather than re-rendered — a switch that replaces itself
+  // inside its own click handler drops focus to <body> and announces nothing —
+  // so the closure's copy goes stale after the first tap.
+  button.addEventListener('click', () => {
+    onToggle(button.getAttribute('aria-checked') !== 'true');
+  });
+  return button;
+}
+
+/**
+ * The Files page: what the File options dialog held, on the panel instead.
+ *
+ * Three controls and no headings. The panel is only as tall as the keyboard it
+ * stands in for, its actions row is sticky, and a fourth row does not scroll —
+ * it sits behind the buttons. Nothing here names the folder because the
+ * breadcrumb does, at the top of the screen, where the panel does not reach.
+ */
+function renderKeyPanelFiles(page) {
+  const hidden = keyPanelSwitch(
+    'files-option-hidden',
+    'Show hidden files',
+    filesShowHidden,
+    (next) => {
+      filesShowHidden = next;
+      saveFilesShowHidden();
+      updateFilesHiddenControls();
+      if (filesListing) {
+        renderFilesListing(filesListing);
+      } else {
+        void refreshFilesListing();
+      }
+    }
+  );
+
+  // Both actions put something else on screen — a modal, or the selection bar
+  // over the listing — so the panel gets out of the way first.
+  const newFolder = keyPanelAction('New folder', () => {
+    setKeyPanelOpen(false);
+    openFilesNameDialog('create');
+  });
+  newFolder.id = 'files-option-new-folder';
+  newFolder.disabled = !filesWritable;
+  if (!filesWritable) {
+    newFolder.title = 'This folder is read-only';
+  }
+
+  const select = keyPanelAction(
+    filesSelectMode ? 'Stop selecting' : 'Select files',
+    () => {
+      setKeyPanelOpen(false);
+      setFilesSelectMode(!filesSelectMode);
+    }
+  );
+  select.id = 'files-option-select';
+
+  page.replaceChildren(hidden, createKeyPanelActions(newFolder, select));
+}
+
 function createKeyPanelPasteItem(label, detail, mode, onTap) {
   const item = document.createElement('button');
   item.type = 'button';
@@ -4910,6 +5319,7 @@ async function loadAppConfig() {
       shipClientDebugEntries(clientDebugEntries.slice(-20));
     }
     gamesViewAvailable = cfg?.gamesView === true;
+    newGameAvailable = cfg?.newGame === true;
     refreshGamesViewUi();
     if (cfg && typeof cfg.appName === 'string' && cfg.appName.trim()) {
       appDisplayName = cfg.appName.trim().slice(0, 64);
@@ -9501,13 +9911,69 @@ function clearFilesSelection() {
   setFilesSelection(-1, { scroll: false });
 }
 
+/**
+ * Files is standing somewhere new and the pane has not caught up.
+ *
+ * The listing in hand describes the folder just left. Anything that reads it
+ * before the next one lands — the up button, a row tap, "start a session here"
+ * — would answer for that folder, and up is the one that shows: it would climb
+ * out of a place nobody is looking at. Dropped rather than kept; every reader
+ * is already written for no listing, which is also the state at startup.
+ */
+function beginFilesNavigation() {
+  filesListing = null;
+  refreshFilesUpButtonState();
+}
+
+/**
+ * The up button, on or off.
+ *
+ * Recomputed when a listing arrives, when Files starts moving, and when GameLab
+ * Mode is switched: the setting decides which roots are offered, and therefore
+ * whether the top of this root has a way out.
+ */
+function refreshFilesUpButtonState() {
+  if (!filesUpButton) {
+    return;
+  }
+  if (!filesListing) {
+    filesUpButton.disabled = true;
+    return;
+  }
+  const atRoot =
+    filesListing.parent === null || filesListing.parent === undefined;
+  filesUpButton.disabled =
+    atRoot &&
+    !filesParentRootTarget(
+      gamesViewRoots(filesRootsCatalog, gamesViewEnabled),
+      filesRootId
+    );
+}
+
 function navigateFilesParent() {
-  if (
-    !filesListing ||
-    filesListing.parent === null ||
-    filesListing.parent === undefined
-  ) {
+  if (!filesListing) {
     return false;
+  }
+  if (filesListing.parent === null || filesListing.parent === undefined) {
+    // Top of a root. If a root contains this one, up crosses into it.
+    const up = filesParentRootTarget(
+      gamesViewRoots(filesRootsCatalog, gamesViewEnabled),
+      filesRootId
+    );
+    if (!up) {
+      return false;
+    }
+    closeFilesPreview({ restoreFocus: false });
+    filesRestoreSelectionName = up.name;
+    filesSelectedName = '';
+    filesSelectedIndex = -1;
+    filesRootId = up.root;
+    filesPath = up.path;
+    beginFilesNavigation();
+    saveFilesNav();
+    renderFilesRoots();
+    void refreshFilesListing();
+    return true;
   }
   const segments = String(filesListing.path || '').split('/').filter(Boolean);
   closeFilesPreview({ restoreFocus: false });
@@ -9515,6 +9981,7 @@ function navigateFilesParent() {
   filesSelectedName = '';
   filesSelectedIndex = -1;
   filesPath = filesListing.parent;
+  beginFilesNavigation();
   saveFilesNav();
   void refreshFilesListing();
   return true;
@@ -9591,6 +10058,7 @@ function goToFilesLocation(root, path) {
   filesSelectedName = '';
   filesSelectedIndex = -1;
   filesRestoreSelectionName = '';
+  beginFilesNavigation();
   saveFilesNav();
   renderFilesRoots();
   void refreshFilesListing();
@@ -10057,10 +10525,13 @@ function setViewMode(mode, options = {}) {
   if (footerFilesElement) {
     footerFilesElement.hidden = next !== 'files';
   }
+  // The panel stays open across the switch and swaps its strip for the one this
+  // view offers. Before the branches below, so the tab is already right by the
+  // time either of them renders anything.
+  syncKeyPanelForView();
   if (next === 'files') {
     closeFindBar();
     closeFooterDrawer();
-    setKeyPanelOpen(false);
     // It describes a terminal cell, so it has no meaning here.
     hideTerminalLinkChip();
     terminal?.blur();
@@ -10079,7 +10550,6 @@ function setViewMode(mode, options = {}) {
   }
   closeFilesActions({ restoreFocus: false });
   closeFilesPreview();
-  closeFilesOptions();
   closeFilesSessionDialog();
   closeFilesNameDialog();
   // Term mode: show empty or terminal based on session.
@@ -10265,8 +10735,12 @@ function updateFilesHiddenControls() {
   if (sidebarInput) {
     sidebarInput.checked = filesShowHidden;
   }
-  if (filesOptionHidden) {
-    filesOptionHidden.checked = filesShowHidden;
+  // Patched in place, the way the GameLab switch is. Re-rendering the page
+  // would destroy the control the tap is still inside, which loses focus and
+  // announces no state change.
+  const panelSwitch = document.querySelector('#files-option-hidden');
+  if (panelSwitch) {
+    panelSwitch.setAttribute('aria-checked', String(filesShowHidden));
   }
 }
 
@@ -10285,6 +10759,7 @@ function switchFilesRoot(rootId) {
   filesPath = '';
   filesRestoreSelectionName = '';
   clearFilesSelection();
+  beginFilesNavigation();
   saveFilesNav();
   renderFilesRoots();
   void refreshFilesListing();
@@ -10363,15 +10838,17 @@ function renderFilesListing(listing) {
   filesWritable = listing.writable !== false;
   filesRootId = listing.root || filesRootId;
   renderFilesBreadcrumb(listing);
-  const atRoot = listing.parent === null || listing.parent === undefined;
-  if (filesUpButton) {
-    filesUpButton.disabled = atRoot;
-  }
+  refreshFilesUpButtonState();
   if (filesNewFolderDesktopButton) {
     filesNewFolderDesktopButton.disabled = !filesWritable;
   }
-  if (filesOptionNewFolder) {
-    filesOptionNewFolder.disabled = !filesWritable;
+  // The panel's New folder button, when the Files tab is built. Queried rather
+  // than held, because that page is rebuilt on every render of it — and patched
+  // rather than re-rendered, so a listing that arrives mid-tap cannot pull the
+  // switch out from under the finger.
+  const panelNewFolder = document.querySelector('#files-option-new-folder');
+  if (panelNewFolder) {
+    panelNewFolder.disabled = !filesWritable;
   }
   for (const input of [filesUploadInput, filesUploadDesktopInput]) {
     if (input) {
@@ -10401,7 +10878,7 @@ function renderFilesListing(listing) {
       filesEmptyHintElement.hidden = false;
       if (rawEntries.length > 0 && !filesShowHidden) {
         filesEmptyHintElement.textContent =
-          `No visible items (${hiddenCount} hidden). Enable “Show hidden files” in File options.`;
+          `No visible items (${hiddenCount} hidden). Turn on “Show hidden files” on the Files tab.`;
       } else {
         filesEmptyHintElement.textContent = 'Empty folder';
       }
@@ -10597,6 +11074,9 @@ async function refreshFilesListing() {
   if (filesLoadPromise) {
     return filesLoadPromise;
   }
+  // Set when a load gave up chasing a moving target. The next load starts once
+  // this one has released the guard, so the pane still ends on the right folder.
+  let reloadAfterGuard = false;
   filesLoadPromise = (async () => {
     filesPanelElement?.setAttribute('aria-busy', 'true');
     for (const button of [filesRefreshButton, filesRefreshDesktopButton]) {
@@ -10606,13 +11086,37 @@ async function refreshFilesListing() {
     }
     try {
       let triedRootFallback = false;
+      // A navigation that arrives while a listing is in flight used to be lost:
+      // the second call gets this same promise back, and the answer already on
+      // its way then wrote its own root and path over the new ones. Each answer
+      // is now checked against where the app is standing when it lands, and a
+      // stale one is dropped and re-asked.
+      //
+      // Bounded, so a page that keeps moving cannot spin here. On the bound the
+      // answer is still dropped rather than applied: writing it back would move
+      // Files to a place nobody asked for, and with GameLab Mode on that place
+      // can be a root the mode does not offer. One more load runs after the
+      // guard clears, which needs another five navigations to reach again.
+      let retargets = 0;
+      const retargetLimit = 4;
       while (true) {
+        const wantedRoot = filesRootId;
+        const wantedPath = filesPath || '';
         try {
           const query = new URLSearchParams({
-            root: filesRootId,
-            path: filesPath || ''
+            root: wantedRoot,
+            path: wantedPath
           });
           const listing = await api(`/api/fs/list?${query.toString()}`);
+          if (filesRootId !== wantedRoot || (filesPath || '') !== wantedPath) {
+            if (retargets >= retargetLimit) {
+              reloadAfterGuard = true;
+              break;
+            }
+            retargets += 1;
+            triedRootFallback = false;
+            continue;
+          }
           filesRootId = listing.root || filesRootId;
           filesPath = typeof listing.path === 'string' ? listing.path : '';
           saveFilesNav();
@@ -10622,6 +11126,17 @@ async function refreshFilesListing() {
           }
           break;
         } catch (error) {
+          // The app moved while this request was failing, so the failure
+          // belongs to a place nobody is looking at any more.
+          if (filesRootId !== wantedRoot || (filesPath || '') !== wantedPath) {
+            if (retargets >= retargetLimit) {
+              reloadAfterGuard = true;
+              break;
+            }
+            retargets += 1;
+            triedRootFallback = false;
+            continue;
+          }
           // A remembered path may disappear between visits. Retry its root
           // within the same guarded load so a second refresh cannot race it.
           if (filesPath && !triedRootFallback) {
@@ -10656,6 +11171,9 @@ async function refreshFilesListing() {
         }
       }
       filesLoadPromise = null;
+      if (reloadAfterGuard) {
+        void refreshFilesListing();
+      }
     }
   })();
   return filesLoadPromise;
@@ -10845,18 +11363,25 @@ function syncFilesNavPlacement() {
   filesHeaderNav.hidden = true;
 }
 
+/**
+ * The folder settings, on the Files tab of the panel.
+ *
+ * There is no File options dialog any more. The gear toggles the panel in both
+ * views now, so this is here for the QA suites and for anything that wants the
+ * settings open without knowing which view is up.
+ */
 function openFilesOptions() {
-  updateFilesHiddenControls();
-  if (filesOptionsDialog && !filesOptionsDialog.open) {
-    filesOptionsDialog.showModal();
-    filesOptionsDialog.focus({ preventScroll: true });
+  if (viewMode !== 'files') {
+    // Guarded, because setViewMode kicks off a listing refresh. Asking for the
+    // settings of the folder you are already in should not reload it.
+    setViewMode('files');
   }
+  setKeyPanelTab('files');
+  setKeyPanelOpen(true);
 }
 
 function closeFilesOptions() {
-  if (filesOptionsDialog?.open) {
-    filesOptionsDialog.close();
-  }
+  setKeyPanelOpen(false);
 }
 
 // ---- Start of the pure Files session-name block. ----
@@ -11609,21 +12134,16 @@ function debugTabUnlocked() {
 }
 
 function applyDebugTabVisibility() {
-  const tab = document.querySelector(
-    '#key-panel-tabs [data-panel-tab="debug"]'
-  );
-  if (!tab) {
-    return;
-  }
-  const unlocked = debugTabUnlocked();
   // Hidden, not removed: qa/key-reorder.js and tests/test-vps-terminal both
   // assert the tab ships, and removing it would also throw away the markup that
-  // has to come back when it is unlocked.
-  tab.hidden = !unlocked;
-  if (!unlocked && keyPanelTab === 'debug') {
+  // has to come back when it is unlocked. updateKeyPanelTabVisibility owns the
+  // attribute, so locking Debug cannot fight the view with the games root over
+  // who last set it.
+  updateKeyPanelTabVisibility();
+  if (!debugTabUnlocked() && keyPanelTab === 'debug') {
     // Locking while the tab is open would otherwise leave the panel showing a
     // page whose tab no longer exists.
-    setKeyPanelTab(keyPanelTabs[0]);
+    setKeyPanelTab(defaultKeyPanelTab());
   }
 }
 
@@ -11749,14 +12269,16 @@ function installDialogBackdropDismiss(dialog, dismiss) {
 }
 
 /**
- * Settings live in the panel, and the panel lives in Term.
+ * Settings live in the panel, and the panel lives in both views.
  *
  * There is no settings dialog any more. Everything it held is a tab, and the
  * three things that need typing — a custom key, a password, a snippet body —
  * open the input sheet instead.
+ *
+ * It no longer forces Term. Both views have the panel now, so throwing the user
+ * out of their folder to reach a theme is the thing this change removes.
  */
 function openTerminalSettings() {
-  setViewMode('term');
   setKeyPanelOpen(true);
 }
 
@@ -11881,12 +12403,14 @@ function renderGamesViewList() {
 function refreshGamesViewUi() {
   // The tab carries the setting, so a host with no games root has no tab at
   // all. Hidden rather than removed, the way the Debug tab is: the markup has
-  // to be there to come back.
-  if (gamesViewTabButton) {
-    gamesViewTabButton.hidden = !gamesViewAvailable;
-  }
+  // to be there to come back. It is on both strips, because the setting decides
+  // what Files opens on as well as what Term lists.
+  updateKeyPanelTabVisibility();
   if (!gamesViewAvailable && keyPanelTab === 'gamelab') {
-    setKeyPanelTab(keyPanelTabs[0]);
+    setKeyPanelTab(defaultKeyPanelTab());
+  }
+  if (newGameSection) {
+    newGameSection.hidden = !newGameAvailable;
   }
   if (gamesViewToggle) {
     gamesViewToggle.setAttribute('aria-checked', String(gamesViewEnabled));
@@ -11910,6 +12434,79 @@ function refreshGamesViewUi() {
   if (offered.length > 0 && !offered.some((root) => root.id === filesRootId)) {
     switchFilesRoot(offered[0].id);
   }
+  // The setting decides which roots are offered, so it decides whether the top
+  // of this one can be climbed out of.
+  refreshFilesUpButtonState();
+}
+
+/** Both saved places, checked on the way out of storage. */
+function loadModePlaces() {
+  try {
+    const parsed = JSON.parse(
+      window.localStorage.getItem(modePlacesStorageKey) || 'null'
+    );
+    return {
+      on: normalizeModePlace(parsed?.on),
+      off: normalizeModePlace(parsed?.off)
+    };
+  } catch {
+    return { on: null, off: null };
+  }
+}
+
+function saveModePlace(enabled, place) {
+  const places = loadModePlaces();
+  places[enabled ? 'on' : 'off'] = normalizeModePlace(place);
+  try {
+    window.localStorage.setItem(modePlacesStorageKey, JSON.stringify(places));
+  } catch {
+    // Continue without persistence when browser storage is unavailable.
+  }
+}
+
+/** Where the app is standing right now. */
+function currentModePlace() {
+  return {
+    session: activeSession,
+    files: { root: filesRootId, path: filesPath },
+    view: viewMode === 'files' ? 'files' : 'term'
+  };
+}
+
+/**
+ * The Create-new-game button.
+ *
+ * The page sends no command and no name: it asks the server to start the
+ * interview, and the server holds the one string that gets typed. What comes
+ * back is the session to move to, which is a window that did not exist a moment
+ * ago, so the person lands on the question rather than on somebody else's
+ * conversation.
+ */
+async function startNewGame() {
+  if (!newGameButton || newGameButton.disabled) {
+    return;
+  }
+  newGameButton.disabled = true;
+  setStatus('Starting a new game…', { sticky: true });
+  try {
+    const answer = await api('/api/games/new', { method: 'POST' });
+    const session = typeof answer?.session === 'string' ? answer.session : '';
+    if (!session) {
+      throw new Error('the server named no session');
+    }
+    setKeyPanelOpen(false);
+    if (viewMode !== 'term') {
+      setViewMode('term');
+    }
+    // Said before the connect, not after: connect() resolves around the time
+    // the socket opens, and its own status line lands last either way.
+    setStatus('The studio is asking what to build');
+    await connect(session);
+  } catch (error) {
+    setStatus(error.message || 'Could not start a new game');
+  } finally {
+    newGameButton.disabled = false;
+  }
 }
 
 function setGamesViewEnabled(value) {
@@ -11917,15 +12514,56 @@ function setGamesViewEnabled(value) {
   if (next === gamesViewEnabled) {
     return;
   }
+  // Where you stood in the mode you are leaving, kept for the way back.
+  saveModePlace(gamesViewEnabled, currentModePlace());
   gamesViewEnabled = next;
   noteDurablePreferencesChange();
+  const place = usableModePlace(loadModePlaces()[next ? 'on' : 'off'], {
+    sessions,
+    roots: filesRootsCatalog,
+    enabled: next
+  });
+  // Only when it is somewhere else. A place that names the folder Files is
+  // already showing needs no fetch, and re-fetching would throw away a listing
+  // that is still correct.
+  const movesFiles = Boolean(
+    place?.files &&
+      (place.files.root !== filesRootId ||
+        place.files.path !== (filesPath || ''))
+  );
+  // The location is put back before refreshGamesViewUi, not after. That function
+  // moves Files itself when the current root is no longer offered, and two
+  // navigations in one tick used to lose the second.
+  if (movesFiles) {
+    closeFilesPreview({ restoreFocus: false });
+    clearFilesSelection();
+    filesRestoreSelectionName = '';
+    filesRootId = place.files.root;
+    filesPath = place.files.path;
+    beginFilesNavigation();
+    saveFilesNav();
+  }
   refreshGamesViewUi();
   renderSessions();
   renderFilesRoots();
-  // Turning it on while a non-game session is attached would leave a terminal
-  // on screen that the picker no longer lists. Move to a game if there is one;
-  // if there is none, the session stays, because dropping someone into an empty
-  // app is worse than showing them the session they were already reading.
+  if (place?.view && place.view !== viewMode) {
+    setViewMode(place.view);
+  }
+  if (movesFiles) {
+    void refreshFilesListing();
+  }
+  if (place?.session) {
+    if (place.session !== activeSession) {
+      void connect(place.session);
+    }
+    return;
+  }
+  // No place to go back to, so the first visit to a mode behaves as it always
+  // did. Turning it on while a non-game session is attached would leave a
+  // terminal on screen that the picker no longer lists. Move to a game if there
+  // is one; if there is none, the session stays, because dropping someone into
+  // an empty app is worse than showing them the session they were already
+  // reading.
   const visible = visibleSessions();
   if (
     gamesViewEnabled &&
@@ -12018,12 +12656,7 @@ function renderSessions() {
     button.className = isActive ? 'session active' : 'session';
     const sessionName = document.createElement('span');
     sessionName.className = 'session-name';
-    // The slug, not `game-sodium-lamp`: in Games view every row is a game, so
-    // the prefix is the same six characters on every line and says nothing.
-    sessionName.textContent =
-      gamesViewEnabled && sessionIsGame(session)
-        ? session.game.slug
-        : session.name;
+    sessionName.textContent = sessionRowLabel(session, gamesViewEnabled);
     button.append(sessionName);
     button.title =
       `${session.windows} window(s), ${session.attached} client(s). ` +
@@ -14127,6 +14760,96 @@ function disconnect() {
   updateTermControlsEnabled();
 }
 
+/**
+ * The control channel, kept open for as long as the tab is.
+ *
+ * A message on it moves this tab to another session, which is what `new-game`
+ * and the games list need: they create or name a session on the host and the
+ * person should end up looking at it, not hunting for it in a list.
+ *
+ * It reconnects on the same backoff as the terminal socket. The server closes
+ * it after an hour like any other, and a phone that suspends the tab loses it
+ * silently, so the visibility handler asks again on the way back.
+ */
+function openControlChannel(options = {}) {
+  if (options.replaceStale && controlSocket) {
+    // Not `close()`: a socket whose peer is gone never completes the handshake,
+    // so the close event that starts the reconnect may never arrive. Dropping
+    // the reference first means the handler cannot schedule a second one.
+    const stale = controlSocket;
+    controlSocket = null;
+    try {
+      stale.close();
+    } catch {
+      // Already dead, which is the case this exists for.
+    }
+  }
+  if (
+    controlSocket &&
+    (controlSocket.readyState === WebSocket.OPEN ||
+      controlSocket.readyState === WebSocket.CONNECTING)
+  ) {
+    return;
+  }
+  clearTimeout(controlReconnectTimer);
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  let nextSocket = null;
+  try {
+    nextSocket = new WebSocket(`${protocol}//${window.location.host}/control`);
+  } catch {
+    scheduleControlReconnect();
+    return;
+  }
+  controlSocket = nextSocket;
+  nextSocket.addEventListener('open', () => {
+    controlReconnectAttempts = 0;
+  });
+  nextSocket.addEventListener('message', (event) => {
+    handleControlMessage(event.data);
+  });
+  nextSocket.addEventListener('close', () => {
+    if (controlSocket === nextSocket) {
+      controlSocket = null;
+      scheduleControlReconnect();
+    }
+  });
+  nextSocket.addEventListener('error', () => {
+    // The close handler does the reconnecting; this only stops a socket that
+    // failed while connecting from sitting half-open.
+    nextSocket.close();
+  });
+}
+
+function scheduleControlReconnect() {
+  clearTimeout(controlReconnectTimer);
+  controlReconnectAttempts += 1;
+  controlReconnectTimer = setTimeout(
+    openControlChannel,
+    reconnectDelayForAttempt(controlReconnectAttempts)
+  );
+}
+
+function handleControlMessage(raw) {
+  const intent = controlMessageIntent(raw);
+  if (!intent) {
+    return;
+  }
+  if (intent.type === 'focus-session') {
+    if (intent.session === activeSession && viewMode === 'term') {
+      return;
+    }
+    // Through connect(), which is what a tap on a row and a swipe both call, so
+    // the header, the stored session, and the theme move with the terminal. A
+    // page that switched the pane without them would say one session and show
+    // another, and a reload would go back to the one it says.
+    if (viewMode !== 'term') {
+      setViewMode('term');
+    }
+    void connect(intent.session);
+    setStatus(`Moved to ${intent.session}`);
+  }
+}
+
 async function connect(name) {
   stopNativeDeleteRepeat();
   if (name === activeSession && socket?.readyState === WebSocket.OPEN) {
@@ -14850,7 +15573,7 @@ async function openTerminalPathLink(rawPath) {
     gamesViewFilesTarget(resolved.rootId, directory, true).root !==
       resolved.rootId
   ) {
-    setStatus('Games view keeps Files on your games');
+    setStatus('GameLab Mode keeps Files on your games');
     return;
   }
   closeFilesPreview({ restoreFocus: false });
@@ -16201,7 +16924,16 @@ window.addEventListener('pagehide', stopNativeDeleteRepeat);
 document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopNativeDeleteRepeat();
+    controlHiddenSince = Date.now();
+    return;
   }
+  // A suspended tab loses the control channel without a close event on some
+  // phones, and `readyState` still reads OPEN afterwards. Long enough away and
+  // the channel is replaced rather than believed; a short switch away leaves a
+  // working socket alone.
+  const away = controlHiddenSince ? Date.now() - controlHiddenSince : 0;
+  controlHiddenSince = 0;
+  openControlChannel({ replaceStale: away >= controlStaleAfterMs });
 });
 
 viewModeElement?.addEventListener('click', (event) => {
@@ -16234,10 +16966,11 @@ filesRefreshButton?.addEventListener('click', () => {
 filesRefreshDesktopButton?.addEventListener('click', () => {
   void refreshFilesListing();
 });
-filesSettingsButton?.addEventListener('click', () => {
-  openFilesOptions();
-});
-filesSettingsDesktopButton?.addEventListener('click', openTerminalSettings);
+// Both Files gears are the same toggle the Term one is. The desktop button used
+// to call openTerminalSettings, which switched the view to Term — asking for the
+// folder's settings and losing the folder.
+filesSettingsButton?.addEventListener('click', openFooterMenu);
+filesSettingsDesktopButton?.addEventListener('click', openFooterMenu);
 filesStartSessionButtons.forEach((button) => {
   button.addEventListener('click', openFilesSessionDialog);
 });
@@ -16319,10 +17052,6 @@ filesActionInsert?.addEventListener('click', () => {
   }
   insertFilesPath(filesActionTarget);
 });
-document.querySelector('#files-option-select')?.addEventListener('click', () => {
-  closeFilesOptions();
-  setFilesSelectMode(true);
-});
 filesSelectAll?.addEventListener('click', () => {
   const total = filesVisibleEntries.length;
   if (filesCheckedNames.size === total) {
@@ -16379,22 +17108,6 @@ filesPreviewClose?.addEventListener('click', () => {
 filesPreviewPaneClose?.addEventListener('click', () => {
   closeFilesPreview();
 });
-filesOptionsClose?.addEventListener('click', () => {
-  closeFilesOptions();
-});
-filesOptionNewFolder?.addEventListener('click', () => {
-  openFilesNameDialog('create');
-});
-filesOptionHidden?.addEventListener('change', () => {
-  filesShowHidden = filesOptionHidden.checked;
-  saveFilesShowHidden();
-  updateFilesHiddenControls();
-  if (filesListing) {
-    renderFilesListing(filesListing);
-  } else {
-    void refreshFilesListing();
-  }
-});
 filesNameClose?.addEventListener('click', () => {
   closeFilesNameDialog();
 });
@@ -16413,12 +17126,11 @@ filesPreviewDialog?.addEventListener('cancel', (event) => {
   event.preventDefault();
   closeFilesPreview();
 });
-filesOptionsDialog?.addEventListener('cancel', (event) => {
-  event.preventDefault();
-  closeFilesOptions();
-});
 gamesViewToggle?.addEventListener('click', () => {
   setGamesViewEnabled(!gamesViewEnabled);
+});
+newGameButton?.addEventListener('click', () => {
+  void startNewGame();
 });
 feedbackSendButton?.addEventListener('click', () => {
   sendGameFeedback();
@@ -16682,17 +17394,15 @@ document.addEventListener('pointerdown', (event) => {
   setHeaderCollapsed(true);
 });
 /**
- * The gear opens the panel where the panel exists, and the settings dialog where
- * it does not. Landscape, desktop and Files have no keyboard area for a panel to
- * take, and the Menu sheet that used to serve them is gone — everything it held
- * is in the dialog now.
+ * Every gear toggles the panel — the one in the Term strip, the one in the
+ * header, and the two in Files.
+ *
+ * A toggle rather than an open, because in Files the folder toolbar stays on
+ * screen with the panel up, so the gear is also the way back out. Term hides
+ * its strip behind the panel and leaves by the keyboard button instead.
  */
 function openFooterMenu() {
-  if (keyPanelIsAvailable()) {
-    toggleKeyPanel();
-    return;
-  }
-  openTerminalSettings();
+  toggleKeyPanel();
 }
 document.querySelector('#settings').addEventListener('click', openFooterMenu);
 headerSettingsButton?.addEventListener('click', openFooterMenu);
@@ -16734,9 +17444,9 @@ applyTerminalTheme(terminalThemeName, { persist: false });
 resetPreferencesIfSchemaChanged();
 loadKeySet();
 keyPanelTab = loadKeyPanelTab();
-// Before the panel is ever shown, so the tab strip never flashes six tabs on a
-// device that has not unlocked the sixth. Also corrects a stored `debug` tab
-// from a build that shipped it visible.
+// Before the panel is ever shown, so the strip never flashes a tab this device
+// has not unlocked. Also corrects a stored `debug` tab from a build that
+// shipped it visible. setViewMode below runs the same pass again for the view.
 applyDebugTabVisibility();
 renderFooterPins();
 closeFooterDrawer();
@@ -16750,6 +17460,7 @@ setViewMode(loadViewMode(), { persist: false });
 if (viewMode === 'files') {
   void ensureFilesRoots();
 }
+openControlChannel();
 installAppButton.addEventListener('click', installWebApp);
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();

@@ -1,0 +1,201 @@
+#!/usr/bin/env node
+'use strict';
+
+/**
+ * Move the open browser tab to a tmux session.
+ *
+ * Run on the host, as the user the server runs as. It reaches the server over
+ * its Unix socket, which never passes through the reverse proxy and therefore
+ * carries no login: the server accepts this route only from a local process,
+ * and file permissions on the socket are what decide who that can be.
+ *
+ * Usage:
+ *   vps-terminal-focus <session> [--user <email>] [--socket <path>]
+ *                                [--url <http://host:port>]
+ *
+ * `--url` is for a development server bound to a loopback TCP port instead of
+ * a socket. It has to be passed; it is never read from the environment, because
+ * a shell that inherited one would quietly send this somewhere else. Never point
+ * it at a public address: the route it calls has no login on it, because the
+ * socket it normally speaks over has no login to carry.
+ *
+ * Without --user every open tab moves. That is the honest default while one
+ * person uses this host; with it, only that login's tabs move.
+ *
+ * Exit codes:
+ *   0  delivered to at least one tab
+ *   3  nobody was listening — no tab is open
+ *   1  refused, or the server could not be reached
+ */
+
+const fs = require('node:fs');
+const http = require('node:http');
+const os = require('node:os');
+const path = require('node:path');
+
+const toolName = 'vps-terminal-focus';
+// Two installers, two homes for the socket: the package's `scripts/install.sh`
+// puts runtime state under `share`, and an installation that sets
+// VPS_TERMINAL_STATE_DIR — as this host's does — puts it under `state`. Whichever
+// socket is actually there wins, and `VPS_TERMINAL_SOCKET` beats both. An
+// environment left over from an older layout is the one thing that would
+// otherwise send this at a path with nothing behind it.
+const candidateSockets = ['state', 'share'].map((directory) =>
+  path.join(os.homedir(), '.local', directory, 'vps-terminal', 'run', 'terminal.sock')
+);
+
+function resolveDefaultSocket() {
+  if (process.env.VPS_TERMINAL_SOCKET) {
+    const named = process.env.VPS_TERMINAL_SOCKET;
+    if (fs.existsSync(named)) {
+      return named;
+    }
+    const present = candidateSockets.find((candidate) => fs.existsSync(candidate));
+    return present || named;
+  }
+  return (
+    candidateSockets.find((candidate) => fs.existsSync(candidate)) ||
+    candidateSockets[0]
+  );
+}
+
+function fail(message, status = 1) {
+  process.stderr.write(`${toolName}: ${message}\n`);
+  process.exit(status);
+}
+
+const argumentFields = { '--user': 'user', '--socket': 'socket', '--url': 'url' };
+
+function parseArguments(argv) {
+  const options = {
+    session: null,
+    user: null,
+    socket: resolveDefaultSocket(),
+    // Only when asked for on the command line. Reading it from the environment
+    // meant any shell that had once run the QA wrapper sent this to a
+    // development port and reported "no open tab" instead of an error.
+    url: null
+  };
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === '--help' || argument === '-h') {
+      process.stdout.write(
+        `Usage: ${toolName} <session> [--user <email>] [--socket <path>] ` +
+          '[--url <http://host:port>]\n'
+      );
+      process.exit(0);
+    } else if (Object.hasOwn(argumentFields, argument)) {
+      const value = argv[index + 1];
+      if (!value || value.startsWith('-')) {
+        fail(`${argument} needs a value`);
+      }
+      options[argumentFields[argument]] = value;
+      index += 1;
+    } else if (argument.startsWith('-')) {
+      fail(`unknown option ${argument}`);
+    } else if (options.session === null) {
+      options.session = argument;
+    } else {
+      fail('name one session');
+    }
+  }
+  if (!options.session) {
+    fail(`usage: ${toolName} <session> [--user <email>] [--socket <path>]`);
+  }
+  return options;
+}
+
+function requestTarget(options) {
+  if (!options.url) {
+    return { socketPath: options.socket };
+  }
+  const parsed = new URL(options.url);
+  if (parsed.protocol !== 'http:') {
+    fail('--url takes a plain http address on this host');
+  }
+  return { host: parsed.hostname, port: parsed.port || 80 };
+}
+
+function post(options, body) {
+  return new Promise((resolve, reject) => {
+    const payload = Buffer.from(JSON.stringify(body), 'utf8');
+    const request = http.request(
+      {
+        ...requestTarget(options),
+        method: 'POST',
+        path: '/api/control/focus-session',
+        // A socket file can exist in front of a server whose event loop is
+        // wedged: the connection is accepted and the answer never comes. This
+        // runs as the last line of `new-game`, so a wait with no ceiling stalls
+        // whatever called it.
+        timeout: 5000,
+        headers: {
+          'content-type': 'application/json',
+          'content-length': payload.length
+        }
+      },
+      (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () =>
+          resolve({
+            statusCode: response.statusCode,
+            text: Buffer.concat(chunks).toString('utf8')
+          })
+        );
+      }
+    );
+    request.on('timeout', () => {
+      request.destroy(new Error('the server did not answer within 5s'));
+    });
+    request.once('error', reject);
+    request.end(payload);
+  });
+}
+
+(async () => {
+  const options = parseArguments(process.argv.slice(2));
+  let answer = null;
+  try {
+    answer = await post(options, {
+      session: options.session,
+      target: options.user || 'all'
+    });
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      fail(`no server socket at ${options.socket}`);
+    }
+    if (error.code === 'ECONNREFUSED') {
+      fail(`nothing is listening at ${options.url}`);
+    }
+    if (error.code === 'EACCES') {
+      fail(`not allowed to open ${options.socket}`);
+    }
+    fail(error.message || 'could not reach the server');
+  }
+
+  let value = null;
+  try {
+    value = JSON.parse(answer.text);
+  } catch {
+    value = null;
+  }
+  if (answer.statusCode !== 200) {
+    fail(
+      `server refused (${answer.statusCode}): ${value?.error || 'no reason given'}`
+    );
+  }
+  const delivered = Number(value?.delivered) || 0;
+  if (delivered === 0) {
+    // Not an error: nothing is open. The caller usually wants to say so rather
+    // than stop, so this gets a code of its own.
+    process.stdout.write(
+      `${toolName}: no open tab to move to ${options.session}\n`
+    );
+    process.exit(3);
+  }
+  process.stdout.write(
+    `${toolName}: moved ${delivered} tab${delivered === 1 ? '' : 's'} ` +
+      `to ${options.session}\n`
+  );
+})();

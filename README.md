@@ -93,7 +93,9 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - tmux session list, create, rename, kill
 - xterm.js terminal, reconnect, scrollback find
 - Mobile footer: a scrolling key bar with every key on it
-- A panel where the keyboard would be: paste, keys, snippets, appearance
+- A panel where the keyboard would be, shared by both views. Term gets paste,
+  keys, snippets and debug; Files gets its folder settings; appearance, GameLab
+  and app settings are on both
 - One editable key set and one snippet list, both edited in place: hold one to
   reorder, remove or change it, with optional per-login setup sync across
   browsers
@@ -102,9 +104,13 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - Hardware keyboard support when focus is on chrome
 - Files workspace with jailed Locations, preview, rename, new folders, and
   folder-scoped Terminal/Codex/Grok/Claude session launch
-- Games view: an optional per-login setting on its own GameLab tab. It lists
+- `vps-terminal-focus <session>`: a host command that moves the open browser
+  tab to a tmux session, over a one-way control channel
+- GameLab Mode: an optional per-login setting on its own GameLab tab. It lists
   game sessions only, gives each a Play link, and turns the Files Locations into
   the games themselves. It changes what the app shows, not what the shell can do
+- Create new game: one interview session per tap, closed again once its agent has
+  exited and nobody is attached
 - Installable PWA
 
 ---

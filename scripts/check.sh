@@ -29,6 +29,7 @@ node --check "${root}/public/viewport-init.js"
 # from the public export, which ships no qa/ directory, and it deletes the whole
 # range rather than matching lines: a per-line rule takes the `for` and leaves
 # `done` behind, which is a syntax error rather than a missing check.
+node --check "${root}/bin/vps-terminal-focus"
 bash -n "${root}/attach-session"
 bash -n "${root}/scripts/install.sh"
 bash -n "${root}/scripts/vendor-assets.sh"

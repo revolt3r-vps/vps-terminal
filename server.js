@@ -281,6 +281,58 @@ function buildFsRootCatalog() {
       };
     }
   }
+  return annotateParentRoots(catalog);
+}
+
+/**
+ * Which root each root sits inside, so Files can climb out of one.
+ *
+ * `games` is `~/projects/games` and `paste` is `~/paste`, so the top of either
+ * was a dead end: `parent` is null there and the up button switched off. The
+ * only way out was the Locations strip, which a person reads as "the folder
+ * above this one is gone". Each root now carries the next place up — the root
+ * that contains it, and the path of its own parent directory inside that root.
+ *
+ * Compared on resolved paths, not realpath: a root reached through a symlink
+ * simply reports no parent, which is the behaviour there has always been.
+ */
+function annotateParentRoots(catalog) {
+  const roots = Object.values(catalog);
+  for (const entry of roots) {
+    let container = null;
+    for (const other of roots) {
+      if (other === entry) {
+        continue;
+      }
+      // A root at `/` is its own separator. Appending one gives `//`, which
+      // matches nothing, so an install that offers the filesystem root would
+      // have left every other root with no way up.
+      const prefix =
+        other.rootPath === path.sep
+          ? other.rootPath
+          : `${other.rootPath}${path.sep}`;
+      if (!entry.rootPath.startsWith(prefix)) {
+        continue;
+      }
+      // Roots nest, so the most specific container wins: `~/projects/games`
+      // is inside both `projects` and `home`, and up means `projects`.
+      if (!container || other.rootPath.length > container.rootPath.length) {
+        container = other;
+      }
+    }
+    if (!container) {
+      entry.parentRoot = null;
+      continue;
+    }
+    const relative = path
+      .relative(container.rootPath, entry.rootPath)
+      .split(path.sep);
+    entry.parentRoot = {
+      id: container.id,
+      path: relative.slice(0, -1).join('/'),
+      name: relative.at(-1) || ''
+    };
+  }
   return catalog;
 }
 
@@ -326,8 +378,69 @@ const sessionLauncherCommands = Object.freeze({
 const sessionLoginShell = process.env.SHELL || '/bin/bash';
 const sessionBrowserOpener = process.env.BROWSER || '';
 const authenticatedEmailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
+// The game studio: the directory the `new-game` skill lives in, and how the
+// sessions the Settings button starts are named. Both have defaults, so an
+// install that follows the documented layout sets neither. Declared here, after
+// the session-name rule, so the names are held to that one rule and not a copy
+// of it.
+const gameStudioDirectory = path.resolve(
+  process.env.VPS_TERMINAL_GAME_STUDIO_DIR || path.join(projectRoot, 'game-lab')
+);
+// A prefix, not a session name: each tap gets `lab-1`, `lab-2`, and so on. One
+// shared session would need windows to hold two interviews, and the session rail
+// is the only navigation this app has — it lists sessions, so a second window
+// was a conversation nobody could reach.
+//
+// Deliberately not `game-`: `gameForSession` reads `game-<rest>` as a game when
+// `rest` starts with a real slug, so `game-lab-2` would turn into a game the day
+// somebody makes a game called `lab`.
+const gameStudioSessionPrefix = (
+  process.env.VPS_TERMINAL_GAME_STUDIO_SESSION || 'lab'
+).trim();
+// The one thing that button types, held here and never sent by the page.
+// Anything typed at an agent runs, so this string cannot be assembled from a
+// field, a session name, or anything a browser passed in.
+const gameStudioPrompt = '/new-game';
+const gameStudioLauncher = 'claude';
+// Refuse to start rather than fail at the tap, the same way an unusable game
+// URL template does. Checked against the names actually created, at both ends of
+// the number range, because the prefix is never a session name on its own.
+if (
+  !validatedSessionName(`${gameStudioSessionPrefix}-1`) ||
+  !validatedSessionName(`${gameStudioSessionPrefix}-999`)
+) {
+  throw new Error(
+    'VPS_TERMINAL_GAME_STUDIO_SESSION must be a prefix that forms a valid tmux ' +
+      'session name with `-<number>` appended'
+  );
+}
+const studioSessionPattern = new RegExp(
+  `^${gameStudioSessionPrefix.replace(/[.*+?^${}()|[\]\\-]/g, '\\$&')}-\\d+$`
+);
+// A tmux user option, set on the interview's own session by the pane that ran
+// the agent, once the agent is gone. This is what the sweep reads.
+//
+// Not the pane's command: `pane_current_command` reports the shell for anything
+// that does not take over the foreground process group, so an agent that is a
+// shell script reads exactly like a finished one, and the sweep would kill a
+// conversation in progress. A mark set by the pane itself cannot be wrong about
+// that.
+const studioFinishedOption = '@vps-terminal-studio-finished';
+
+
 const connections = new Set();
 let pendingConnections = 0;
+// The control channel: one socket per open tab, carrying messages from the
+// server to the page. It is separate from the terminal socket on purpose. That
+// one is a byte pipe running a PTY, and framing JSON into it would put the
+// app's own messages in the same stream as whatever a program prints.
+//
+// Kept apart from `connections` for the cap as well. A control socket holds no
+// PTY and no tmux client, so counting it against the terminal cap would halve
+// the number of terminals a person can open.
+const controlConnections = new Map();
+const maximumControlConnections = 20;
+const controlPath = '/control';
 
 function authenticatedEmail(request) {
   // Local test mode: skip Google/Caddy identity header (never on with SOCKET).
@@ -596,6 +709,73 @@ async function appendClientDebugEntries(entries) {
     entries,
     { maximumBytes: maximumClientDebugLogBytes }
   );
+}
+
+/**
+ * Whether this request came from a local process rather than through the proxy.
+ *
+ * In production the server listens on a Unix socket and Caddy is the only thing
+ * in front of it. Caddy deletes any client-supplied identity header and sets
+ * `X-Vps-Authenticated-Email` from the verified login, so a request that
+ * carries no identity header did not come from a browser: it came from
+ * something on this host that can open the socket file, which is the same
+ * privilege as running tmux directly.
+ *
+ * The forwarding headers are a second signal. Caddy sets them on everything it
+ * proxies and a local caller sets none, so their presence means the request
+ * came through the edge even if the identity header went missing.
+ *
+ * A TCP bind with no proxy in front is never trusted here. Local dev mode is,
+ * because it binds a private address and has no login at all.
+ */
+function isLocalControlRequest(request) {
+  if (localDevMode) {
+    return true;
+  }
+  if (!socketPath) {
+    return false;
+  }
+  if (typeof request.headers['x-vps-authenticated-email'] === 'string') {
+    return false;
+  }
+  return !(
+    request.headers['x-forwarded-for'] ||
+    request.headers['x-forwarded-proto'] ||
+    request.headers['x-forwarded-host']
+  );
+}
+
+/**
+ * Who a control message is for.
+ *
+ * `all` is the default and the honest one for this host: one person uses it.
+ * The parameter exists so the day a second login shares the terminal, the
+ * caller says whose tab to move rather than moving everybody's.
+ */
+function validatedControlTarget(value) {
+  if (value === undefined || value === null || value === 'all') {
+    return null;
+  }
+  if (typeof value !== 'string' || !authenticatedEmailPattern.test(value)) {
+    return undefined;
+  }
+  return value.toLowerCase();
+}
+
+function broadcastControlMessage(message, target) {
+  const payload = JSON.stringify(message);
+  let delivered = 0;
+  for (const [websocket, email] of controlConnections) {
+    if (target && target !== email) {
+      continue;
+    }
+    if (websocket.readyState !== websocket.OPEN) {
+      continue;
+    }
+    websocket.send(payload);
+    delivered += 1;
+  }
+  return delivered;
 }
 
 function validatedSessionName(value) {
@@ -1369,11 +1549,11 @@ function slugForGamePath(candidatePath, slugs) {
  * The game a session belongs to, or null.
  *
  * The working directory decides it, because that is what the session is
- * actually doing: `game-lab` is the studio and sits outside the games root, so
- * it is not a game, and no name rule could tell that. Two directories are
- * checked — the session's own and the active pane's — because `new-game` moves
- * the tree after creating the session, which leaves session_path pointing at
- * the pre-move directory.
+ * actually doing: an interview runs in the studio directory, which sits outside
+ * the games root, so it is not a game, and no name rule could tell that. Two
+ * directories are checked — the session's own and the active pane's — because
+ * `new-game` moves the tree after creating the session, which leaves
+ * session_path pointing at the pre-move directory.
  *
  * The name is the fallback, for a session whose pane has been `cd`-ed
  * somewhere else. Without it a game would drop out of the list mid-play.
@@ -1441,7 +1621,12 @@ async function listSessions() {
           windows: session.windows,
           attached: session.attached,
           command: session.command,
-          game: gameForSession(session, slugs)
+          game: gameForSession(session, slugs),
+          // A game-studio interview. The server marks it, because the naming is
+          // a server setting and the page must not carry a copy of the pattern.
+          // GameLab Mode keeps these rows: an interview has no game yet, and a
+          // row is the only way back to one that is still running.
+          studio: studioSessionPattern.test(session.name)
         };
       })
       .filter((session) => validatedSessionName(session.name));
@@ -1465,6 +1650,56 @@ async function sessionExists(name) {
     }
     throw error;
   }
+}
+
+/**
+ * Every session tmux knows, with the two facts the studio sweep needs.
+ *
+ * Separate from `listSessions`, which reads game slugs off disk and shapes rows
+ * for the page. This one answers the questions the new-game route asks: which
+ * names are taken, and which interviews are finished.
+ *
+ * No server running exits 1, which is a host where nothing is up rather than a
+ * failure, so that answers with an empty list. An option no session has set
+ * formats as an empty string, so `finished` is '1' or nothing.
+ */
+async function readSessionStates() {
+  let stdout = '';
+  try {
+    ({ stdout } = await execFileAsync(
+      'tmux',
+      [
+        'list-sessions',
+        '-F',
+        `#{session_name}|#{session_attached}|#{${studioFinishedOption}}`
+      ],
+      { timeout: 3000, maxBuffer: 64 * 1024 }
+    ));
+  } catch (error) {
+    if (error.code === 1) {
+      return [];
+    }
+    throw error;
+  }
+  return stdout
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => {
+      const fields = line.split('|');
+      // A session created outside this app may hold a '|' in its name, which
+      // shifts the split. The two fields asked for are the last two, so read
+      // from that end and give the rest back to the name.
+      if (fields.length < 3) {
+        return { name: line, attached: 0, finished: '' };
+      }
+      const attached = Number(fields[fields.length - 2]);
+      return {
+        name: fields.slice(0, -2).join('|'),
+        attached: Number.isFinite(attached) ? attached : 0,
+        finished: fields[fields.length - 1]
+      };
+    });
 }
 
 async function ensureTmuxCapabilities() {
@@ -1495,6 +1730,142 @@ async function ensureTmuxCapabilities() {
     ['set-option', '-g', 'mouse', 'on'],
     { timeout: 3000 }
   );
+}
+
+/**
+ * Whether the Create-new-game button can do anything on this host.
+ *
+ * A games root to put the game in, a studio directory to run the skill from,
+ * and the agent on PATH. A button whose only outcome is an error is worse than
+ * no button. What it cannot check is that the studio holds a `new-game` skill:
+ * that is the studio's own business, and an agent that does not know the
+ * command says so.
+ */
+async function newGameIsPossible() {
+  if (!Object.hasOwn(fsRootCatalog, 'games')) {
+    return false;
+  }
+  try {
+    await fs.promises.access(
+      gameStudioDirectory,
+      fs.constants.R_OK | fs.constants.X_OK
+    );
+    await resolvedSessionLauncherCommand(gameStudioLauncher);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Close the interview sessions nobody is in any more.
+ *
+ * The pane ends with `exec <shell> -l`, so a session outlives the agent that ran
+ * in it. That is deliberate everywhere else: a crash stays on screen and
+ * readable. An interview is temporary, though — the skill creates the game's own
+ * session and the person moves to it — and nothing ever closed the one left
+ * behind, so they piled up.
+ *
+ * Three conditions, all of them required. The name is one this app hands out, so
+ * a session somebody renamed is theirs to keep. The mark is set by the pane
+ * itself, so the agent is provably gone. Nobody is attached, so nobody is reading
+ * it — including the error from an agent that failed, which stays on screen for
+ * as long as the person who tapped is looking at it.
+ *
+ * Returns the names it closed. Best-effort by design: a kill that fails leaves an
+ * idle shell, which breaks nothing and gets swept at the next tap.
+ */
+async function sweepFinishedStudioSessions(states) {
+  const closed = [];
+  for (const session of states) {
+    if (
+      !studioSessionPattern.test(session.name) ||
+      session.attached !== 0 ||
+      session.finished !== '1'
+    ) {
+      continue;
+    }
+    try {
+      await execFileAsync('tmux', ['kill-session', '-t', `=${session.name}`], {
+        timeout: 5000
+      });
+      forgetSessionActivity(session.name);
+      closed.push(session.name);
+    } catch {
+      // Already gone, or a tmux that refused. Either way the next tap retries.
+    }
+  }
+  return closed;
+}
+
+/**
+ * The next free interview name.
+ *
+ * Lowest free number rather than a stored counter, so a host that has been up for
+ * months does not reach `lab-400` while three sessions exist. `taken` is every
+ * session name, not only the interviews: a person can rename any session to
+ * anything, and a name that is taken is taken.
+ */
+function nextStudioSessionName(taken) {
+  const names = new Set(taken);
+  for (let index = 1; index <= 999; index += 1) {
+    const candidate = `${gameStudioSessionPrefix}-${index}`;
+    if (!names.has(candidate)) {
+      return candidate;
+    }
+  }
+  const error = new Error('too many game studio sessions');
+  error.statusCode = 503;
+  throw error;
+}
+
+/**
+ * A session of its own for one interview, running the agent on the one prompt.
+ *
+ * A session rather than a window in a shared studio, because the rail lists
+ * sessions. It also means the person lands on their own question instead of
+ * somebody else's conversation, and nothing selects a window under a second
+ * person who is already attached.
+ *
+ * Two taps at once can read the same free number before either creates it. The
+ * loser retries with the next one rather than showing "internal error".
+ */
+async function openStudioSession(command, email) {
+  const pane = studioPaneCommand(command);
+  const environment = sessionBrowserOpener
+    ? ['-e', `BROWSER=${sessionBrowserOpener}`]
+    : [];
+  let taken = (await readSessionStates()).map((session) => session.name);
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const name = nextStudioSessionName(taken);
+    try {
+      await execFileAsync(
+        'tmux',
+        [
+          'new-session',
+          '-d',
+          '-s',
+          name,
+          '-c',
+          gameStudioDirectory,
+          ...environment,
+          pane
+        ],
+        { timeout: 5000 }
+      );
+      // The person who opened this interview is the one whose request it is.
+      recordSessionActivity(name, email);
+      return name;
+    } catch (error) {
+      if (!(await sessionExists(name))) {
+        throw error;
+      }
+      taken = (await readSessionStates()).map((session) => session.name);
+    }
+  }
+  const error = new Error('could not name a free game studio session');
+  error.statusCode = 503;
+  throw error;
 }
 
 function validatedSessionLauncher(value) {
@@ -1564,8 +1935,169 @@ function shellQuote(value) {
 // this way inherits none of the shell startup files and dies taking the whole
 // session with it. Run it from a login shell instead, and leave that shell
 // behind when the agent exits.
-function sessionPaneCommand(command) {
-  return `${shellQuote(command)}; exec ${sessionLoginShell} -l`;
+function sessionPaneCommand(command, argument) {
+  const invocation =
+    argument === undefined
+      ? shellQuote(command)
+      : `${shellQuote(command)} ${shellQuote(argument)}`;
+  return `${invocation}; exec ${sessionLoginShell} -l`;
+}
+
+/**
+ * The same, for an interview, plus the mark that says the agent is gone.
+ *
+ * `$TMUX_PANE` rather than the session name: tmux exports it into the pane, and
+ * `set-option` takes a pane as a target and applies to the session that holds it.
+ * So the mark lands on the right session even if somebody renames it, and no
+ * name has to be quoted into a shell string.
+ *
+ * `;` not `&&`, so an agent that failed is marked finished too. Its output stays
+ * on screen for whoever is attached, and the sweep only takes the session once
+ * nobody is. Errors from `set-option` go nowhere: an unmarked interview is a
+ * session that outstays its welcome, which is not worth printing over the last
+ * thing the agent said.
+ */
+function studioPaneCommand(command) {
+  const mark = `tmux set-option -t "$TMUX_PANE" ${studioFinishedOption} 1`;
+  return `${shellQuote(command)} ${shellQuote(gameStudioPrompt)}; ${mark} 2>/dev/null; exec ${sessionLoginShell} -l`;
+}
+
+/**
+ * Who was at the keyboard, per tmux session.
+ *
+ * Everyone here shares the one Linux user, and two people can be attached to the
+ * same session at once, so nothing in the shell can tell them apart. The
+ * websocket can: each browser tab carries its own verified login. This appends
+ * `<unix seconds> <email>` whenever the login typing into a session changes, so
+ * a reader can ask who was active at a given moment rather than who created the
+ * session. `notify-assistant` uses it to route its Telegram status to the person
+ * who gave the agent its task.
+ *
+ * Append on change of typist only, so one person typing writes nothing after the
+ * first line. Two people typing alternately is the pathological case: every
+ * frame is then a change. The cap is therefore set far above any plausible
+ * exchange, and the line count is kept in memory so an append never re-reads the
+ * file. Trimming has to stay rare — dropping the entry that was in force at a
+ * prompt would make the reader find nothing and fall back to the default
+ * assistant, which is precisely the misdelivery this record exists to prevent.
+ *
+ * This is a label, not a permission. It grants nothing, and a failure to write
+ * it must never break the keystroke that triggered it.
+ */
+const sessionActivityDirectory = path.join(stateRoot, 'session-activity');
+// Every attached tab holds the session name it upgraded with. tmux keeps a
+// renamed session attached, so nothing reconnects and nothing re-reads the name;
+// a tab that kept writing under the old one would freeze the current log and
+// send the next person's status to whoever typed before the rename.
+const terminalSessionNames = new Map();
+const sessionActivityLineLimit = (() => {
+  const configured = Number(
+    process.env.VPS_TERMINAL_SESSION_ACTIVITY_LIMIT || 20000
+  );
+  return Number.isInteger(configured) && configured >= 4 ? configured : 20000;
+})();
+const lastRecordedSessionActivity = new Map();
+const sessionActivityLineCount = new Map();
+
+function recordSessionActivity(name, email) {
+  if (!validatedSessionName(name) || typeof email !== 'string') {
+    return;
+  }
+  const login = email.trim().toLowerCase();
+  if (!authenticatedEmailPattern.test(login)) {
+    return;
+  }
+  if (lastRecordedSessionActivity.get(name) === login) {
+    return;
+  }
+  const file = path.join(sessionActivityDirectory, `${name}.log`);
+  try {
+    fs.mkdirSync(sessionActivityDirectory, { recursive: true, mode: 0o700 });
+    fs.appendFileSync(
+      file,
+      `${Math.floor(Date.now() / 1000)} ${login}\n`,
+      { mode: 0o600 }
+    );
+    // Counted rather than measured: reading the whole file on every keystroke of
+    // a two-person exchange put the file size on the event loop every time.
+    let lines = sessionActivityLineCount.get(name);
+    if (lines === undefined) {
+      lines = fs
+        .readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0).length;
+    } else {
+      lines += 1;
+    }
+    if (lines > sessionActivityLineLimit) {
+      const kept = fs
+        .readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => line.length > 0)
+        .slice(-Math.floor(sessionActivityLineLimit / 2));
+      fs.writeFileSync(file, `${kept.join('\n')}\n`, { mode: 0o600 });
+      lines = kept.length;
+    }
+    sessionActivityLineCount.set(name, lines);
+    lastRecordedSessionActivity.set(name, login);
+  } catch {
+    // A missing state directory or a full disk must not cost the person their
+    // keystroke. The next input tries again, because the map is only updated on
+    // a successful write.
+  }
+}
+
+// A session that is gone cannot be the subject of a notification, and the log
+// names a person. Removing it with the session keeps this from accumulating.
+// Only sessions ended through this app come through here: one killed from inside
+// a pane, or lost to a reboot, leaves its log until the name is reused.
+function forgetSessionActivity(name) {
+  if (!validatedSessionName(name)) {
+    return;
+  }
+  lastRecordedSessionActivity.delete(name);
+  sessionActivityLineCount.delete(name);
+  try {
+    fs.rmSync(path.join(sessionActivityDirectory, `${name}.log`), {
+      force: true
+    });
+  } catch {
+    // Losing the file is not worth failing the kill the person asked for.
+  }
+}
+
+// Follow a rename, so the record stays findable under the name the session now
+// has. The in-memory keys move with it or the next input would be judged against
+// the wrong session's last typist.
+function moveSessionActivity(name, nextName) {
+  if (!validatedSessionName(name) || !validatedSessionName(nextName)) {
+    return;
+  }
+  for (const reference of terminalSessionNames.values()) {
+    if (reference.name === name) {
+      reference.name = nextName;
+    }
+  }
+  const previousLogin = lastRecordedSessionActivity.get(name);
+  const previousCount = sessionActivityLineCount.get(name);
+  lastRecordedSessionActivity.delete(name);
+  sessionActivityLineCount.delete(name);
+  try {
+    fs.renameSync(
+      path.join(sessionActivityDirectory, `${name}.log`),
+      path.join(sessionActivityDirectory, `${nextName}.log`)
+    );
+  } catch {
+    // No log yet, or it could not be moved. Either way the next input starts a
+    // fresh one under the new name, so nothing is left pointing at the old.
+    return;
+  }
+  if (previousLogin !== undefined) {
+    lastRecordedSessionActivity.set(nextName, previousLogin);
+  }
+  if (previousCount !== undefined) {
+    sessionActivityLineCount.set(nextName, previousCount);
+  }
 }
 
 async function createSession(name, options = {}) {
@@ -1602,6 +2134,9 @@ async function createSession(name, options = {}) {
     args,
     { timeout: 5000 }
   );
+  // The first person on the record for this session is whoever asked for it.
+  // Everything typed into it afterwards is attributed as it arrives.
+  recordSessionActivity(name, options.email);
   return launcher;
 }
 
@@ -1614,6 +2149,7 @@ async function killSession(name) {
   await execFileAsync('tmux', ['kill-session', '-t', `=${name}`], {
     timeout: 5000
   });
+  forgetSessionActivity(name);
 }
 
 async function renameSession(name, nextName) {
@@ -1635,6 +2171,11 @@ async function renameSession(name, nextName) {
     ['rename-session', '-t', `=${name}`, nextName],
     { timeout: 5000 }
   );
+  // The log is keyed on the session name, and a reader looks it up by the name
+  // the session has now. Leaving it behind would make a renamed session look like
+  // one nobody typed in, which routes its notification to the default assistant
+  // instead of to the person.
+  moveSessionActivity(name, nextName);
   return nextName;
 }
 
@@ -1926,13 +2467,54 @@ async function serveStatic(request, response) {
 
 const server = http.createServer(async (request, response) => {
   try {
+    const url = new URL(request.url, publicOrigin);
+
+    // Ahead of the login gate, because this is the one route with no browser
+    // behind it. A CLI on this host reaches the Unix socket directly, which
+    // never passes through Caddy and so carries no identity to check.
+    if (request.method === 'POST' && url.pathname === '/api/control/focus-session') {
+      if (!isLocalControlRequest(request)) {
+        sendError(response, 403, 'local callers only');
+        return;
+      }
+      let body = null;
+      try {
+        body = JSON.parse(await readBody(request));
+      } catch {
+        sendError(response, 400, 'invalid JSON body');
+        return;
+      }
+      const name = validatedSessionName(body?.session);
+      if (!name) {
+        sendError(response, 400, 'invalid session name');
+        return;
+      }
+      const target = validatedControlTarget(body?.target);
+      if (target === undefined) {
+        sendError(response, 400, 'invalid target');
+        return;
+      }
+      // A tab told to move to a session that is not there would land on a
+      // failed connection and show an error where a terminal should be.
+      if (!(await sessionExists(name))) {
+        sendError(response, 404, 'no such session');
+        return;
+      }
+      sendJson(response, 200, {
+        delivered: broadcastControlMessage(
+          { type: 'focus-session', session: name },
+          target
+        )
+      });
+      return;
+    }
+
     const requestEmail = authenticatedEmail(request);
     if (!requestEmail) {
       sendError(response, 401, 'authentication required');
       return;
     }
 
-    const url = new URL(request.url, publicOrigin);
     if (request.method === 'GET' && url.pathname === '/api/config') {
       sendJson(response, 200, {
         appName: appDisplayName,
@@ -1941,7 +2523,12 @@ const server = http.createServer(async (request, response) => {
         clientDebug: clientDebugEnabled,
         // Offering a Games view on a host with no games would be a setting that
         // does nothing, so the toggle only exists where the root does.
-        gamesView: Object.hasOwn(fsRootCatalog, 'games')
+        gamesView: Object.hasOwn(fsRootCatalog, 'games'),
+        // And a Create-a-game button needs a studio to open and an agent to
+        // start. Both are read per request, not at boot: a directory that
+        // appears later should light the button up on the next page load, and
+        // one that goes away should put it out.
+        newGame: await newGameIsPossible()
       });
       return;
     }
@@ -1964,6 +2551,66 @@ const server = http.createServer(async (request, response) => {
             url: gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null
           }))
       });
+      return;
+    }
+
+    /**
+     * Start the interview that makes a new game.
+     *
+     * One tap in Settings, for someone who has no shell, no slug, and no reason
+     * to know the skill is called `new-game`. A window in the studio session
+     * with the agent started on that one prompt — passed as an argument rather
+     * than typed, so there is no waiting for the agent to be ready and no
+     * keystroke that could land somewhere else.
+     *
+     * A new window, never the existing one. That session usually holds an agent
+     * mid-conversation, and sending a prompt into it would interrupt whatever
+     * is in the box.
+     */
+    if (request.method === 'POST' && url.pathname === '/api/games/new') {
+      if (!requestOriginIsValid(request)) {
+        sendError(response, 403, 'bad origin');
+        return;
+      }
+      if (!Object.hasOwn(fsRootCatalog, 'games')) {
+        sendError(response, 404, 'this install has no games root');
+        return;
+      }
+      try {
+        await fs.promises.access(
+          gameStudioDirectory,
+          fs.constants.R_OK | fs.constants.X_OK
+        );
+      } catch {
+        sendError(response, 409, 'the game studio directory is not there');
+        return;
+      }
+      // Throws a 503 of its own when the binary is not on PATH. There is no
+      // null to check for: null is only returned for a launcher key that does
+      // not exist, and this one is a constant.
+      const studioCommand =
+        await resolvedSessionLauncherCommand(gameStudioLauncher);
+      // Before the new one, so a finished interview's number is free to reuse and
+      // the rail does not fill with idle shells. Never fatal: a sweep that fails
+      // must not cost somebody their new game.
+      try {
+        await sweepFinishedStudioSessions(await readSessionStates());
+      } catch {
+        console.warn('vps-terminal: could not sweep finished studio sessions');
+      }
+      const session = await openStudioSession(studioCommand, requestEmail);
+      // After the session, not before. `show-options` needs a tmux server to ask,
+      // and on a host where nothing is running yet this route is what starts
+      // one — asking first turned the whole tap into a 500. Nothing has attached
+      // at this point, and these options are read at attach.
+      try {
+        await ensureTmuxCapabilities();
+      } catch {
+        // Truecolor for a pane nobody is looking at yet is not worth failing a
+        // window that already exists.
+        console.warn('vps-terminal: could not set tmux capabilities');
+      }
+      sendJson(response, 200, { session });
       return;
     }
 
@@ -2100,7 +2747,8 @@ const server = http.createServer(async (request, response) => {
           id: entry.id,
           label: entry.label,
           displayPrefix: rootDisplayPrefix(entry),
-          writable: entry.writable !== false
+          writable: entry.writable !== false,
+          parentRoot: entry.parentRoot || null
         }))
       });
       return;
@@ -2322,7 +2970,8 @@ const server = http.createServer(async (request, response) => {
       const launcher = await createSession(name, {
         root: value.root,
         path: value.path,
-        launcher: value.launcher
+        launcher: value.launcher,
+        email: requestEmail
       });
       sendJson(response, 201, { name, launcher });
       return;
@@ -2414,6 +3063,33 @@ server.on('upgrade', async (request, socket, head) => {
   let reservedSlot = false;
   try {
     const url = new URL(request.url, publicOrigin);
+
+    // The control channel. Same login and same origin rules as a terminal, but
+    // no session and no PTY: it exists so the server can tell this tab to move.
+    if (url.pathname === controlPath) {
+      const email = authenticatedEmail(request);
+      const refusal = !email
+        ? 'auth'
+        : !requestOriginIsValid(request)
+          ? 'origin'
+          : controlConnections.size >= maximumControlConnections
+            ? 'capacity'
+            : null;
+      if (refusal) {
+        console.warn(
+          `vps-terminal: refused control upgrade (${refusal}) ` +
+            `control=${controlConnections.size}`
+        );
+        socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+      websocketServer.handleUpgrade(request, socket, head, (websocket) => {
+        acceptControlConnection(websocket, email);
+      });
+      return;
+    }
+
     const name = validatedSessionName(url.searchParams.get('session'));
     // One opaque 403 for four different refusals made this impossible to diagnose
     // from the outside. The reason is a fixed string — never the session name, the
@@ -2461,7 +3137,54 @@ server.on('upgrade', async (request, socket, head) => {
   }
 });
 
+/**
+ * A control socket, from upgrade to close.
+ *
+ * One way, server to page. The page sends nothing on it, so incoming frames are
+ * dropped rather than parsed: a channel with no command to read cannot be told
+ * to do the wrong thing. The keepalive is the terminal socket's, for the same
+ * reason it has one — a tab that is killed rather than closed leaves a
+ * half-open socket that would otherwise sit in the map until the lifetime
+ * timer, holding a slot against the cap.
+ */
+function acceptControlConnection(websocket, email) {
+  controlConnections.set(websocket, email);
+  const lifetime = setTimeout(
+    () => websocket.close(1000, 'control channel expired'),
+    websocketLifetimeMs
+  );
+  let awaitingPong = false;
+  websocket.on('pong', () => {
+    awaitingPong = false;
+  });
+  const ping = setInterval(() => {
+    if (websocket.readyState !== websocket.OPEN) {
+      return;
+    }
+    if (awaitingPong) {
+      websocket.terminate();
+      return;
+    }
+    awaitingPong = true;
+    websocket.ping();
+  }, 30000);
+  const cleanup = () => {
+    clearTimeout(lifetime);
+    clearInterval(ping);
+    controlConnections.delete(websocket);
+  };
+  websocket.on('close', cleanup);
+  websocket.on('error', () => websocket.terminate());
+  websocket.on('message', () => {});
+}
+
 websocketServer.on('connection', (websocket, request, name) => {
+  // The upgrade already refused an unauthenticated request, so this is the
+  // verified login of the tab on the other end of this socket. Read once: the
+  // headers cannot change for the life of the connection.
+  const connectionEmail = authenticatedEmail(request);
+  // Mutable, because a rename has to reach a tab that is already attached.
+  const session = { name };
   let terminal;
   try {
     terminal = pty.spawn(
@@ -2484,6 +3207,7 @@ websocketServer.on('connection', (websocket, request, name) => {
     return;
   }
   connections.add(websocket);
+  terminalSessionNames.set(websocket, session);
 
   const lifetime = setTimeout(() => websocket.close(1000, 'session expired'), websocketLifetimeMs);
   // A page that navigates away or is killed often leaves the socket half-open: no
@@ -2523,6 +3247,12 @@ websocketServer.on('connection', (websocket, request, name) => {
     try {
       const message = JSON.parse(buffer.toString('utf8'));
       if (message.type === 'input' && typeof message.data === 'string') {
+        // Before the write, so the record cannot land after the prompt it
+        // belongs to. Only a change of typist writes anything, and an empty
+        // frame is not typing: it reaches the pty as nothing.
+        if (message.data.length > 0) {
+          recordSessionActivity(session.name, connectionEmail);
+        }
         terminal.write(message.data.slice(0, maximumInputLength));
       } else if (
         message.type === 'resize' &&
@@ -2544,6 +3274,7 @@ websocketServer.on('connection', (websocket, request, name) => {
     clearTimeout(lifetime);
     clearInterval(ping);
     connections.delete(websocket);
+    terminalSessionNames.delete(websocket);
     terminal.kill();
   });
 });

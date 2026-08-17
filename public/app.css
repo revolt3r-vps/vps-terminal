@@ -542,7 +542,6 @@ header.collapsed #view-mode {
 }
 
 body.files-view #files-actions-dialog,
-body.files-view #files-options-dialog,
 body.files-view #files-session-dialog,
 body.files-view #files-name-dialog {
   -webkit-user-select: none;
@@ -1038,7 +1037,6 @@ body.files-view #files-name-dialog {
 }
 
 #files-actions-dialog,
-#files-options-dialog,
 #files-session-dialog,
 #files-name-dialog{
   width: min(92vw, 360px);
@@ -1277,9 +1275,8 @@ body.files-view #terminal-link-copy-chip {
   }
 }
 
-/* Settings menus (Terminal Menu, File options) stay a small contextual card,
- * never a full-screen sheet — so they get a lighter scrim with no blur. */
-#files-options-dialog,
+/* The Start Session picker stays a small contextual card, never a full-screen
+ * sheet — so it gets a lighter scrim with no blur. */
 #files-session-dialog {
   width: min(90vw, 300px);
 }
@@ -1291,7 +1288,6 @@ body.files-view #terminal-link-copy-chip {
   backdrop-filter: blur(2px);
 }
 
-#files-options-dialog::backdrop,
 #files-session-dialog::backdrop {
   background: rgba(4, 7, 11, 0.32);
 }
@@ -1432,7 +1428,6 @@ body.files-view #terminal-link-copy-chip {
   outline: 0;
 }
 
-#files-options-dialog:focus,
 #files-session-dialog:focus {
   outline: 0;
 }
@@ -2741,8 +2736,12 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
   /* Up onto the footer's own border, which is then the only line between the
      terminal and the keys. Left where it is, the footer's top padding shows as
-     a band of a third colour above the panel. */
-  body.key-panel-open #key-panel {
+     a band of a third colour above the panel.
+
+     Term only, because it assumes the panel is the first thing in the footer.
+     Files keeps its toolbar above the panel, so there the panel keeps its own
+     top border and stays put — pulling it up would slide it over the bar. */
+  body.key-panel-open:not(.files-view) #key-panel {
     margin-top: calc(0px - var(--footer-top-padding));
     border-top: 0;
   }
@@ -2807,6 +2806,13 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
     display: none !important;
   }
 
+  /* The Files bar is the phone's toolbar; a fine pointer has #files-toolbar
+     instead. The footer is display:none here at rest, so this only matters once
+     the panel brings the footer back into the grid. */
+  body.key-panel-open #footer-files {
+    display: none !important;
+  }
+
   /*
    * The slack goes into the panel here, the way portrait puts it into the footer
    * height.
@@ -2827,10 +2833,6 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
     height: calc(var(--key-panel-height, 320px) + var(--terminal-slack, 0px));
     margin: 0;
   }
-}
-
-body.files-view #key-panel {
-  display: none !important;
 }
 
 /* No header row. The panel opens straight onto its content — a title would
@@ -4503,10 +4505,11 @@ footer button {
     min-height: var(--header-control);
   }
 
-  /* The gear opens the key panel, and Files hides that panel outright, so the
-     gear has nothing to open there. Commands stays: the palette carries Show
-     Files and Connect to <session>, which are exactly the things worth reaching
-     from Files. */
+  /* Files has the panel now, but it also has a gear of its own in
+     #files-toolbar-actions, three inches lower and beside the folder it acts
+     on. Two gears in one view is one too many, and the header is the one to
+     drop. Commands stays: the palette carries Show Files and Connect to
+     <session>, which are exactly the things worth reaching from Files. */
   body.files-view #header-settings {
     display: none;
   }

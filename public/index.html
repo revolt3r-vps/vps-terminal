@@ -355,24 +355,6 @@
         <pre id="files-preview-body"></pre>
       </dialog>
       <dialog
-        id="files-options-dialog"
-        aria-labelledby="files-options-title"
-        tabindex="-1"
-      >
-        <div class="settings-heading">
-          <strong id="files-options-title">File options</strong>
-          <button id="files-options-close" class="icon-button" type="button" title="Close">×</button>
-        </div>
-        <div class="files-actions-buttons">
-          <button id="files-option-new-folder" type="button">New folder</button>
-          <button id="files-option-select" type="button">Select files</button>
-          <label class="files-checkbox-control">
-            <input id="files-option-hidden" type="checkbox">
-            <span>Show hidden files</span>
-          </label>
-        </div>
-      </dialog>
-      <dialog
         id="files-session-dialog"
         aria-labelledby="files-session-title"
         tabindex="-1"
@@ -681,11 +663,12 @@
         --footer-height follows the panel with no extra wiring and the portrait
         session menu keeps clearing it.
 
-        Portrait touch in Term only. Landscape has no room, desktop has no
-        keyboard area to occupy, and every tab here is a terminal concept Files
-        does not have — all three keep the settings dialog instead.
+        Both views use it, and each gets its own strip of tabs. Term keeps the
+        terminal concepts — Paste, Keys, Snippets, Debug. Files keeps the folder
+        ones. Appearance, GameLab and App are in both, because a theme, a games
+        list and an app build belong to neither view on its own.
       -->
-      <div id="key-panel" hidden aria-label="Terminal panel">
+      <div id="key-panel" hidden aria-label="Settings panel">
         <!-- Desktop only. The panel takes a grid row on a fine pointer, so its
              height is real terminal rows and the tabs need very different amounts
              of it. A separator role rather than a button: it has a value, and the
@@ -698,6 +681,15 @@
           aria-label="Resize panel"
         ></div>
         <div id="key-panel-body">
+          <!-- Files view only. Everything the File options dialog used to hold,
+               on the surface the terminal already used for its settings. -->
+          <div
+            class="key-panel-page"
+            data-panel-page="files"
+            role="tabpanel"
+            aria-label="Files"
+            hidden
+          ></div>
           <div
             class="key-panel-page"
             data-panel-page="keys"
@@ -749,7 +741,7 @@
               aria-labelledby="games-view-title"
             >
               <div class="settings-sync-heading">
-                <strong id="games-view-title">Games view</strong>
+                <strong id="games-view-title">GameLab Mode</strong>
               </div>
               <p class="settings-hint">
                 Lists your game sessions only, opens Files on your games, and
@@ -767,10 +759,30 @@
                 aria-checked="false"
               >
                 <span class="settings-switch-track" aria-hidden="true"></span>
-                <span>Use Games view</span>
+                <span>Use GameLab Mode</span>
               </button>
             </section>
             <p id="games-view-list" class="settings-hint"></p>
+            <!-- Hidden unless the server reports both a games root and the
+                 studio directory the skill lives in. A button whose only
+                 outcome is an error is worse than no button. -->
+            <section
+              id="new-game-section"
+              class="settings-sync"
+              aria-labelledby="new-game-title"
+              hidden
+            >
+              <div class="settings-sync-heading">
+                <strong id="new-game-title">Make a game</strong>
+              </div>
+              <p class="settings-hint">
+                Opens the studio session and starts the interview. It asks you
+                what the game is; you do not need a name for it yet.
+              </p>
+              <button id="new-game-button" class="settings-secondary" type="button">
+                Create new game
+              </button>
+            </section>
           </div>
           <div
             class="key-panel-page"
@@ -829,6 +841,22 @@
         </div>
         <div id="key-panel-tabbar">
         <div id="key-panel-tabs" role="tablist" aria-label="Panel sections">
+          <!-- Leads in Files, the way Paste leads in Term. Hidden in Term,
+               where there is no folder for it to act on. -->
+          <button
+            type="button"
+            class="key-panel-tab"
+            data-panel-tab="files"
+            role="tab"
+            aria-selected="false"
+            title="Files"
+            aria-label="Files"
+            hidden
+          >
+            <svg viewBox="0 0 20 20" aria-hidden="true">
+              <path d="M2.5 5.5a1 1 0 0 1 1-1h3.4l1.6 2h7a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1h-11a1 1 0 0 1-1-1z" />
+            </svg>
+          </button>
           <button
             type="button"
             class="key-panel-tab"
