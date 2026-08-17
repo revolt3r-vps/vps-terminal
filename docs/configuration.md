@@ -142,8 +142,11 @@ GameLab Mode keeps interview rows, labelled **New game**, so a conversation stil
 in progress stays one tap away after you move to the game it created.
 
 The interview is temporary. Its pane marks its own session finished when the
-agent exits, and the next tap closes every interview that is marked and has
-nobody attached. Three conditions, all required: the name is one the app handed
+agent exits — a tmux user option, `@vps-terminal-studio-finished` — and the next
+tap closes every interview that is marked and has nobody attached. The studio's
+own `new-game` script sets the same option at handoff, because an agent that
+finishes a turn does not exit: it sits at its prompt, so nothing else would ever
+mark a successful interview finished. Three conditions, all required: the name is one the app handed
 out, so a session you renamed is yours to keep; the mark is set by the pane
 itself, so the agent is provably gone; and nobody is attached, so an agent's
 error stays on screen for as long as you are reading it. Nothing is closed on a
