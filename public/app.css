@@ -2079,19 +2079,43 @@ html.keyboard-input-onscreen-tappable #terminal .xterm-helper-textarea {
 
 /*
  * The bridge: the element that actually raises the keyboard on a browser which
- * refuses xterm's. Deliberately identical to the probe field below, because that
- * shape is the one measured to work — 40x24 at the bottom-left, barely-there
- * opacity, z-index 1. Text and caret are transparent so nothing of it is ever
+ * refuses xterm's. Text and caret are transparent so nothing of it is ever
  * visible. See the keyboard bridge block in app.js.
  *
- * Taps are left enabled, which is the one part of this that is a compromise rather
- * than a measurement. The field that opened the keyboard had them, and whether
- * `pointer-events: none` costs that is untested — so it keeps them, and the footer
- * covers this corner at a higher z-index, which is what stops it swallowing the
- * keyboard button. runKeyboardProbe() tests the untappable variant so the next
- * report can settle it.
+ * At the top, not the bottom, and this is the whole reason: Android calls
+ * ScrollFocusedEditableNodeIntoView when an editable takes focus, and
+ * focus({preventScroll: true}) does not stop it for a text field
+ * (crbug.com/41492445). A field pinned to `bottom: 0` sits under the keyboard that
+ * just opened, so Chrome scrolls the page up to reveal it and the whole app rides
+ * up with it. At the top of the viewport the keyboard never covers it, so there is
+ * nothing to scroll into view.
+ *
+ * Measured on the device, so neither of these is a guess: the same input opened the
+ * keyboard from the body, from inside #terminal and from inside <main>, so where it
+ * lives is free — and it opened it with pointer-events off too, so it does not have
+ * to be able to take a tap.
  */
-.keyboard-bridge-input,
+.keyboard-bridge-input {
+  position: fixed;
+  left: 0;
+  top: 0;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0.01;
+  z-index: 1;
+  pointer-events: none;
+}
+
+/*
+ * The probe's own field, for the strategies that do not use xterm's textarea. Kept
+ * at the bottom-left where the measurement that found it was taken, so a later run
+ * compares like with like.
+ */
 .keyboard-probe-input {
   position: fixed;
   left: 0;

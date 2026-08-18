@@ -8353,6 +8353,26 @@ function ensureKeyboardBridge() {
   input.addEventListener('focus', () => {
     handleTerminalInputFocused('bridge-focus');
     primeKeyboardBridge();
+    // Android scrolls a focused editable into view and ignores preventScroll for
+    // text fields (crbug.com/41492445). The field is at the top of the viewport so
+    // there should be nothing to scroll, and this is the second line of defence:
+    // the app is a fixed layout that is never meant to scroll at all.
+    pinPageToOrigin();
+    keyboardDebug(
+      `bridge-focus scrollY=${Math.round(window.scrollY)} ` +
+        `offsetTop=${Math.round(window.visualViewport?.offsetTop || 0)} ` +
+        `box=${Math.round(input.getBoundingClientRect().top)}`
+    );
+    // Once more after the keyboard has finished arriving: the scroll it triggers
+    // lands after the focus, so a reading taken here would miss it.
+    window.setTimeout(() => {
+      pinPageToOrigin();
+      keyboardDebug(
+        `bridge-settled scrollY=${Math.round(window.scrollY)} ` +
+          `offsetTop=${Math.round(window.visualViewport?.offsetTop || 0)} ` +
+          `gap=${keyboardViewportGap()}`
+      );
+    }, keyboardOpenSettleMilliseconds);
   });
   input.addEventListener('blur', () => {
     recordKeyboardTransition('bridge-blur');
