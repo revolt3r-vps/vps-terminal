@@ -2017,6 +2017,41 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
   pointer-events: none !important;
 }
 
+/*
+ * The escalation path for a browser that will not raise its keyboard for the
+ * textarea xterm ships. xterm parks it at `left: -9999em` with no width or
+ * height; this puts it on screen with a real size, still invisible behind the
+ * terminal. See setOnscreenTerminalInput() in app.js.
+ */
+html.keyboard-input-onscreen #terminal .xterm-helper-textarea {
+  left: 0 !important;
+  top: 0 !important;
+  width: 2px !important;
+  height: 1em !important;
+  opacity: 0 !important;
+  z-index: -5 !important;
+}
+
+/*
+ * The keyboard probe's own field, for the one strategy that does not use xterm's
+ * textarea at all. On screen and focusable, because that is the point of the
+ * comparison, and gone again as soon as the strategy is measured.
+ */
+.keyboard-probe-input {
+  position: fixed;
+  left: 0;
+  bottom: 0;
+  width: 40px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  opacity: 0.01;
+  z-index: 1;
+}
+
 #paste.copy-mode {
   border-color: var(--accent);
   background: var(--accent-surface);

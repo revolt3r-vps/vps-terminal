@@ -3168,7 +3168,7 @@ function keyPanelShowKeyboard() {
   setKeyPanelOpen(false);
   if (terminal && activeSession) {
     clearTerminalSelection();
-    focusTerminalForTyping();
+    focusTerminalForTyping('panel-button');
   }
 }
 
@@ -4980,7 +4980,70 @@ function renderKeyPanelDebug(page) {
     ? dragDebugLines.join('\n')
     : 'No lines recorded yet.';
 
+  // Always recording, unlike the gesture log above. A keyboard that never opens
+  // leaves no way to switch a log on first and reproduce, because this tab lives
+  // in the panel that stands in for the keyboard.
+  const keyboardHeading = document.createElement('p');
+  keyboardHeading.className = 'key-panel-group-label';
+  keyboardHeading.textContent = 'Keyboard log';
+
+  const keyboardNote = document.createElement('p');
+  keyboardNote.className = 'key-panel-note';
+  keyboardNote.textContent =
+    'Test closes this panel, asks for the keyboard five different ways, then ' +
+    'comes back. The line that says opened=true is the one that worked.';
+
+  const keyboardOutput = document.createElement('pre');
+  keyboardOutput.className = 'key-panel-debug-log';
+  keyboardOutput.tabIndex = 0;
+  keyboardOutput.textContent = keyboardDebugLines.length
+    ? keyboardDebugLines.join('\n')
+    : 'Nothing recorded yet. Tap the terminal, or run Test.';
+
+  const copyLines = () =>
+    [
+      keyboardDebugLines.length ? '# keyboard' : '',
+      ...keyboardDebugLines,
+      dragDebugLines.length ? '# gesture' : '',
+      ...dragDebugLines
+    ].filter(Boolean);
+
   page.replaceChildren(
+    keyboardHeading,
+    keyboardNote,
+    keyboardOutput,
+    createKeyPanelActions(
+      keyPanelAction('Test', () => {
+        // The panel is standing in the keyboard's space, so it has to go before
+        // anything can measure a keyboard arriving. The probe reopens it here.
+        setKeyPanelOpen(false);
+        setStatus('Testing the keyboard…');
+        void runKeyboardProbe().then(() => {
+          setKeyPanelOpen(true);
+          setKeyPanelTab('debug');
+          renderKeyPanel();
+          setStatus('Keyboard test done');
+        });
+      }),
+      keyPanelAction('Copy', async () => {
+        const text = copyLines().join('\n');
+        if (!text) {
+          setStatus('Nothing recorded yet');
+          return;
+        }
+        try {
+          await navigator.clipboard.writeText(text);
+          setStatus(`Copied ${copyLines().length} lines`);
+        } catch {
+          keyboardOutput.focus();
+          setStatus('Clipboard refused — long-press the log to select it');
+        }
+      }),
+      keyPanelAction('Clear', () => {
+        keyboardDebugLines.length = 0;
+        renderKeyPanel();
+      })
+    ),
     heading,
     note,
     output,
@@ -4988,20 +5051,6 @@ function renderKeyPanelDebug(page) {
       keyPanelAction(dragDebugActive() ? 'Stop' : 'Record', () => {
         setDragDebugActive(!dragDebugActive());
         renderKeyPanel();
-      }),
-      keyPanelAction('Copy', async () => {
-        const text = dragDebugLines.join('\n');
-        if (!text) {
-          setStatus('Nothing recorded yet');
-          return;
-        }
-        try {
-          await navigator.clipboard.writeText(text);
-          setStatus(`Copied ${dragDebugLines.length} lines`);
-        } catch {
-          output.focus();
-          setStatus('Clipboard refused — long-press the log to select it');
-        }
       }),
       keyPanelAction('Clear', () => {
         dragDebugLines.length = 0;
@@ -8117,7 +8166,7 @@ function usesSoftKeyboard() {
  * Only while the viewport is full height. A reduced viewport means the keyboard is
  * already up, and blurring there closes it just to reopen it.
  */
-function focusTerminalForTyping() {
+function focusTerminalForTyping(keyboardRaiseReason = 'focus') {
   if (!terminal) {
     return;
   }
@@ -8134,7 +8183,332 @@ function focusTerminalForTyping() {
     terminal.blur();
   }
   terminal.focus();
+  scheduleKeyboardRaiseCheck(keyboardRaiseReason);
 }
+
+// ---- Start of the soft keyboard diagnostic block. ----
+/**
+ * Why the keyboard did not come up, answered on the device that refused it.
+ *
+ * Focusing xterm's helper textarea raises the keyboard on iOS and in every
+ * emulated Android profile the QA browser can produce. A real Chrome on a real
+ * Android phone reported neither the terminal tap nor the footer button opening
+ * it, and an emulated device cannot reproduce that: there is no soft keyboard
+ * behind CDP to raise, so the harness can only prove focus landed.
+ *
+ * So the app measures the keyboard itself. A keyboard that opened shortens the
+ * visual viewport; one that never opened leaves it alone. That is the only
+ * signal available in the page, and it is enough to tell a working raise from a
+ * silent one, log it, and escalate to a different way of asking.
+ *
+ * The log is always on and capped. A keyboard that never opens leaves no way to
+ * turn recording on and reproduce, because the Debug tab lives in the panel that
+ * stands in for the keyboard.
+ */
+const keyboardDebugMaximumLines = 140;
+const keyboardDebugLines = [];
+// Long enough for a keyboard animation to finish and the viewport event to land.
+const keyboardRaiseCheckMilliseconds = 700;
+const keyboardProbeWaitMilliseconds = 1300;
+const keyboardProbeRestMilliseconds = 500;
+/** A viewport this much shorter than the layout means a keyboard is over it. */
+const keyboardViewportGapPixels = 120;
+let keyboardRaiseCheckTimer = null;
+let keyboardOnscreenInputActive = false;
+let keyboardProbeRunning = false;
+
+function keyboardDebug(line) {
+  keyboardDebugLines.push(
+    `${String(Math.round(window.performance.now())).padStart(6)} ${line}`
+  );
+  if (keyboardDebugLines.length > keyboardDebugMaximumLines) {
+    keyboardDebugLines.shift();
+  }
+}
+
+/** How many pixels of the layout viewport something is covering. */
+function keyboardViewportGap() {
+  const layout = Math.round(
+    document.documentElement.clientHeight || window.innerHeight
+  );
+  const visual = Math.round(window.visualViewport?.height || layout);
+  return layout - visual;
+}
+
+function keyboardVisualHeight() {
+  return Math.round(
+    window.visualViewport?.height ||
+      document.documentElement.clientHeight ||
+      window.innerHeight
+  );
+}
+
+function describeElementForDebug(element) {
+  if (!element) {
+    return 'none';
+  }
+  const id = element.id ? `#${element.id}` : '';
+  const classes =
+    typeof element.className === 'string' && element.className.trim()
+      ? `.${element.className.trim().split(/\s+/).join('.')}`
+      : '';
+  return `${element.tagName.toLowerCase()}${id}${classes}`;
+}
+
+/**
+ * Everything that could stop a focus raising the keyboard, in one place.
+ *
+ * Most of these have been the answer to a "nothing happens" report in some app:
+ * a modal dialog left open makes the rest of the document inert, a disabled
+ * button never fires, a socket that is not open makes the tap handler return
+ * before it focuses anything, and xterm sets the textarea readOnly whenever
+ * disableStdin is on.
+ */
+function keyboardEnvironmentLines() {
+  const textarea = terminal?.textarea || null;
+  const style = textarea ? window.getComputedStyle(textarea) : null;
+  const box = textarea ? textarea.getBoundingClientRect() : null;
+  const build =
+    document
+      .querySelector('meta[name="vps-build-id"]')
+      ?.getAttribute('content') || 'unknown';
+  const openDialogs = Array.from(document.querySelectorAll('dialog'))
+    .filter((dialog) => dialog.open)
+    .map(
+      (dialog) =>
+        `${describeElementForDebug(dialog)}${
+          dialog.matches(':modal') ? ':modal' : ''
+        }`
+    );
+  let blockingAncestor = 'none';
+  for (
+    let node = textarea;
+    node && node !== document.documentElement;
+    node = node.parentElement
+  ) {
+    if (node.inert === true || node.getAttribute?.('aria-hidden') === 'true') {
+      blockingAncestor = describeElementForDebug(node);
+      break;
+    }
+  }
+  return [
+    `build ${build}`,
+    `ua ${navigator.userAgent}`,
+    `mode display=${document.documentElement.dataset.displayMode || '?'} ` +
+      `coarse=${usesSoftKeyboard()} applePath=${nativeTouchSelection} ` +
+      `onscreenTextarea=${keyboardOnscreenInputActive}`,
+    `session name=${activeSession || 'none'} socket=${
+      socket ? socket.readyState : 'null'
+    } terminal=${Boolean(terminal)}`,
+    `chrome buttonDisabled=${keyboardButton?.disabled} panelOpen=${keyPanelOpen}`,
+    `dialogs ${openDialogs.length ? openDialogs.join(' ') : 'none'} ` +
+      `blockingAncestor=${blockingAncestor}`,
+    `active ${describeElementForDebug(document.activeElement)}`,
+    `textarea readOnly=${textarea?.readOnly} disabled=${textarea?.disabled} ` +
+      `tabIndex=${textarea?.tabIndex}`,
+    `textarea box=${
+      box
+        ? `${Math.round(box.left)},${Math.round(box.top)} ` +
+          `${Math.round(box.width)}x${Math.round(box.height)}`
+        : 'none'
+    }`,
+    `textarea style=${
+      style
+        ? `pos:${style.position} opacity:${style.opacity} vis:${style.visibility} ` +
+          `disp:${style.display} z:${style.zIndex} pe:${style.pointerEvents}`
+        : 'none'
+    }`,
+    `viewport layout=${Math.round(
+      document.documentElement.clientHeight || window.innerHeight
+    )} visual=${keyboardVisualHeight()} gap=${keyboardViewportGap()} ` +
+      `scale=${(window.visualViewport?.scale ?? 1).toFixed(2)}`,
+    `virtualKeyboardApi=${'virtualKeyboard' in navigator}`
+  ];
+}
+
+/**
+ * Put the helper textarea on screen with a real size.
+ *
+ * xterm parks it at `left: -9999em` with no width or height. That is fine for
+ * every desktop browser and for iOS; it is the first thing to suspect when a
+ * Chrome refuses the keyboard, because a zero-sized element far outside the
+ * viewport is not something a browser has to treat as a place to type. Opacity 0
+ * and a negative z-index keep it invisible either way.
+ */
+function setOnscreenTerminalInput(on) {
+  keyboardOnscreenInputActive = on;
+  document.documentElement.classList.toggle('keyboard-input-onscreen', on);
+}
+
+/**
+ * Did the raise work? Ask the viewport, and escalate once if it did not.
+ *
+ * Both measurements are kept because a browser is free to answer a keyboard with
+ * either viewport. Chrome under interactive-widget=resizes-visual shortens the
+ * visual viewport and leaves the layout one, which shows up as a gap. A browser
+ * that shortens both leaves no gap at all, so a visual height that simply
+ * dropped counts too.
+ */
+function scheduleKeyboardRaiseCheck(reason) {
+  window.clearTimeout(keyboardRaiseCheckTimer);
+  const startedGap = keyboardViewportGap();
+  const startedVisual = keyboardVisualHeight();
+  keyboardDebug(
+    `raise ${reason} gap=${startedGap} visual=${startedVisual} ` +
+      `active=${describeElementForDebug(document.activeElement)}`
+  );
+  keyboardRaiseCheckTimer = window.setTimeout(() => {
+    keyboardRaiseCheckTimer = null;
+    const gap = keyboardViewportGap();
+    const visual = keyboardVisualHeight();
+    const focused = terminalInputIsFocused();
+    const opened = gap > keyboardViewportGapPixels || visual < startedVisual - 100;
+    keyboardDebug(
+      `raise-result ${reason} opened=${opened} gap=${gap} visual=${visual} ` +
+        `focused=${focused}`
+    );
+    if (opened || !focused || keyboardProbeRunning) {
+      return;
+    }
+    // The Apple path is the one that already works, and a hardware keyboard is
+    // not a failure to raise anything.
+    if (!usesSoftKeyboard() || nativeTouchSelection) {
+      return;
+    }
+    if (keyboardOnscreenInputActive) {
+      keyboardDebug('raise-escalate exhausted');
+      return;
+    }
+    keyboardDebug('raise-escalate onscreen-textarea');
+    setOnscreenTerminalInput(true);
+    terminal?.blur();
+    terminal?.focus();
+    window.setTimeout(() => {
+      keyboardDebug(
+        `raise-escalate-result gap=${keyboardViewportGap()} ` +
+          `visual=${keyboardVisualHeight()} focused=${terminalInputIsFocused()}`
+      );
+    }, keyboardRaiseCheckMilliseconds);
+  }, keyboardRaiseCheckMilliseconds);
+}
+
+function keyboardProbeRest() {
+  return new Promise((resolve) =>
+    window.setTimeout(resolve, keyboardProbeRestMilliseconds)
+  );
+}
+
+function keyboardProbeWait() {
+  return new Promise((resolve) =>
+    window.setTimeout(resolve, keyboardProbeWaitMilliseconds)
+  );
+}
+
+/**
+ * Try every way of asking for the keyboard, and report which one the device
+ * answered.
+ *
+ * Each strategy is measured the same way and undone before the next, so the
+ * result names the one difference that mattered. Whichever line says
+ * `opened=true` is the fix; a run where every line says false rules the textarea
+ * out and points at the environment lines above it instead.
+ */
+async function runKeyboardProbe() {
+  if (keyboardProbeRunning) {
+    return;
+  }
+  if (!terminal) {
+    keyboardDebug('probe skipped: no terminal');
+    return;
+  }
+  keyboardProbeRunning = true;
+  const restoreOnscreen = keyboardOnscreenInputActive;
+  let probeInput = null;
+  try {
+    keyboardDebug('--- probe start ---');
+    for (const line of keyboardEnvironmentLines()) {
+      keyboardDebug(line);
+    }
+    const strategies = [
+      {
+        name: 'plain-focus',
+        apply: () => terminal.focus()
+      },
+      {
+        name: 'blur-then-focus',
+        apply: () => {
+          terminal.blur();
+          terminal.focus();
+        }
+      },
+      {
+        name: 'onscreen-textarea',
+        apply: () => {
+          setOnscreenTerminalInput(true);
+          terminal.blur();
+          terminal.focus();
+        },
+        reset: () => setOnscreenTerminalInput(false)
+      },
+      {
+        name: 'own-input',
+        apply: () => {
+          probeInput = document.createElement('input');
+          probeInput.type = 'text';
+          probeInput.className = 'keyboard-probe-input';
+          probeInput.setAttribute('autocapitalize', 'off');
+          probeInput.setAttribute('autocorrect', 'off');
+          probeInput.setAttribute('spellcheck', 'false');
+          probeInput.setAttribute('aria-hidden', 'true');
+          document.body.append(probeInput);
+          probeInput.focus();
+        },
+        reset: () => {
+          probeInput?.remove();
+          probeInput = null;
+        }
+      },
+      {
+        name: 'virtualkeyboard-api',
+        apply: () => {
+          terminal.focus();
+          navigator.virtualKeyboard?.show?.();
+        }
+      }
+    ];
+    for (const strategy of strategies) {
+      terminal.blur();
+      document.activeElement?.blur?.();
+      await keyboardProbeRest();
+      const beforeGap = keyboardViewportGap();
+      const beforeVisual = keyboardVisualHeight();
+      let failure = '';
+      try {
+        strategy.apply();
+      } catch (error) {
+        failure = ` threw=${error?.name || 'Error'}`;
+      }
+      await keyboardProbeWait();
+      const gap = keyboardViewportGap();
+      const visual = keyboardVisualHeight();
+      const opened =
+        gap > keyboardViewportGapPixels || visual < beforeVisual - 100;
+      keyboardDebug(
+        `probe ${strategy.name} opened=${opened} gap=${beforeGap}->${gap} ` +
+          `visual=${beforeVisual}->${visual} ` +
+          `active=${describeElementForDebug(document.activeElement)}${failure}`
+      );
+      strategy.reset?.();
+      await keyboardProbeRest();
+    }
+    keyboardDebug('--- probe end ---');
+  } finally {
+    probeInput?.remove();
+    setOnscreenTerminalInput(restoreOnscreen);
+    keyboardProbeRunning = false;
+  }
+}
+// ---- End of the soft keyboard diagnostic block. ----
 
 function toggleKeyboard() {
   if (!terminal || !activeSession) {
@@ -8146,11 +8520,12 @@ function toggleKeyboard() {
   // keyboard could never drop focus at all: its pointer is coarse and its
   // viewport never shrinks, so every press would read as that same state.
   if (terminalInputIsFocused()) {
+    keyboardDebug('button blur');
     terminal.blur();
     return;
   }
   clearTerminalSelection();
-  focusTerminalForTyping();
+  focusTerminalForTyping('button');
 }
 
 function hideScrollPosition() {
@@ -13048,7 +13423,7 @@ function handleTerminalTap(clientX, clientY) {
     if (!terminalInputIsFocused()) {
       clearTerminalSelection();
     }
-    focusTerminalForTyping();
+    focusTerminalForTyping('terminal-tap');
   }
   if (terminal.modes.mouseTrackingMode === 'none') {
     return;
