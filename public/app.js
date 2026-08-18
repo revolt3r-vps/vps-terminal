@@ -2981,7 +2981,7 @@ function setKeyPanelOpen(open) {
     document.body.classList.add('key-panel-open');
     // Hand the keyboard's space over rather than stacking on top of it.
     if (terminalInputIsFocused()) {
-      terminal?.blur();
+      blurTerminalInput();
     }
     // The panel owns that space from this instant, so the keyboard geometry goes
     // now. Left to the blur, this only happens when the terminal had focus —
@@ -6046,9 +6046,18 @@ function markCopyNeedsAttention(clientX, clientY) {
 }
 
 function terminalInputIsFocused() {
-  return Boolean(
-    document.activeElement && terminalElement.contains(document.activeElement)
-  );
+  const active = document.activeElement;
+  if (!active) {
+    return false;
+  }
+  // The bridge lives in the body rather than inside #terminal, so it has to be
+  // named here. Everything that asks this question — the footer button, the layout
+  // lock, the tap handler — means "is the user typing into the terminal", and with
+  // the bridge in use that is this element.
+  if (keyboardBridgeInput && active === keyboardBridgeInput) {
+    return true;
+  }
+  return terminalElement.contains(active);
 }
 
 function terminalHasCopyableSelection() {
@@ -6784,7 +6793,7 @@ function beginLongPressTerminalSelection(clientX, clientY) {
     // copy or a paste. Only a keyboard that was up gets put back — this must not
     // open one the user never had.
     terminalFocusedBeforeSelection = true;
-    terminal.blur();
+    blurTerminalInput();
   }
   beginXtermTouchSelection(clientX, clientY);
   updateClipboardButton();
@@ -7839,6 +7848,14 @@ function isHardwareKeyboardUiCaptureTarget(target) {
   if (terminal?.textarea && (field === terminal.textarea || terminal.textarea.contains(field))) {
     return false;
   }
+  // The bridge is the same thing on a browser that will not raise a keyboard for
+  // xterm's element. Belt and braces: the terminalInputIsFocused() guard in the
+  // hardware-key handler already returns before this is consulted, so naming it
+  // here changes no behaviour today — it keeps the two definitions of "the
+  // terminal's own input" from drifting apart.
+  if (keyboardBridgeInput && field === keyboardBridgeInput) {
+    return false;
+  }
   return true;
 }
 
@@ -8145,6 +8162,234 @@ function handleNativeTerminalDeleteInput(event) {
   scheduleNativeTerminalInputPrime();
 }
 
+// ---- Start of the keyboard bridge block. ----
+/**
+ * Type through an input element we own, for a browser that will not raise its
+ * keyboard for xterm's.
+ *
+ * Measured on a real Android Chrome 151 across two builds. Focusing xterm's helper
+ * textarea never opened the keyboard — not at 2x13 and not at 40x24, not at opacity
+ * 0 and not at 0.01, not behind the page at z-index -5 and not in front at 1, not
+ * off-viewport and not fixed to the bottom of it. Ten strategies, one worked:
+ * focusing a plain `<input>` in the same page at the same moment, every time, taking
+ * the visual viewport from 827 to 436.
+ *
+ * So the geometry was never the problem and this stops arguing with it. The input
+ * below is the thing that works; everything typed into it is forwarded to the shell.
+ *
+ * It is not the default. Every browser that raises a keyboard for xterm's textarea
+ * keeps using it, including iOS, where the selection and paste machinery is built
+ * around that element. This is reached when a raise measurably opens nothing, and
+ * remembered afterwards so the next load starts here rather than paying for the
+ * discovery again.
+ */
+const keyboardBridgeStorageKey = 'vps-terminal.keyboard-bridge';
+// Zero-width spaces. Backspace needs something in the field to delete, or Android
+// keyboards send no event at all for it — the same reason the iOS path primes
+// xterm's textarea. Never typed by a person, so anything else in the value is real.
+const keyboardBridgeSentinel = '\u200b\u200b\u200b';
+let keyboardBridgeInput = null;
+let keyboardBridgeComposing = false;
+let keyboardBridgeEnabled = loadKeyboardBridgePreference();
+
+function loadKeyboardBridgePreference() {
+  try {
+    // `?keyboard-bridge=off` is the way back, for a browser that gets fixed or a
+    // profile carried to a device where xterm's textarea works. Nothing else clears
+    // this, and a preference with no exit is a trap.
+    const asked = new URLSearchParams(window.location.search).get(
+      'keyboard-bridge'
+    );
+    if (asked === 'off') {
+      window.localStorage.removeItem(keyboardBridgeStorageKey);
+      return false;
+    }
+    if (asked === 'on') {
+      window.localStorage.setItem(keyboardBridgeStorageKey, '1');
+      return true;
+    }
+    return window.localStorage.getItem(keyboardBridgeStorageKey) === '1';
+  } catch {
+    // Storage denied. The escalation will find it again this session.
+    return false;
+  }
+}
+
+function keyboardBridgeIsActive() {
+  return keyboardBridgeEnabled && keyboardBridgeInput !== null;
+}
+
+function primeKeyboardBridge() {
+  if (!keyboardBridgeInput || keyboardBridgeComposing) {
+    return;
+  }
+  keyboardBridgeInput.value = keyboardBridgeSentinel;
+  const end = keyboardBridgeSentinel.length;
+  keyboardBridgeInput.setSelectionRange(end, end);
+}
+
+/** Whatever the field holds that a person actually typed. */
+function keyboardBridgeTypedText() {
+  if (!keyboardBridgeInput) {
+    return '';
+  }
+  return keyboardBridgeInput.value.split('\u200b').join('');
+}
+
+function flushKeyboardBridge() {
+  const typed = keyboardBridgeTypedText();
+  if (typed) {
+    sendInput(typed);
+  }
+  primeKeyboardBridge();
+}
+
+function ensureKeyboardBridge() {
+  if (keyboardBridgeInput) {
+    return keyboardBridgeInput;
+  }
+  const input = document.createElement('input');
+  // type=password, not text. xtermjs/xterm.js#2403 and #675 report what a
+  // predictive keyboard does to a terminal on Android: suggestions appear ahead of
+  // the cursor, a hidden history builds up, and pressing backspace or enter
+  // duplicates earlier characters. A password field gets none of that treatment,
+  // and it is what that thread settled on. Nothing is ever submitted and the field
+  // has no name, so no password manager has anything to offer to save.
+  input.type = 'password';
+  input.className = 'keyboard-bridge-input';
+  input.setAttribute('autocapitalize', 'off');
+  input.setAttribute('autocorrect', 'off');
+  input.setAttribute('autocomplete', 'off');
+  input.setAttribute('spellcheck', 'false');
+  input.setAttribute('aria-label', 'Terminal input');
+  input.setAttribute('enterkeyhint', 'enter');
+
+  // Enter here rather than in beforeinput: preventing the keydown stops the line
+  // break ever being inserted, so there is one carriage return per press instead of
+  // one from each event.
+  let bridgeEnterHandled = false;
+  input.addEventListener('keydown', (event) => {
+    if (event.isComposing) {
+      return;
+    }
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      bridgeEnterHandled = true;
+      flushKeyboardBridge();
+      sendInput('\r');
+    }
+  });
+  // The backstop. A single-line input fires no beforeinput for Enter — Chrome
+  // treats it as implicit form submission, and with no form there is no event at
+  // all — so a keyboard that reports the press as keyCode 229 on keydown would
+  // lose the return with nothing to catch it. The flag keeps one press to one
+  // carriage return.
+  input.addEventListener('keyup', (event) => {
+    if (event.key !== 'Enter') {
+      return;
+    }
+    if (!bridgeEnterHandled) {
+      flushKeyboardBridge();
+      sendInput('\r');
+    }
+    bridgeEnterHandled = false;
+  });
+
+  // Backspace here rather than in keydown: Android keyboards report it as keyCode
+  // 229 or not at all, and this fires either way — which is what the sentinel in the
+  // field exists to guarantee.
+  input.addEventListener('beforeinput', (event) => {
+    // Every delete a soft keyboard can send, not just the single-character one.
+    // Gboard's swipe-left deletes a word and Ctrl+Backspace does the same; both
+    // report deleteWordBackward, which used to fall through to the default, eat the
+    // sentinel, and leave the input handler with nothing to forward — the keystroke
+    // vanished with nothing on screen.
+    const deletes = {
+      deleteContentBackward: '\u007f',
+      // WERASE and KILL, which is what a shell does with these.
+      deleteWordBackward: '\u0017',
+      deleteSoftLineBackward: '\u0015',
+      deleteHardLineBackward: '\u0015'
+    };
+    const deleteSequence = deletes[event.inputType];
+    if (deleteSequence) {
+      event.preventDefault();
+      sendInput(deleteSequence);
+      primeKeyboardBridge();
+      return;
+    }
+    if (
+      event.inputType === 'insertLineBreak' ||
+      event.inputType === 'insertParagraph'
+    ) {
+      event.preventDefault();
+      flushKeyboardBridge();
+      sendInput('\r');
+    }
+  });
+
+  input.addEventListener('input', () => {
+    if (keyboardBridgeComposing) {
+      // Mid-word suggestions are not committed text. compositionend sends them.
+      return;
+    }
+    flushKeyboardBridge();
+  });
+
+  input.addEventListener('compositionstart', () => {
+    keyboardBridgeComposing = true;
+  });
+  input.addEventListener('compositionend', (event) => {
+    keyboardBridgeComposing = false;
+    if (event.data) {
+      sendInput(event.data);
+    }
+    primeKeyboardBridge();
+  });
+
+  // The same two listeners xterm's textarea has, so every piece of keyboard
+  // bookkeeping — the input-active class, the footer button, the layout lock —
+  // behaves exactly as it does on the paths that use xterm's own element.
+  input.addEventListener('focus', () => {
+    handleTerminalInputFocused('bridge-focus');
+    primeKeyboardBridge();
+  });
+  input.addEventListener('blur', () => {
+    recordKeyboardTransition('bridge-blur');
+    keyboardBridgeComposing = false;
+    terminalElement.classList.remove('keyboard-input-active');
+    setKeyboardButtonState(false);
+    releaseKeyboardLayoutLock();
+  });
+
+  // In the body, not in #terminal. The input that worked was in the body, and
+  // whether an ancestor of xterm's textarea is what Chrome objects to is still
+  // unknown — runKeyboardProbe() asks. Putting it where the measurement was taken
+  // keeps the one proven fact intact. terminalInputIsFocused() knows about it, so
+  // living outside #terminal costs nothing.
+  document.body.append(input);
+  keyboardBridgeInput = input;
+  return input;
+}
+
+/**
+ * Switch typing to the bridge, and remember it.
+ *
+ * Remembered because the discovery costs a dead first tap: the escalation only runs
+ * after a raise has measurably opened nothing, and on a phone where xterm's textarea
+ * never works that is every single load.
+ */
+function enableKeyboardBridge() {
+  keyboardBridgeEnabled = true;
+  ensureKeyboardBridge();
+  try {
+    window.localStorage.setItem(keyboardBridgeStorageKey, '1');
+  } catch {
+    // Storage denied. It still holds for this session.
+  }
+}
+// ---- End of the keyboard bridge block. ----
+
 /**
  * A coarse primary pointer, which means typing goes through a soft keyboard.
  *
@@ -8170,6 +8415,8 @@ function focusTerminalForTyping(keyboardRaiseReason = 'focus') {
   if (!terminal) {
     return;
   }
+  // The bridge, once it is the typing path, is what a raise has to focus.
+  const target = keyboardBridgeIsActive() ? keyboardBridgeInput : null;
   if (
     terminalInputIsFocused() &&
     usesSoftKeyboard() &&
@@ -8180,9 +8427,17 @@ function focusTerminalForTyping(keyboardRaiseReason = 'focus') {
     window.performance.now() - terminalInputFocusedAt >
       keyboardOpenSettleMilliseconds
   ) {
-    terminal.blur();
+    if (target) {
+      target.blur();
+    } else {
+      terminal.blur();
+    }
   }
-  terminal.focus();
+  if (target) {
+    target.focus();
+  } else {
+    terminal.focus();
+  }
   scheduleKeyboardRaiseCheck(keyboardRaiseReason);
 }
 
@@ -8293,6 +8548,7 @@ function keyboardEnvironmentLines() {
   }
   return [
     `build ${build}`,
+    `bridge enabled=${keyboardBridgeEnabled} active=${keyboardBridgeIsActive()}`,
     `ua ${navigator.userAgent}`,
     `mode display=${document.documentElement.dataset.displayMode || '?'} ` +
       `coarse=${usesSoftKeyboard()} applePath=${nativeTouchSelection} ` +
@@ -8344,6 +8600,77 @@ function setOnscreenTerminalInput(on) {
   document.documentElement.classList.toggle('keyboard-input-onscreen', on);
 }
 
+/**
+ * Everything that has to happen when the terminal starts taking keystrokes.
+ *
+ * Shared, because there are two elements it can take them through and the bridge
+ * skipped three pieces of this when it had its own copy: the dismiss poll kept
+ * running, a live selection stayed up, and the layout was never frozen at the end
+ * of the keyboard animation.
+ */
+function handleTerminalInputFocused(reason) {
+  recordKeyboardTransition(reason);
+  terminalInputFocusedAt = window.performance.now();
+  keyboardDismissing = false;
+  clearTimeout(keyboardDismissPollTimer);
+  keyboardDismissPollTimer = null;
+  terminalElement.classList.add('keyboard-input-active');
+  clearTerminalSelection();
+  setKeyboardButtonState(true);
+  // Wait for the keyboard animation, then freeze layout so later visualViewport
+  // pans cannot slide the whole page.
+  scheduleVisualViewportUpdate();
+  window.setTimeout(() => {
+    if (keyboardLayoutLock) {
+      // The settle gate in updateVisualViewport() already froze a height that had
+      // stopped moving. Re-capturing here would overwrite it with whatever this
+      // instant happens to be and refit the terminal again.
+      recordKeyboardTransition('focus-settle-already-locked');
+    } else if (keyboardViewportIsReduced()) {
+      captureKeyboardLayoutLock();
+      scheduleFit();
+    } else {
+      // Either the blur landed inside the 320 ms animation window or the keyboard
+      // never came up. Both mean the viewport is full height, and freezing it there
+      // is the T18 bug — updateVisualViewport() captures once the reduction arrives.
+      recordKeyboardTransition('focus-settle-skipped');
+    }
+  }, keyboardOpenSettleMilliseconds);
+}
+
+/**
+ * Focus whichever element the terminal types through, with no raise bookkeeping.
+ *
+ * For the callers that are putting focus back where it was rather than asking for a
+ * keyboard — restoring after a long-press selection, most of all. That one called
+ * terminal.focus() straight through, which on the device the bridge exists for
+ * raises nothing while xterm's focus handler still reports the keyboard as up: the
+ * footer button then read as "hide" and it took two presses to type again.
+ */
+function focusTerminalInput() {
+  if (keyboardBridgeIsActive()) {
+    keyboardBridgeInput.focus();
+    return;
+  }
+  terminal?.focus();
+}
+
+/**
+ * Take focus off whichever element the terminal is typing through.
+ *
+ * `terminal.blur()` only touches xterm's textarea. With the bridge in use that call
+ * does nothing, and everything that dismisses the keyboard by blurring — the footer
+ * button, opening the key panel, switching to Files, losing the session — silently
+ * stopped working.
+ */
+function blurTerminalInput() {
+  if (keyboardBridgeInput && document.activeElement === keyboardBridgeInput) {
+    keyboardBridgeInput.blur();
+    return;
+  }
+  terminal?.blur();
+}
+
 /** One probe strategy's worth of class, off again before the next one. */
 function setTerminalInputProbeClass(name, on) {
   document.documentElement.classList.toggle(name, on);
@@ -8384,18 +8711,22 @@ function scheduleKeyboardRaiseCheck(reason) {
     if (!usesSoftKeyboard() || nativeTouchSelection) {
       return;
     }
-    if (keyboardOnscreenInputActive) {
+    if (keyboardBridgeIsActive()) {
       keyboardDebug('raise-escalate exhausted');
       return;
     }
-    keyboardDebug('raise-escalate onscreen-textarea');
-    setOnscreenTerminalInput(true);
+    // Straight to the bridge. Moving xterm's textarea on screen was the first
+    // escalation and the device answered it: ten strategies, and only an input of
+    // our own opened the keyboard.
+    keyboardDebug('raise-escalate keyboard-bridge');
+    enableKeyboardBridge();
     terminal?.blur();
-    terminal?.focus();
+    keyboardBridgeInput?.focus();
     window.setTimeout(() => {
       keyboardDebug(
         `raise-escalate-result gap=${keyboardViewportGap()} ` +
-          `visual=${keyboardVisualHeight()} focused=${terminalInputIsFocused()}`
+          `visual=${keyboardVisualHeight()} focused=${terminalInputIsFocused()} ` +
+          `bridge=${keyboardBridgeIsActive()}`
       );
     }, keyboardRaiseCheckMilliseconds);
   }, keyboardRaiseCheckMilliseconds);
@@ -8493,29 +8824,69 @@ async function runKeyboardProbe() {
           setOnscreenTerminalInput(false);
         }
       },
-      {
-        name: 'own-input',
+      // The one that works, and then the same element in two other places. If a
+      // field in the body opens the keyboard and the same field inside #terminal
+      // does not, an ancestor of xterm's textarea is the refusal and this says
+      // which — the one thing ten strategies have not been able to separate.
+      ...[
+        ['own-input', () => document.body, {}],
+        ['own-input-in-terminal', () => terminalElement, {}],
+        ['own-input-in-main', () => document.querySelector('main'), {}],
+        // Whether the bridge can refuse taps. It keeps them today because the field
+        // that worked had them, and an invisible 40x24 target is only harmless while
+        // the footer covers that corner.
+        ['own-input-untappable', () => document.body, { pointerEvents: 'none' }]
+      ].map(([name, parent, style]) => ({
+        name,
         apply: () => {
           probeInput = document.createElement('input');
           probeInput.type = 'text';
+          Object.assign(probeInput.style, style);
           probeInput.className = 'keyboard-probe-input';
           probeInput.setAttribute('autocapitalize', 'off');
           probeInput.setAttribute('autocorrect', 'off');
           probeInput.setAttribute('spellcheck', 'false');
           probeInput.setAttribute('aria-hidden', 'true');
-          document.body.append(probeInput);
+          (parent() || document.body).append(probeInput);
           probeInput.focus();
         },
         reset: () => {
           probeInput?.remove();
           probeInput = null;
         }
-      },
+      })),
       {
         name: 'virtualkeyboard-api',
         apply: () => {
           terminal.focus();
           navigator.virtualKeyboard?.show?.();
+        }
+      },
+      // The same API, done the way it is documented. show() is refused unless the
+      // focused element sets virtualkeyboardpolicy="manual" — which the strategy
+      // above never did, so its failure said nothing about the API. If this one
+      // opens the keyboard, xterm's own textarea can keep the job and the bridge
+      // is unnecessary: it is two attributes and a call, against a whole second
+      // input path.
+      //
+      // The policy is put back afterwards. Leaving it on `manual` hands the
+      // keyboard to the page permanently, so a browser that ignores show() would
+      // be left with no keyboard at all rather than the one it had.
+      {
+        name: 'textarea-vk-manual',
+        apply: () => {
+          const textarea = terminal.textarea;
+          textarea?.setAttribute('virtualkeyboardpolicy', 'manual');
+          terminal.blur();
+          terminal.focus();
+          navigator.virtualKeyboard?.show?.();
+        },
+        reset: () => {
+          // hide() before the attribute goes: per MDN it is only honoured while the
+          // focused element still carries the manual policy, so the other order can
+          // leave the keyboard up and skew the next strategy's measurement.
+          navigator.virtualKeyboard?.hide?.();
+          terminal.textarea?.removeAttribute('virtualkeyboardpolicy');
         }
       }
     ];
@@ -8572,7 +8943,7 @@ function toggleKeyboard() {
   // viewport never shrinks, so every press would read as that same state.
   if (terminalInputIsFocused()) {
     keyboardDebug('button blur');
-    terminal.blur();
+    blurTerminalInput();
     return;
   }
   clearTerminalSelection();
@@ -11013,7 +11384,7 @@ function setViewMode(mode, options = {}) {
     closeFooterDrawer();
     // It describes a terminal cell, so it has no meaning here.
     hideTerminalLinkChip();
-    terminal?.blur();
+    blurTerminalInput();
     // Collapse session chrome — not used in Files.
     setHeaderCollapsed(true);
     if (emptyElement) {
@@ -13305,35 +13676,8 @@ async function ensureTerminal() {
         capture: true
       });
       terminal.textarea?.addEventListener('focus', () => {
-        recordKeyboardTransition('terminal-focus');
-        terminalInputFocusedAt = window.performance.now();
-        keyboardDismissing = false;
-        clearTimeout(keyboardDismissPollTimer);
-        keyboardDismissPollTimer = null;
-        terminalElement.classList.add('keyboard-input-active');
-        clearTerminalSelection();
-        setKeyboardButtonState(true);
+        handleTerminalInputFocused('terminal-focus');
         scheduleNativeTerminalInputPrime();
-        // Wait for the keyboard animation, then freeze layout so later
-        // visualViewport pans cannot slide the whole page.
-        scheduleVisualViewportUpdate();
-        window.setTimeout(() => {
-          if (keyboardLayoutLock) {
-            // The settle gate in updateVisualViewport() already froze a height
-            // that had stopped moving. Re-capturing here would overwrite it with
-            // whatever this instant happens to be and refit the terminal again.
-            recordKeyboardTransition('focus-settle-already-locked');
-          } else if (keyboardViewportIsReduced()) {
-            captureKeyboardLayoutLock();
-            scheduleFit();
-          } else {
-            // Either the blur landed inside the 320 ms animation window or the
-            // keyboard never came up. Both mean the viewport is full height, and
-            // freezing it there is the T18 bug — updateVisualViewport() captures
-            // once the reduction actually arrives.
-            recordKeyboardTransition('focus-settle-skipped');
-          }
-        }, keyboardOpenSettleMilliseconds);
       });
       terminal.textarea?.addEventListener('blur', () => {
         stopNativeDeleteRepeat();
@@ -13414,6 +13758,13 @@ async function ensureTerminal() {
         }
       });
       terminal.refresh(0, terminal.rows - 1);
+      // Remembered from a previous visit. Without this the flag was read at load and
+      // then nothing acted on it: the element was only ever built by the escalation,
+      // so every load waited for a raise to fail before typing worked.
+      if (keyboardBridgeEnabled) {
+        ensureKeyboardBridge();
+        keyboardDebug('bridge restored from preference');
+      }
       installTouchScrolling();
     })();
   }
@@ -15258,7 +15609,7 @@ function disconnect() {
   clearConnectionWatch();
   setConnectionState('idle');
   setHeaderCollapsed(false);
-  terminal?.blur();
+  blurTerminalInput();
   setKeyboardButtonState(false);
   setArmedModifier(null);
   clearTerminalSelection();
@@ -17335,7 +17686,7 @@ function restoreTerminalFocusAfterSelection() {
     return;
   }
   terminalFocusedBeforeSelection = false;
-  terminal?.focus();
+  focusTerminalInput();
 }
 
 async function handleSelectionCopyChipClick(event) {

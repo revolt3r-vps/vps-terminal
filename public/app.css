@@ -2078,10 +2078,20 @@ html.keyboard-input-onscreen-tappable #terminal .xterm-helper-textarea {
 }
 
 /*
- * The keyboard probe's own field, for the one strategy that does not use xterm's
- * textarea at all. On screen and focusable, because that is the point of the
- * comparison, and gone again as soon as the strategy is measured.
+ * The bridge: the element that actually raises the keyboard on a browser which
+ * refuses xterm's. Deliberately identical to the probe field below, because that
+ * shape is the one measured to work — 40x24 at the bottom-left, barely-there
+ * opacity, z-index 1. Text and caret are transparent so nothing of it is ever
+ * visible. See the keyboard bridge block in app.js.
+ *
+ * Taps are left enabled, which is the one part of this that is a compromise rather
+ * than a measurement. The field that opened the keyboard had them, and whether
+ * `pointer-events: none` costs that is untested — so it keeps them, and the footer
+ * covers this corner at a higher z-index, which is what stops it swallowing the
+ * keyboard button. runKeyboardProbe() tests the untappable variant so the next
+ * report can settle it.
  */
+.keyboard-bridge-input,
 .keyboard-probe-input {
   position: fixed;
   left: 0;
