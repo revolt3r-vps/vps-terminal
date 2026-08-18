@@ -8327,17 +8327,26 @@ function keyboardEnvironmentLines() {
 }
 
 /**
- * Put the helper textarea on screen with a real size.
+ * Make the helper textarea look like the field Chrome does accept.
  *
- * xterm parks it at `left: -9999em` with no width or height. That is fine for
- * every desktop browser and for iOS; it is the first thing to suspect when a
- * Chrome refuses the keyboard, because a zero-sized element far outside the
- * viewport is not something a browser has to treat as a place to type. Opacity 0
- * and a negative z-index keep it invisible either way.
+ * Measured on a real Android Chrome 151: focusing xterm's textarea never raised
+ * the keyboard, and focusing a plain <input> in the same page at the same moment
+ * always did. Four properties differ — opacity 0 against 0.01, z-index -5 against
+ * 1, 2x13 against 40x24, and off-viewport against in it — and this applies all
+ * four, because any of them could be the refusal and the keyboard is worth more
+ * than the tidiness of changing one.
+ *
+ * runKeyboardProbe() tests them one at a time so the next report can trim this
+ * back to whichever one mattered.
  */
 function setOnscreenTerminalInput(on) {
   keyboardOnscreenInputActive = on;
   document.documentElement.classList.toggle('keyboard-input-onscreen', on);
+}
+
+/** One probe strategy's worth of class, off again before the next one. */
+function setTerminalInputProbeClass(name, on) {
+  document.documentElement.classList.toggle(name, on);
 }
 
 /**
@@ -8441,6 +8450,24 @@ async function runKeyboardProbe() {
           terminal.focus();
         }
       },
+      // One property at a time, in the order they are most likely to be the
+      // refusal. Each is xterm's own textarea with a single difference.
+      ...[
+        'keyboard-input-opacity',
+        'keyboard-input-zindex',
+        'keyboard-input-size',
+        'keyboard-input-fixed'
+      ].map((className) => ({
+        name: className.replace('keyboard-input-', 'textarea-'),
+        apply: () => {
+          setTerminalInputProbeClass(className, true);
+          terminal.blur();
+          terminal.focus();
+        },
+        reset: () => setTerminalInputProbeClass(className, false)
+      })),
+      // All four together, which is what the escalation applies. If this opens
+      // the keyboard and none of the four alone does, it takes a combination.
       {
         name: 'onscreen-textarea',
         apply: () => {
@@ -8449,6 +8476,22 @@ async function runKeyboardProbe() {
           terminal.focus();
         },
         reset: () => setOnscreenTerminalInput(false)
+      },
+      // The same with taps left on. The field that worked had them, and the
+      // escalation turns them off so a box at the bottom-left cannot swallow the
+      // footer's keyboard button — this says whether that costs the keyboard.
+      {
+        name: 'onscreen-textarea-tappable',
+        apply: () => {
+          setOnscreenTerminalInput(true);
+          setTerminalInputProbeClass('keyboard-input-onscreen-tappable', true);
+          terminal.blur();
+          terminal.focus();
+        },
+        reset: () => {
+          setTerminalInputProbeClass('keyboard-input-onscreen-tappable', false);
+          setOnscreenTerminalInput(false);
+        }
       },
       {
         name: 'own-input',
@@ -8493,9 +8536,17 @@ async function runKeyboardProbe() {
       const visual = keyboardVisualHeight();
       const opened =
         gap > keyboardViewportGapPixels || visual < beforeVisual - 100;
+      const textarea = terminal.textarea;
+      const box = textarea?.getBoundingClientRect();
       keyboardDebug(
         `probe ${strategy.name} opened=${opened} gap=${beforeGap}->${gap} ` +
           `visual=${beforeVisual}->${visual} ` +
+          `box=${
+            box
+              ? `${Math.round(box.left)},${Math.round(box.top)} ` +
+                `${Math.round(box.width)}x${Math.round(box.height)}`
+              : 'none'
+          } ` +
           `active=${describeElementForDebug(document.activeElement)}${failure}`
       );
       strategy.reset?.();

@@ -2019,17 +2019,62 @@ html.native-touch-terminal #terminal .xterm-helper-textarea {
 
 /*
  * The escalation path for a browser that will not raise its keyboard for the
- * textarea xterm ships. xterm parks it at `left: -9999em` with no width or
- * height; this puts it on screen with a real size, still invisible behind the
- * terminal. See setOnscreenTerminalInput() in app.js.
+ * textarea xterm ships.
+ *
+ * Measured on a real Android Chrome 151 on 2026-08-18: focusing xterm's helper
+ * textarea never raised the keyboard, and focusing a plain <input> in the same
+ * page at the same moment always did. Four properties differ between them, and
+ * each has its own class below so the device can say which one is the refusal.
+ * `-fixed` exists because `top: 0` is relative to `.xterm-helpers` inside the
+ * scrolled screen, and on that phone it put the box at y = -270 — still outside
+ * the viewport, so the first attempt at this never tested what it meant to.
+ *
+ * See setOnscreenTerminalInput() and runKeyboardProbe() in app.js.
+ */
+html.keyboard-input-opacity #terminal .xterm-helper-textarea {
+  opacity: 0.01 !important;
+}
+
+html.keyboard-input-zindex #terminal .xterm-helper-textarea {
+  z-index: 1 !important;
+}
+
+html.keyboard-input-size #terminal .xterm-helper-textarea {
+  width: 40px !important;
+  height: 24px !important;
+}
+
+html.keyboard-input-fixed #terminal .xterm-helper-textarea {
+  position: fixed !important;
+  left: 0 !important;
+  bottom: 0 !important;
+  top: auto !important;
+}
+
+/*
+ * All four at once, which is the shape the probe proved a plain field has. Text
+ * and caret are transparent so a field that is now technically visible still
+ * shows nothing, and pointer-events are off so a 40x24 box at the bottom-left
+ * cannot take the taps meant for the footer's keyboard button.
  */
 html.keyboard-input-onscreen #terminal .xterm-helper-textarea {
+  position: fixed !important;
   left: 0 !important;
-  top: 0 !important;
-  width: 2px !important;
-  height: 1em !important;
-  opacity: 0 !important;
-  z-index: -5 !important;
+  bottom: 0 !important;
+  top: auto !important;
+  width: 40px !important;
+  height: 24px !important;
+  opacity: 0.01 !important;
+  z-index: 1 !important;
+  color: transparent !important;
+  caret-color: transparent !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+/* The same, with taps left on, so the probe can say whether that mattered. */
+html.keyboard-input-onscreen-tappable #terminal .xterm-helper-textarea {
+  pointer-events: auto !important;
 }
 
 /*
