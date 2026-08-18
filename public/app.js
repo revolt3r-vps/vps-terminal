@@ -338,6 +338,10 @@ const nativePastePromptMilliseconds = 250;
 // matching that is the point — a repeat count instead of a duration escalates
 // sooner on a faster keyboard, which is what made it fire early.
 const nativeDeleteWordEscalationMilliseconds = 2000;
+// How long a soft keyboard takes to finish rising. The viewport reports full
+// height for this long after the focus that raised it, so nothing may read a
+// full-height viewport inside this window as "the keyboard is down".
+const keyboardOpenSettleMilliseconds = 320;
 const nativeSelectionSettleMilliseconds = 1000;
 const nativeSelectionViewportSettleMilliseconds = 1200;
 const nativeTapMaximumMilliseconds = 350;
@@ -1314,8 +1318,12 @@ let nativeTouchStartX = null;
 let terminalFocusedBeforeSelection = false;
 // Tracks the keyboard-open animation so the layout is frozen once, at the end.
 let keyboardSettleState = null;
+/** When the terminal input last took focus, to leave a rising keyboard alone. */
+let terminalInputFocusedAt = Number.NEGATIVE_INFINITY;
 let genericTouchStartX = null;
 let genericTouchStartY = null;
+/** When the current single-finger gesture began, to tell a tap from a drag. */
+let genericTouchStartedAt = Number.NEGATIVE_INFINITY;
 let nativeTouchStartY = null;
 let nativeTouchMaxDistance = 0;
 let nativeTouchStartedAt = Number.NEGATIVE_INFINITY;
@@ -3160,7 +3168,7 @@ function keyPanelShowKeyboard() {
   setKeyPanelOpen(false);
   if (terminal && activeSession) {
     clearTerminalSelection();
-    terminal.focus();
+    focusTerminalForTyping();
   }
 }
 
@@ -8088,16 +8096,61 @@ function handleNativeTerminalDeleteInput(event) {
   scheduleNativeTerminalInputPrime();
 }
 
+/**
+ * A coarse primary pointer, which means typing goes through a soft keyboard.
+ *
+ * Not shouldUseNativeTouchSelection(): that one is Apple-only by design, and the
+ * keyboard questions here apply to every touch device.
+ */
+function usesSoftKeyboard() {
+  return window.matchMedia?.('(pointer: coarse)').matches === true;
+}
+
+/**
+ * Focus the terminal so the soft keyboard comes up.
+ *
+ * Android keeps focus on the xterm helper textarea when the keyboard is dismissed
+ * with the Back button. Chrome raises the keyboard on a focus *change*, so a later
+ * focus() on the element that already holds focus does nothing at all, and typing
+ * has no way back. Blurring first makes it a change again.
+ *
+ * Only while the viewport is full height. A reduced viewport means the keyboard is
+ * already up, and blurring there closes it just to reopen it.
+ */
+function focusTerminalForTyping() {
+  if (!terminal) {
+    return;
+  }
+  if (
+    terminalInputIsFocused() &&
+    usesSoftKeyboard() &&
+    !keyboardViewportIsReduced() &&
+    // Not while the keyboard is still rising. It reports full height for the
+    // whole animation, so without this a second tap inside ~320 ms reads it as
+    // dismissed and closes it to open it again.
+    window.performance.now() - terminalInputFocusedAt >
+      keyboardOpenSettleMilliseconds
+  ) {
+    terminal.blur();
+  }
+  terminal.focus();
+}
+
 function toggleKeyboard() {
   if (!terminal || !activeSession) {
     return;
   }
+  // A plain toggle, deliberately. The Back-button state — focus held, keyboard
+  // gone — is answered by tapping the terminal, which is the gesture for it. If
+  // the button re-showed instead of blurring there, a tablet with a hardware
+  // keyboard could never drop focus at all: its pointer is coarse and its
+  // viewport never shrinks, so every press would read as that same state.
   if (terminalInputIsFocused()) {
     terminal.blur();
     return;
   }
   clearTerminalSelection();
-  terminal.focus();
+  focusTerminalForTyping();
 }
 
 function hideScrollPosition() {
@@ -8666,9 +8719,9 @@ function runningAsInstalledWebApp() {
 }
 
 const viewportMetaCoverContent =
-  'width=device-width, initial-scale=1, viewport-fit=cover';
+  'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual';
 const viewportMetaInsetContent =
-  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no';
+  'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-visual';
 
 function currentDisplayMode() {
   return runningAsInstalledWebApp() ? 'standalone' : 'browser';
@@ -12827,6 +12880,7 @@ async function ensureTerminal() {
       });
       terminal.textarea?.addEventListener('focus', () => {
         recordKeyboardTransition('terminal-focus');
+        terminalInputFocusedAt = window.performance.now();
         keyboardDismissing = false;
         clearTimeout(keyboardDismissPollTimer);
         keyboardDismissPollTimer = null;
@@ -12853,7 +12907,7 @@ async function ensureTerminal() {
             // once the reduction actually arrives.
             recordKeyboardTransition('focus-settle-skipped');
           }
-        }, 320);
+        }, keyboardOpenSettleMilliseconds);
       });
       terminal.textarea?.addEventListener('blur', () => {
         stopNativeDeleteRepeat();
@@ -12988,13 +13042,13 @@ function handleTerminalTap(clientX, clientY) {
     socket.send(JSON.stringify({ type: 'input', data: held }));
     return;
   }
-  if (!terminalInputIsFocused() && nearPrompt) {
-    clearTerminalSelection();
-    terminal.focus();
-  } else if (!terminalInputIsFocused() && terminal.modes.mouseTrackingMode === 'none') {
-    // Full-screen mouse apps skip auto-focus; normal shells open keyboard.
-    clearTerminalSelection();
-    terminal.focus();
+  // Near the prompt, or anywhere in a shell that is not tracking the mouse.
+  // Full-screen mouse apps keep the rest of their surface for themselves.
+  if (nearPrompt || terminal.modes.mouseTrackingMode === 'none') {
+    if (!terminalInputIsFocused()) {
+      clearTerminalSelection();
+    }
+    focusTerminalForTyping();
   }
   if (terminal.modes.mouseTrackingMode === 'none') {
     return;
@@ -14235,6 +14289,7 @@ function installTouchScrolling() {
       // The swipe needs an origin, and this path only tracked Y.
       genericTouchStartX = event.touches[0].clientX;
       genericTouchStartY = event.touches[0].clientY;
+      genericTouchStartedAt = window.performance.now();
       touchMoved = false;
     },
     { capture: true, passive: false }
@@ -14320,11 +14375,38 @@ function installTouchScrolling() {
         touchLastY = null;
         return;
       }
+      // A tap, by the same rule the Apple path uses. This handler owns it because
+      // the touchstart above calls preventDefault(), which stops Chrome
+      // synthesising the click xterm would have focused itself on. Without this
+      // the keyboard never came up on Android at all: tapping the terminal did
+      // nothing, and only the footer keyboard button could start typing.
+      const wasTap =
+        !touchMoved &&
+        genericTouchStartX !== null &&
+        window.performance.now() - genericTouchStartedAt <=
+          nativeTapMaximumMilliseconds &&
+        pinchStartDistance === null;
+      const touch = event.changedTouches?.[0];
       genericTouchStartX = null;
+      genericTouchStartY = null;
+      genericTouchStartedAt = Number.NEGATIVE_INFINITY;
       if (viewSwipe) {
         finishViewSwipe();
+        finishTouchGesture();
+        return;
       }
+      const hadSelection = Boolean(terminal?.hasSelection());
       finishTouchGesture();
+      if (!wasTap || !touch) {
+        return;
+      }
+      // A tap on a live selection dismisses it instead of moving the cursor,
+      // which is what the Apple path does with the same gesture.
+      if (hadSelection) {
+        clearTerminalSelection();
+        return;
+      }
+      handleTerminalTap(touch.clientX, touch.clientY);
     },
     { capture: true, passive: true }
   );
@@ -14332,6 +14414,8 @@ function installTouchScrolling() {
     'touchcancel',
     () => {
       genericTouchStartX = null;
+      genericTouchStartY = null;
+      genericTouchStartedAt = Number.NEGATIVE_INFINITY;
       cancelViewSwipe();
       finishTouchGesture();
     },

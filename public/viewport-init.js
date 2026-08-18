@@ -8,9 +8,14 @@
 try {
   const meta = document.querySelector('meta[name="viewport"]');
   if (meta) {
-    const cover = 'width=device-width, initial-scale=1, viewport-fit=cover';
+    // Keep in step with viewportMetaCoverContent in app.js. interactive-widget
+    // states what the keyboard does to the viewport rather than trusting a
+    // browser default: the app measures the keyboard as the gap between the
+    // layout and visual viewports, which only exists under resizes-visual.
+    const cover =
+      'width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-visual';
     const inset =
-      'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no';
+      'width=device-width, initial-scale=1, minimum-scale=1, maximum-scale=1, user-scalable=no, interactive-widget=resizes-visual';
     const installed =
       window.navigator.standalone === true ||
       (window.matchMedia &&
