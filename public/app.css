@@ -1091,6 +1091,24 @@ body.files-view #files-name-dialog {
   background: var(--surface-pressed);
 }
 
+/*
+ * The cells the chips above will act on, drawn as an xterm decoration under the
+ * glyphs. "Open file" and "Run" name an action and not its object, and a row can
+ * hold two paths or a command inside a sentence, so the highlight is what says
+ * which one. See highlightTerminalChipTarget() in app.js.
+ */
+.terminal-chip-target {
+  position: fixed;
+  /* Over the grid, under the chips, which sit at 60. */
+  z-index: 55;
+  /* Translucent, because it is drawn over the glyphs rather than behind them. */
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  outline: 1px solid var(--accent);
+  border-radius: 2px;
+  /* A tap that lands on the highlight must still reach the terminal under it. */
+  pointer-events: none;
+}
+
 /* A fine pointer has the modifier gesture and never needs this. */
 @media (pointer: fine) {
   #terminal-link-chip,

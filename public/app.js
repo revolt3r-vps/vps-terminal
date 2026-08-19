@@ -1341,6 +1341,11 @@ let keyboardDismissPollTimer = null;
 // count is. Recorded only from a fit with nothing covering the terminal, so an
 // overlay can never become the new resting size.
 let terminalLiftApplied = false;
+// The box a pinned terminal was measured against, kept so the slide can be
+// recomputed on a cursor move without measuring anything again.
+let terminalLiftBox = null;
+let appliedTerminalLift = null;
+let terminalLiftRefreshFrame = 0;
 let restingTerminalRows = null;
 let terminalResizeSendTimer = null;
 let holdKeyboardLayoutForSelection = false;
@@ -13806,7 +13811,11 @@ async function ensureTerminal() {
         sendInput(data);
         scheduleNativeTerminalInputPrime();
       });
+      // A session that has not filled the screen slides up only as far as its
+      // cursor needs, so the cursor moving is what changes the slide.
+      terminal.onCursorMove(scheduleTerminalLiftRefresh);
       terminal.onScroll(() => {
+        scheduleTerminalLiftRefresh();
         showScrollPosition();
         // The chip points at one cell of one row, so a scroll invalidates it —
         // except the reflow from the keyboard the offering tap just raised, which
@@ -15330,10 +15339,18 @@ function terminalCoverHeight(parts) {
  * Ceil, because the fit addon floors: a pin a fraction short of a whole row
  * would come back one row smaller.
  *
+ * The slide is only as far as the rows in use need. A fresh session has its
+ * prompt on row 1 and blank rows under it, and sliding the whole grid up by the
+ * keyboard's height puts that prompt under the header — you type and see
+ * nothing. `usedRows` is how many rows must stay on screen, counted from the top
+ * of the grid to the cursor, and the lift stops as soon as that last row sits
+ * just above the keyboard. Once the session has filled the screen it is the full
+ * slide again, which is what it always was.
+ *
  * Null when there is nothing to do — no resting row count yet, no usable cell
  * height, or a box that already fits the rows.
  */
-function terminalPinFromRows(restingRows, cellHeight, availableHeight) {
+function terminalPinFromRows(restingRows, cellHeight, availableHeight, usedRows) {
   if (!Number.isFinite(restingRows) || !(restingRows > 0)) {
     return null;
   }
@@ -15344,9 +15361,18 @@ function terminalPinFromRows(restingRows, cellHeight, availableHeight) {
     return null;
   }
   const height = Math.ceil(restingRows * cellHeight);
-  const lift = Math.round(availableHeight - height);
-  if (lift >= 0) {
+  const fullLift = Math.round(availableHeight - height);
+  if (fullLift >= 0) {
     return null;
+  }
+  let lift = fullLift;
+  if (Number.isFinite(usedRows) && usedRows > 0) {
+    // Floor, not round: half a pixel of the cursor's row left under the
+    // keyboard is a clipped line of text.
+    const needed = Math.floor(availableHeight - usedRows * cellHeight);
+    // Never past the full slide, and never downwards: a grid that fits its used
+    // rows already stays where it is.
+    lift = Math.min(0, Math.max(fullLift, needed));
   }
   return { height, lift };
 }
@@ -15449,9 +15475,12 @@ function setTerminalLift(height, lift) {
   document.documentElement.style.setProperty('--terminal-lift', `${lift}px`);
   document.documentElement.classList.add('terminal-lifted');
   terminalLiftApplied = true;
+  appliedTerminalLift = lift;
 }
 
 function clearTerminalLift() {
+  terminalLiftBox = null;
+  appliedTerminalLift = null;
   if (!terminalLiftApplied) {
     return;
   }
@@ -15459,6 +15488,62 @@ function clearTerminalLift() {
   document.documentElement.style.removeProperty('--terminal-pinned-height');
   document.documentElement.style.removeProperty('--terminal-lift');
   terminalLiftApplied = false;
+}
+
+/**
+ * How many rows from the top of the grid must stay on screen.
+ *
+ * The cursor's row, in screen coordinates. `cursorY` is measured from the base
+ * of the scrollback rather than from the top of the view, so a scrolled-up
+ * terminal needs the difference added back; there the answer is the whole grid,
+ * which is the full slide.
+ */
+function terminalRowsInUse() {
+  const buffer = terminal?.buffer?.active;
+  if (!buffer || !(terminal.rows > 0)) {
+    return null;
+  }
+  const row = buffer.cursorY + (buffer.baseY - buffer.viewportY);
+  if (!Number.isFinite(row)) {
+    return null;
+  }
+  return Math.min(terminal.rows, Math.max(1, Math.round(row) + 1));
+}
+
+/**
+ * Re-slide a terminal that is already pinned, without measuring it again.
+ *
+ * The lift depends on where the cursor is, so it moves during a session that is
+ * still filling the screen — output and typing both change it. The box, the pin
+ * and the cell height do not change while the keyboard is up, so they are the
+ * ones taken at cover time and reused here. Measuring them again on every
+ * keystroke would force a layout per frame on the phone, for an answer already
+ * known.
+ */
+function refreshTerminalLift() {
+  if (!terminalLiftApplied || !terminalLiftBox) {
+    return;
+  }
+  const pin = terminalPinFromRows(
+    restingTerminalRows,
+    terminalLiftBox.cellHeight,
+    terminalLiftBox.availableHeight,
+    terminalRowsInUse()
+  );
+  if (!pin || pin.lift === appliedTerminalLift) {
+    return;
+  }
+  setTerminalLift(pin.height, pin.lift);
+}
+
+function scheduleTerminalLiftRefresh() {
+  if (!terminalLiftApplied || terminalLiftRefreshFrame) {
+    return;
+  }
+  terminalLiftRefreshFrame = window.requestAnimationFrame(() => {
+    terminalLiftRefreshFrame = 0;
+    refreshTerminalLift();
+  });
 }
 
 /** One row's height, taken from the grid that is on screen right now. */
@@ -15490,16 +15575,19 @@ function applyTerminalCover() {
     clearTerminalLift();
     return;
   }
+  const cellHeight = terminalCellHeight();
   const pin = terminalPinFromRows(
     restingTerminalRows,
-    terminalCellHeight(),
-    space.height
+    cellHeight,
+    space.height,
+    terminalRowsInUse()
   );
   if (!pin) {
     clearTerminalLift();
     return;
   }
   setTerminalLift(pin.height, pin.lift);
+  terminalLiftBox = { cellHeight, availableHeight: space.height };
 }
 
 /**
@@ -16478,13 +16566,13 @@ function terminalLineChipText(target, knownCommands) {
  * chip went away. Measured in the QA suite, where an error message above the probe
  * did exactly that.
  */
-function terminalWrappedOnlyText(wrappedLine, anchorNumber) {
+function terminalWrappedOnlyBounds(wrappedLine, anchorNumber) {
   const segments = wrappedLine.segments;
   const anchor = segments.findIndex(
     (segment) => segment.bufferLineNumber === anchorNumber
   );
   if (anchor < 0) {
-    return wrappedLine.text;
+    return null;
   }
   let first = anchor;
   while (first > 0 && segments[first].isWrapped) {
@@ -16494,9 +16582,17 @@ function terminalWrappedOnlyText(wrappedLine, anchorNumber) {
   while (last + 1 < segments.length && segments[last + 1].isWrapped) {
     last += 1;
   }
+  return { first, last };
+}
+
+function terminalWrappedOnlyText(wrappedLine, anchorNumber) {
+  const bounds = terminalWrappedOnlyBounds(wrappedLine, anchorNumber);
+  if (!bounds) {
+    return wrappedLine.text;
+  }
   let text = '';
-  for (let index = first; index <= last; index += 1) {
-    text += segments[index].text;
+  for (let index = bounds.first; index <= bounds.last; index += 1) {
+    text += wrappedLine.segments[index].text;
   }
   return text;
 }
@@ -16688,10 +16784,41 @@ function terminalTapTarget(bufferLineNumber, column, getLine) {
   }
   // Links get the joined text, guessed rows and all. Run gets only what the terminal
   // wrapped, plus whether a row below might be the rest of it.
+  const bounds = terminalWrappedOnlyBounds(wrappedLine, bufferLineNumber);
+  const lineStartIndex = bounds
+    ? wrappedLine.segments[bounds.first].startIndex
+    : 0;
   return {
     line: terminalWrappedOnlyText(wrappedLine, bufferLineNumber),
     mayContinue: terminalLineMayContinue(wrappedLine, bufferLineNumber, getLine),
-    match
+    match,
+    /**
+     * The cells holding `line.slice(startIndex, endIndex)`.
+     *
+     * Character offsets rather than columns, because that is what the callers
+     * have: the chip knows the text it will send, not where it sits. The offsets
+     * are into `line`, which starts partway into the joined text whenever the
+     * geometric guess added a row above, so the segment's own start index is
+     * added back before resolving.
+     */
+    rangeForLineText(startIndex, endIndex) {
+      if (!(endIndex > startIndex) || startIndex < 0) {
+        return null;
+      }
+      const segments = wrappedLine.segments;
+      return {
+        start: resolveTerminalLinkCharacter(
+          segments,
+          lineStartIndex + startIndex,
+          false
+        ),
+        end: resolveTerminalLinkCharacter(
+          segments,
+          lineStartIndex + endIndex - 1,
+          true
+        )
+      };
+    }
   };
 }
 
@@ -17038,7 +17165,108 @@ let terminalLinkChipTarget = null;
 let terminalLinkChipTimer = null;
 let terminalLinkChipSettleUntil = 0;
 
+// What the chip will act on, painted over the cells that hold it. A chip says
+// "Open file" or "Run" without saying which file or which run, and on a wrapped
+// line or a row of output holding several paths there is more than one answer.
+// The highlight is the answer.
+//
+// Plain elements over the grid rather than xterm's decoration API. Decorations
+// are the obvious fit and cannot work here: xterm sets every decoration to
+// `display: none` while the alternate buffer is active, and tmux holds this
+// terminal on the alternate screen for the whole session — the same fact
+// qa/terminal-links.js pins as "tmux keeps a session on the alternate screen".
+// Measured: the elements were built at the right size and hidden on the next
+// refresh.
+let terminalChipHighlightElements = [];
+
+function clearTerminalChipHighlight() {
+  for (const element of terminalChipHighlightElements) {
+    element.remove();
+  }
+  terminalChipHighlightElements = [];
+}
+
+/**
+ * Paint `range`, which is in buffer coordinates: 1-based columns, 1-based
+ * absolute line numbers, and possibly more than one row.
+ *
+ * One element per row. The first and last rows are bounded by the range's own
+ * columns; a row in between is covered end to end, the same rule
+ * terminalLinkRangeContains() reads by.
+ *
+ * Fixed to the screen, like the chips themselves, and measured from the grid at
+ * the moment it is offered. Nothing keeps it in place afterwards, which is why a
+ * scroll retires the chips and this together.
+ */
+function highlightTerminalChipTarget(range) {
+  clearTerminalChipHighlight();
+  const screen = terminalElement?.querySelector('.xterm-screen');
+  if (!range || !screen || !(terminal?.cols > 0) || !(terminal?.rows > 0)) {
+    return;
+  }
+  const bounds = screen.getBoundingClientRect();
+  const cellWidth = bounds.width / terminal.cols;
+  const cellHeight = bounds.height / terminal.rows;
+  if (!(cellWidth > 0) || !(cellHeight > 0)) {
+    return;
+  }
+  // A lifted terminal is taller than the box it sits in, and `main` clips it.
+  // Nothing clips a fixed element, so a row that has slid under the header has
+  // to be dropped here or it paints over the header.
+  const box = terminalElement.parentElement?.getBoundingClientRect() ?? bounds;
+  const viewportY = terminal.buffer.active.viewportY;
+  for (let line = range.start.y; line <= range.end.y; line += 1) {
+    const row = line - 1 - viewportY;
+    if (row < 0 || row >= terminal.rows) {
+      continue;
+    }
+    const startColumn = line === range.start.y ? range.start.x : 1;
+    const endColumn = line === range.end.y ? range.end.x : terminal.cols;
+    const cells = endColumn - startColumn + 1;
+    if (!(cells > 0) || startColumn < 1) {
+      continue;
+    }
+    const top = bounds.top + row * cellHeight;
+    if (top < box.top - 0.5 || top + cellHeight > box.bottom + 0.5) {
+      continue;
+    }
+    const element = document.createElement('div');
+    element.className = 'terminal-chip-target';
+    element.style.left = `${bounds.left + (startColumn - 1) * cellWidth}px`;
+    element.style.top = `${top}px`;
+    element.style.width = `${cells * cellWidth}px`;
+    element.style.height = `${cellHeight}px`;
+    document.body.append(element);
+    terminalChipHighlightElements.push(element);
+  }
+}
+
+/**
+ * The cells the chips are offering, or null when they cannot be located.
+ *
+ * A link wins over the line. Both chips can be on screen at once — a tap on a
+ * path inside a `! ` command shows Open file and Run together — and the link is
+ * the narrower claim, so it is the one worth pointing at. The command occupies
+ * the whole row, which is already plain to see.
+ */
+function terminalChipHighlightRange(target, lineText) {
+  if (target?.match?.range) {
+    return target.match.range;
+  }
+  if (!lineText || typeof target?.rangeForLineText !== 'function') {
+    return null;
+  }
+  // indexOf, because the offered text is a slice of the line: a shell-reported
+  // command is found inside it, and a `! ` command is the trimmed whole of it.
+  const start = target.line?.indexOf(lineText) ?? -1;
+  if (start < 0) {
+    return null;
+  }
+  return target.rangeForLineText(start, start + lineText.length);
+}
+
 function hideTerminalLinkChip() {
+  clearTerminalChipHighlight();
   if (terminalLinkChipTimer !== null) {
     window.clearTimeout(terminalLinkChipTimer);
     terminalLinkChipTimer = null;
@@ -17115,7 +17343,10 @@ function showTerminalLinkChip(target, clientX, clientY) {
   // always attaches to tmux, tmux holds xterm on the alternate screen for the whole
   // session, and it turns `mouse on` on globally, so both of those signals report
   // the same thing at a prompt as inside `vim`. See docs/faq.md.
-  if (terminalLineChip && terminalLineChipText(target, terminalSemanticCommands)) {
+  const lineText = terminalLineChip
+    ? terminalLineChipText(target, terminalSemanticCommands)
+    : '';
+  if (lineText) {
     const submits = terminalRunSubmits(target, terminalSemanticCommands);
     const label = submits ? 'Run' : 'Type';
     terminalLineChip.textContent = label;
@@ -17140,6 +17371,7 @@ function showTerminalLinkChip(target, clientX, clientY) {
     return;
   }
   terminalLinkChipTarget = target;
+  highlightTerminalChipTarget(terminalChipHighlightRange(target, lineText));
   if (match) {
     const label = match.kind === 'url' ? 'Open link' : 'Open file';
     terminalLinkChip.textContent = label;
