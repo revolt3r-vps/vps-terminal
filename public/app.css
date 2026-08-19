@@ -1051,7 +1051,8 @@ body.files-view #files-name-dialog {
  * still comfortably reachable — the chip is the target, not the glyphs. Positioned
  * from JS at the tap point, clamped to the viewport. */
 #terminal-link-chip,
-#terminal-link-copy-chip {
+#terminal-link-copy-chip,
+#terminal-line-chip {
   position: fixed;
   z-index: 60;
   min-height: 44px;
@@ -1068,35 +1069,41 @@ body.files-view #files-name-dialog {
   cursor: pointer;
 }
 
-/* Second in the pair, so it reads as the quieter of the two actions. */
-#terminal-link-copy-chip {
+/* Quieter than the first, which is the one action that leaves the terminal. The
+ * row is laid out left to right from JS, so these only carry colour. */
+#terminal-link-copy-chip,
+#terminal-line-chip {
   border-color: var(--border);
   background: var(--surface);
   color: var(--text);
 }
 
 #terminal-link-chip:focus-visible,
-#terminal-link-copy-chip:focus-visible {
+#terminal-link-copy-chip:focus-visible,
+#terminal-line-chip:focus-visible {
   outline: 2px solid var(--focus-ring);
   outline-offset: 2px;
 }
 
 #terminal-link-chip:active,
-#terminal-link-copy-chip:active {
+#terminal-link-copy-chip:active,
+#terminal-line-chip:active {
   background: var(--surface-pressed);
 }
 
 /* A fine pointer has the modifier gesture and never needs this. */
 @media (pointer: fine) {
   #terminal-link-chip,
-  #terminal-link-copy-chip {
+  #terminal-link-copy-chip,
+  #terminal-line-chip {
     display: none;
   }
 }
 
 /* Files view has no terminal cell for it to describe. Mirrors the Copy chip. */
 body.files-view #terminal-link-chip,
-body.files-view #terminal-link-copy-chip {
+body.files-view #terminal-link-copy-chip,
+body.files-view #terminal-line-chip {
   display: none !important;
 }
 
@@ -1801,6 +1808,13 @@ button.active {
 
 .session-play:active {
   background: color-mix(in srgb, var(--accent-surface) 55%, var(--accent));
+}
+
+/* Dev sits next to Play and must not be mistaken for it. Dimmer, because it is
+   the developer's door and a player's thumb should land on the other one. */
+.session-dev {
+  color: var(--muted);
+  font-weight: 500;
 }
 
 /* The one control in the App panel that holds a state rather than doing a

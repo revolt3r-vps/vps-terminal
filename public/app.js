@@ -116,6 +116,7 @@ const selectionCopyChip = document.querySelector('#selection-copy-chip');
 const viewSwipeLabelElement = document.querySelector('#swipe-session-name');
 const terminalLinkChip = document.querySelector('#terminal-link-chip');
 const terminalLinkCopyChip = document.querySelector('#terminal-link-copy-chip');
+const terminalLineChip = document.querySelector('#terminal-line-chip');
 const scrollCatcherElement = document.querySelector('#scroll-catcher');
 const pickerScrimElement = document.querySelector('#picker-scrim');
 const scrollPositionElement = document.querySelector('#scroll-position');
@@ -7088,6 +7089,16 @@ function commandPaletteCommands() {
         }
       });
     }
+    if (activeGame.game.devUrl) {
+      commands.push({
+        id: 'game.playDev',
+        label: `Open ${activeGame.game.slug} in dev mode`,
+        keywords: 'game dev debug cheat panel shortcuts',
+        run: () => {
+          window.open(activeGame.game.devUrl, '_blank', 'noopener,noreferrer');
+        }
+      });
+    }
     commands.push({
       id: 'game.feedback',
       label: 'Send feedback',
@@ -9682,8 +9693,7 @@ function updateInstallSettings() {
   if (runningAsInstalledWebApp()) {
     installAppButton.disabled = true;
     installAppButton.textContent = 'Installed';
-    installHelpElement.textContent =
-      'Running without Safari browser controls.';
+    installHelpElement.textContent = 'Running without browser controls.';
     return;
   }
   installAppButton.disabled = false;
@@ -13552,6 +13562,23 @@ function renderSessions() {
         });
         item.append(playLink);
       }
+      // The same game with its developer panel armed. It is a second link rather
+      // than a modifier on the first, because the whole point is reaching it with
+      // one thumb on a phone — which is also why the panel exists at all.
+      if (session.game.devUrl) {
+        const devLink = document.createElement('a');
+        devLink.className = 'session-play session-dev';
+        devLink.href = session.game.devUrl;
+        devLink.target = '_blank';
+        devLink.rel = 'noopener noreferrer';
+        devLink.textContent = 'Dev';
+        devLink.title = `Open ${session.game.slug} with the dev panel`;
+        devLink.setAttribute('aria-label', `Open ${session.game.slug} in dev mode`);
+        devLink.addEventListener('click', (event) => {
+          event.stopPropagation();
+        });
+        item.append(devLink);
+      }
       sessionsElement.append(item);
       continue;
     }
@@ -16353,10 +16380,65 @@ function findTerminalLinkAtCell(bufferLineNumber, column, getLine) {
   for (const match of extractTerminalLinks(wrappedLine.text)) {
     const range = resolveWrappedTerminalLinkRange(wrappedLine, match);
     if (terminalLinkRangeContains(range, column, bufferLineNumber)) {
-      return { ...match, range };
+      // The joined line travels with the match. The link alone is not always
+      // what you came for: `! bash /tmp/.../apply.sh` is a command, and the path
+      // by itself will not run.
+      return { ...match, range, line: wrappedLine.text };
     }
   }
   return null;
+}
+
+// Longest line the Type chip will send. A wrapped command runs to a few hundred
+// characters; a run of rows a full-screen program drew can be thousands, and
+// pushing that at a prompt is a paste bomb rather than a command.
+const terminalTypeLineLimit = 512;
+// Anything a terminal itself would act on rather than insert. The source is a
+// pty and the destination is a pty, so an escape or a carriage return in the
+// line would be executed, not typed.
+const terminalUntypableCharacterPattern = /[\u0000-\u001f\u007f]/;
+
+/**
+ * The line a chip may type, or an empty string when it must not offer one.
+ *
+ * The text arrives already joined across wrapped rows, which is the whole point:
+ * a command the terminal broke over three rows is one line here. That is why
+ * this reads the buffer rather than the selection — a selection cannot span rows
+ * a full-screen program drew, and a half-made selection would send half a line.
+ *
+ * Refusals, not repairs. Terminal output is untrusted, so a line that is not
+ * plainly typable is declined instead of cleaned up into something it never was.
+ */
+function terminalTypableLine(text) {
+  if (typeof text !== 'string') {
+    return '';
+  }
+  // Both ends only. Interior runs of spaces are left alone: a quoted argument
+  // can hold them, and collapsing them would change the command being typed.
+  const trimmed = text.trim();
+  if (trimmed.length === 0 || trimmed.length > terminalTypeLineLimit) {
+    return '';
+  }
+  if (terminalUntypableCharacterPattern.test(trimmed)) {
+    return '';
+  }
+  return trimmed;
+}
+
+/**
+ * The line Type line should offer for this match, or an empty string for no chip.
+ *
+ * A line that is only the link itself is declined: on a bare `/etc/hosts` the
+ * whole line *is* the path, so the chip would repeat Copy at the cost of a wider
+ * row. The same call decides whether to show the chip and what it types, so the
+ * button can never send something other than what it offered.
+ */
+function terminalLineChipText(match) {
+  const line = terminalTypableLine(match?.line);
+  if (!line || line === match?.text) {
+    return '';
+  }
+  return line;
 }
 
 // End of the pure terminal-link block.
@@ -16714,6 +16796,9 @@ function hideTerminalLinkChip() {
   if (terminalLinkCopyChip) {
     terminalLinkCopyChip.hidden = true;
   }
+  if (terminalLineChip) {
+    terminalLineChip.hidden = true;
+  }
 }
 
 function terminalLinkAtClientPoint(clientX, clientY) {
@@ -16792,26 +16877,30 @@ function showTerminalLinkChip(match, clientX, clientY) {
     ? window.visualViewport.offsetTop + window.visualViewport.height
     : window.innerHeight;
   const clampedY = Math.min(y, Math.max(margin, visibleBottom - margin));
-  // Unhide before measuring: a hidden button has no width, and the pair is
-  // centred on the tap, so both widths have to be known first.
-  terminalLinkChip.hidden = false;
-  if (terminalLinkCopyChip) {
-    terminalLinkCopyChip.hidden = false;
+  const row = [terminalLinkChip, terminalLinkCopyChip].filter(Boolean);
+  if (terminalLineChip && terminalLineChipText(match)) {
+    row.push(terminalLineChip);
+  }
+  // Unhide before measuring: a hidden button has no width, and the row is
+  // centred on the tap, so every width has to be known first.
+  for (const chip of row) {
+    chip.hidden = false;
   }
   const gap = 8;
-  const openWidth = terminalLinkChip.offsetWidth;
-  const copyWidth = terminalLinkCopyChip ? terminalLinkCopyChip.offsetWidth : 0;
-  const totalWidth = openWidth + (copyWidth > 0 ? gap + copyWidth : 0);
-  // Centre the pair, then push it back inside the viewport. Clamping the left
-  // edge after centring keeps both chips reachable near either screen edge.
+  const widths = row.map((chip) => chip.offsetWidth);
+  const totalWidth = widths.reduce(
+    (sum, width, index) => sum + width + (index > 0 ? gap : 0),
+    0
+  );
+  // Centre the row, then push it back inside the viewport. Clamping the left
+  // edge after centring keeps every chip reachable near either screen edge.
   const maximumLeft = Math.max(margin, window.innerWidth - margin - totalWidth);
-  const left = Math.min(Math.max(margin, x - totalWidth / 2), maximumLeft);
-  terminalLinkChip.style.left = `${Math.round(left)}px`;
-  terminalLinkChip.style.top = `${Math.round(clampedY)}px`;
-  if (terminalLinkCopyChip) {
-    terminalLinkCopyChip.style.left = `${Math.round(left + openWidth + gap)}px`;
-    terminalLinkCopyChip.style.top = `${Math.round(clampedY)}px`;
-  }
+  let nextLeft = Math.min(Math.max(margin, x - totalWidth / 2), maximumLeft);
+  row.forEach((chip, index) => {
+    chip.style.left = `${Math.round(nextLeft)}px`;
+    chip.style.top = `${Math.round(clampedY)}px`;
+    nextLeft += widths[index] + gap;
+  });
   // The keyboard's reflow can move viewportY and so fire onScroll, which would
   // retire the chip that the same tap just offered. Ignore scroll-driven hiding
   // briefly; a deliberate scroll after that still dismisses it.
@@ -16877,6 +16966,38 @@ async function copyTerminalLinkChip() {
   } catch {
     setStatus('Clipboard refused — long-press the text to select it');
   }
+}
+
+/**
+ * Type the whole line the chip is offering at the prompt.
+ *
+ * No terminator. The line is read out of terminal output, and output is not
+ * always a command — the detection that found the link cannot know. Landing it on
+ * the prompt lets you read it, edit it, or Ctrl+C it, which a carriage return
+ * here would take away.
+ *
+ * Reads the target before hiding, because hiding clears it.
+ */
+function typeTerminalLineChip() {
+  const match = terminalLinkChipTarget;
+  hideTerminalLinkChip();
+  const line = terminalLineChipText(match);
+  if (!line) {
+    return;
+  }
+  // Same two guards Run on a snippet uses, and for the same reason: this writes
+  // to the pty, so a closed socket has to say so rather than swallow the text.
+  if (!terminal || socket?.readyState !== WebSocket.OPEN) {
+    setStatus('Connect a session first');
+    return;
+  }
+  clearTerminalSelection();
+  setArmedModifier(null);
+  if (!sendInput(line)) {
+    setStatus('Could not send the line');
+    return;
+  }
+  setStatus('Line typed — press Enter to run it');
 }
 
 function installTerminalLinkModifierTracking() {
@@ -18181,6 +18302,7 @@ terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 terminalLinkCopyChip?.addEventListener('click', () => {
   void copyTerminalLinkChip();
 });
+terminalLineChip?.addEventListener('click', typeTerminalLineChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
 selectionCopyChip?.addEventListener(

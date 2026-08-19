@@ -124,6 +124,32 @@ const gameUrlTemplate = (() => {
   }
   return template;
 })();
+
+/**
+ * The same game, opened with its developer panel armed.
+ *
+ * `?dev=1` is the gate every game-lab game reads (`docs/studio/qa.md` §the dev
+ * panel): a DOM overlay with the cheats and shortcuts that reach a state without
+ * playing to it. Off by default, so the Play link stays a player's link.
+ *
+ * Built with `URL` rather than string concatenation, because a published host may
+ * already carry a query string or a fragment and `url + '?dev=1'` would produce
+ * `...?a=b?dev=1`. Anything unparseable gives up and returns null, so a bad
+ * template hides one button instead of breaking the session list.
+ */
+function devUrlFor(url) {
+  if (!url) {
+    return null;
+  }
+  try {
+    const parsed = new URL(url);
+    parsed.searchParams.set('dev', '1');
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 const publicRoot = path.join(__dirname, 'public');
 const attachSessionPath = path.join(__dirname, 'attach-session');
 // Runtime state — preferences, snippets, pasted images, the client debug log —
@@ -1573,10 +1599,8 @@ function gameForSession(session, slugs) {
   if (!slug) {
     return null;
   }
-  return {
-    slug,
-    url: gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null
-  };
+  const url = gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null;
+  return { slug, url, devUrl: devUrlFor(url) };
 }
 
 async function listSessions() {
@@ -2546,10 +2570,10 @@ const server = http.createServer(async (request, response) => {
       sendJson(response, 200, {
         games: [...slugs]
           .sort((first, second) => first.localeCompare(second))
-          .map((slug) => ({
-            slug,
-            url: gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null
-          }))
+          .map((slug) => {
+            const url = gameUrlTemplate ? gameUrlTemplate.replace('{slug}', slug) : null;
+            return { slug, url, devUrl: devUrlFor(url) };
+          })
       });
       return;
     }

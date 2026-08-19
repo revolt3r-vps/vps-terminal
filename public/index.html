@@ -464,6 +464,16 @@
       aria-label="Copy link"
       hidden
     >Copy</button>
+    <!-- Copy hands you the link and nothing else, but a link is often only part of
+         what you need: `! bash /tmp/.../apply.sh` is a command, and the path on its
+         own will not run. This types the whole line at the prompt and stops there,
+         so you read it before Enter. -->
+    <button
+      id="terminal-line-chip"
+      type="button"
+      aria-label="Type the whole line at the prompt"
+      hidden
+    >Type line</button>
     <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
     <button id="selection-copy-chip" type="button" hidden>Copy</button>
     <!-- Names the session a horizontal swipe is heading for, because one terminal

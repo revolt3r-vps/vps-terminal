@@ -58,6 +58,12 @@ writes those straight to your clipboard. Nothing extra to configure if tmux has
 `set-clipboard on` (or the default `external`) and the `xterm*:clipboard`
 terminal feature.
 
+**A command that wrapped.** A long command the terminal broke across rows copies
+with those breaks in it. Paste it and the shell reads each row as a command of
+its own. On touch, tap the path inside it instead: a `Type line` chip appears
+next to Open and Copy, and it types the whole line at the prompt as one line. It
+does not press Enter, so you read the command first.
+
 **Paste.** Ctrl/Cmd+V pastes text or an image, and is handled in the browser
 rather than passed through as `^V`, which TUIs bind to their own actions. It
 uses the browser's own paste, so no clipboard permission prompt appears and

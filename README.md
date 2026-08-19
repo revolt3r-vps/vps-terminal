@@ -107,8 +107,11 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - `vps-terminal-focus <session>`: a host command that moves the open browser
   tab to a tmux session, over a one-way control channel
 - GameLab Mode: an optional per-login setting on its own GameLab tab. It lists
-  game sessions only, gives each a Play link, and turns the Files Locations into
-  the games themselves. It changes what the app shows, not what the shell can do
+  game sessions only, gives each a Play link and a Dev link, and turns the Files
+  Locations into the games themselves. It changes what the app shows, not what
+  the shell can do. Dev opens the same host with `?dev=1`, which arms the game's
+  developer panel — the cheats and shortcuts that reach a state without playing
+  to it
 - Create new game: one interview session per tap, closed again once its agent has
   exited and nobody is attached
 - Installable PWA
