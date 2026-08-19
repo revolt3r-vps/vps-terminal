@@ -5434,14 +5434,6 @@ function runSnippet(id, options = {}) {
     shouldRun = false;
   }
   body = body.replace(/\n+$/g, '');
-  if (shouldRun) {
-    // Carriage return, because Run means "and press Enter" and the Enter key
-    // sends CR. A shell cannot tell the two apart — the line discipline maps CR
-    // to NL on the way in — but anything in raw mode can, and reads LF as
-    // "insert a newline" rather than "submit". That is a Run snippet adding a
-    // blank line to an editor or an agent prompt instead of running.
-    body = `${body}\r`;
-  }
   if (!body) {
     setStatus('Snippet empty');
     return;
@@ -5451,7 +5443,23 @@ function runSnippet(id, options = {}) {
     setStatus('Could not send snippet');
     return;
   }
-  setStatus(shouldRun ? `Ran: ${snippet.label}` : `Inserted: ${snippet.label}`);
+  if (!shouldRun) {
+    setStatus(`Inserted: ${snippet.label}`);
+    return;
+  }
+  // The Enter goes in its own write, a moment later.
+  //
+  // Carriage return, because Run means "and press Enter" and the Enter key sends CR.
+  // A shell cannot tell CR from LF — the line discipline maps CR to NL on the way in
+  // — but anything in raw mode can, and reads LF as "insert a newline" rather than
+  // "submit". That is a Run snippet adding a blank line to an editor or an agent
+  // prompt instead of running.
+  //
+  // Separate, because an agent's prompt turns a leading `!` into shell mode only when
+  // the text arrives with no newline behind it. In one write the whole thing is
+  // submitted as typed, so a snippet body of `! bash x.sh` reached the agent as a chat
+  // message. Measured against a live Claude Code prompt.
+  sendTerminalEnter(() => setStatus(`Ran: ${snippet.label}`));
 }
 
 async function loadSnippetsFromServer() {
@@ -16509,6 +16517,51 @@ function terminalTextEndsPrompt(text) {
 }
 
 /**
+ * Might the line continue on a row this run does not include?
+ *
+ * Two different wrappings reach the terminal, and only one of them can be rejoined.
+ * A single token longer than the width is wrapped by the terminal, which flags the
+ * continuation rows, and those rejoin exactly. Anything else is wrapped by whoever
+ * drew it: an agent breaks a long line at a word boundary and indents what follows by
+ * two spaces, as its own separate row with no flag on it. Measured against a live
+ * Claude Code prompt.
+ *
+ * Nothing can rejoin the second kind — the break took a space with it, and the rows
+ * are ordinary drawn rows. So the answer here is not "join harder", it is "do not
+ * press Enter on this". A fragment that runs is how `rm -rf /tmp/x` becomes
+ * `rm -rf /`.
+ *
+ * Wrap flags do not exempt a line, either. A terminal-wrapped run can still be
+ * followed by an agent's hard-wrapped continuation, so the flags prove where the
+ * *terminal* broke the text and nothing more.
+ *
+ * An indented non-empty row below the run is the signal. It costs the odd false
+ * positive, which is one extra tap, against running half a command.
+ */
+function terminalLineMayContinue(wrappedLine, anchorNumber, getLine) {
+  const segments = wrappedLine.segments;
+  const anchor = segments.findIndex(
+    (segment) => segment.bufferLineNumber === anchorNumber
+  );
+  if (anchor < 0) {
+    return true;
+  }
+  let last = anchor;
+  while (last + 1 < segments.length && segments[last + 1].isWrapped) {
+    last += 1;
+  }
+  // 1-based buffer numbers, so this index is the row after the run.
+  const next = getLine(segments[last].bufferLineNumber);
+  if (!next) {
+    return false;
+  }
+  // Leading whitespace is the measured shape, and a box or quote glyph in front of it
+  // is the same thing inside a rendered block. Both err toward "may continue", which
+  // costs one tap; the other direction runs half a command.
+  return /^[ \t\u2502\u2503\u2506\u250a|>]+\s*\S/.test(next.translateToString(true));
+}
+
+/**
  * The longest reported command this line ends with, or an empty string.
  *
  * A suffix, not the whole line. The row that shows a command also shows the prompt
@@ -16555,6 +16608,25 @@ function terminalRunPayload(line, atShellPrompt) {
     return line;
   }
   return line.replace(/^!\s+/, '');
+}
+
+/**
+ * Will Run press Enter for this tap, or only put the command on the prompt?
+ *
+ * Only where the text is provably the whole command. Two ways to be sure: the shell
+ * reported it, so it is exact; or nothing indented sits below it, so no row was left
+ * out. Otherwise the command goes to the prompt and the Enter is yours, which is the
+ * only safe answer for a line that may be a fragment.
+ */
+function terminalRunSubmits(target, knownCommands) {
+  const line = terminalTypableLine(target?.line);
+  if (!line) {
+    return false;
+  }
+  if (terminalKnownCommandInLine(line, knownCommands)) {
+    return true;
+  }
+  return target?.mayContinue !== true;
 }
 
 /**
@@ -16614,9 +16686,13 @@ function terminalTapTarget(bufferLineNumber, column, getLine) {
       break;
     }
   }
-  // Links get the joined text, guessed rows and all. Run gets only what the
-  // terminal wrapped.
-  return { line: terminalWrappedOnlyText(wrappedLine, bufferLineNumber), match };
+  // Links get the joined text, guessed rows and all. Run gets only what the terminal
+  // wrapped, plus whether a row below might be the rest of it.
+  return {
+    line: terminalWrappedOnlyText(wrappedLine, bufferLineNumber),
+    mayContinue: terminalLineMayContinue(wrappedLine, bufferLineNumber, getLine),
+    match
+  };
 }
 
 // End of the pure terminal-link block.
@@ -17040,6 +17116,15 @@ function showTerminalLinkChip(target, clientX, clientY) {
   // session, and it turns `mouse on` on globally, so both of those signals report
   // the same thing at a prompt as inside `vim`. See docs/faq.md.
   if (terminalLineChip && terminalLineChipText(target, terminalSemanticCommands)) {
+    const submits = terminalRunSubmits(target, terminalSemanticCommands);
+    const label = submits ? 'Run' : 'Type';
+    terminalLineChip.textContent = label;
+    terminalLineChip.setAttribute(
+      'aria-label',
+      submits
+        ? 'Run this command in the session'
+        : 'Type this command at the prompt without running it'
+    );
     row.push(terminalLineChip);
   }
   // Hide the whole row before deciding what to show. Only unhiding leaves a chip
@@ -17172,6 +17257,37 @@ async function copyTerminalLinkChip() {
 }
 
 /**
+ * Send the Enter that submits what was just written, in its own write.
+ *
+ * `onSent` reports after the fact, because the status must not claim a command ran
+ * while the carriage return is still pending: a socket that drops inside the delay
+ * would leave the command sitting on the prompt under a status saying it ran.
+ */
+function sendTerminalEnter(onSent) {
+  window.setTimeout(() => {
+    if (socket?.readyState !== WebSocket.OPEN) {
+      setStatus('Connection dropped before Enter — the command is on the prompt');
+      return;
+    }
+    if (sendInput('\r')) {
+      onSent?.();
+    }
+  }, terminalRunEnterDelay);
+}
+
+// How long to wait between sending the command and sending its Enter.
+//
+// They cannot go in one write. An agent's prompt turns `!` into shell mode, and that
+// only happens if the text arrives without a newline behind it: a single write ending
+// in a carriage return is submitted as typed, so `! bash x.sh` reaches the agent as a
+// chat message instead of running. Measured against a live Claude Code prompt — the
+// same bytes in two writes enter shell mode, in one write they do not.
+//
+// One render tick is enough, since the switch is state rather than paint. This is
+// several.
+const terminalRunEnterDelay = 150;
+
+/**
  * Run the command the chip is offering.
  *
  * A carriage return, not a line feed, because Run means "and press Enter" and that
@@ -17205,11 +17321,18 @@ function runTerminalLineChip() {
     line,
     terminalSemanticMarksSeen && terminalShellPromptLive
   );
-  if (!sendInput(`${payload}\r`)) {
+  if (!sendInput(payload)) {
     setStatus('Could not send the command');
     return;
   }
-  setStatus('Ran the command');
+  if (!terminalRunSubmits(target, terminalSemanticCommands)) {
+    // A row below may hold the rest of it, and nothing can rejoin that. The command
+    // sits on the prompt so the fragment is visible before it runs.
+    setStatus('Typed — check it, then press Enter');
+    return;
+  }
+  // The Enter follows on its own, for the reason above.
+  sendTerminalEnter(() => setStatus('Ran the command'));
 }
 
 // OSC 133, the FinalTerm semantic prompt marks, plus OSC 4133, which is ours.

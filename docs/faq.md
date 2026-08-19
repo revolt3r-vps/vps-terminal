@@ -59,7 +59,24 @@ writes those straight to your clipboard. Nothing extra to configure if tmux has
 terminal feature.
 
 **A command you were told to run.** On touch, tap a line that starts with `! `. A
-`Run` chip appears. It sends the whole line and presses Enter.
+chip appears, and it says which of two things it will do.
+
+`Run` sends the command and presses Enter. `Type` puts it on the prompt and stops,
+because the line may be a fragment: an agent breaks a long line at a word boundary and
+puts the rest on an indented row of its own, which nothing can rejoin. Reading it
+before it runs is the only safe answer there — one cut point separates `rm -rf /tmp/x`
+from `rm -rf /`.
+
+A command the terminal itself wrapped is different. That happens to a single token
+longer than the width, those rows carry a wrap flag, and they rejoin exactly. Even
+then, an indented row below still holds the Enter back, because the flags prove where
+the terminal broke the text and nothing more.
+
+The Enter is sent as a separate write, a moment after the command. At an agent's prompt
+the leading `!` switches the input to shell mode, and that only happens if the text
+arrives with no newline behind it; in one write the whole thing is submitted as typed
+and the command reaches the agent as a chat message. Run on a snippet sends its Enter
+the same way, for the same reason.
 
 The `!` is the mark. An agent writes a command you are meant to run as `! bash
 x.sh`, because `!` is what sends it to the shell instead of to the agent as a
