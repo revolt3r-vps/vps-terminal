@@ -58,11 +58,56 @@ writes those straight to your clipboard. Nothing extra to configure if tmux has
 `set-clipboard on` (or the default `external`) and the `xterm*:clipboard`
 terminal feature.
 
-**A command that wrapped.** A long command the terminal broke across rows copies
-with those breaks in it. Paste it and the shell reads each row as a command of
-its own. On touch, tap the path inside it instead: a `Type line` chip appears
-next to Open and Copy, and it types the whole line at the prompt as one line. It
-does not press Enter, so you read the command first.
+**A command you were told to run.** On touch, tap a line that starts with `! `. A
+`Run` chip appears. It sends the whole line and presses Enter.
+
+The `!` is the mark. An agent writes a command you are meant to run as `! bash
+x.sh`, because `!` is what sends it to the shell instead of to the agent as a
+message. The chip is offered on marked lines only, and it sends the mark too. A
+line without it gets no chip, which is what keeps the chip off ordinary output.
+
+This is also the way to run a command the terminal wrapped across rows. A copy of
+a wrapped command carries the row breaks with it. The shell then reads each row as
+a command of its own. The line does not have to contain a link:
+`! scripts/install-vps-terminal` has no file extension, so it is not a link, and
+the chip still offers it.
+
+`Run` presses Enter, so two shapes are refused outright. A line carrying a second
+`!` is never offered: an interactive shell has history expansion on, and it would
+rewrite `! echo a-!ec` into a previous command and run that instead of what you
+read. A line inside `vim` or `less` that happens to start with `! ` is still
+offered, and its keys reach that program. There is no way to tell those apart
+here, because this terminal always attaches to tmux, and tmux keeps the terminal
+on the alternate screen and `mouse on` for the whole session.
+
+**A command you ran before.** Tap it. No `!` needed, because the shell told the
+terminal what it was.
+
+That is OSC 133, the same shell integration VS Code and iTerm2 use. Each prompt
+marks where it starts and ends, and each command reports itself, so the browser
+knows which text in your scrollback is a command.
+
+It needs two lines. Source the emitter from `~/.bashrc`:
+
+```bash
+. "${HOME}/.local/share/vps-terminal/shell-integration.bash"
+```
+
+And let the marks past tmux, which consumes some of them itself:
+
+```
+set -g allow-passthrough on
+```
+
+`install.sh` reports whether the first one is in place; it does not edit your files.
+Remove the line to turn the feature off, and the chip goes back to needing a `!`.
+
+The marks also tell the chip whether a shell is at its prompt. That is what settles
+the `!` above: at a shell prompt the mark is dropped before the command is sent,
+because `!` is bash's negation word there, and `! x && y` would otherwise run `y`
+when `x` fails. At an agent's prompt the mark is kept, because that is where it
+means "run the rest as a shell command". Where the shell does not report at all,
+the line is sent exactly as offered.
 
 **Paste.** Ctrl/Cmd+V pastes text or an image, and is handled in the browser
 rather than passed through as `^V`, which TUIs bind to their own actions. It

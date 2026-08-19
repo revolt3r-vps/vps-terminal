@@ -76,6 +76,12 @@ install -m 600 \
   "${app_source}/preferences-store.js" \
   "${state_root}/preferences-store.js"
 install -m 700 "${app_source}/attach-session" "${state_root}/attach-session"
+# Sourced by an interactive bash, not run by the server. Checked before it is
+# installed, because a hook that sources a broken file breaks every new shell.
+bash -n "${app_source}/shell-integration.bash"
+install -m 600 \
+  "${app_source}/shell-integration.bash" \
+  "${state_root}/shell-integration.bash"
 # The host command that moves an open browser tab to a session. On PATH rather
 # than in the app directory, because scripts and agents on this host call it by
 # name. It finds the socket itself.
@@ -156,6 +162,13 @@ done
 systemctl --user is-active --quiet vps-terminal.service
 test -S "${state_root}/run/terminal.sock"
 
+# Shell integration is opt-in here. The private installer edits the two files for
+# you; a public reader gets told what they are rather than having them changed.
+readonly integration_hooked=$(
+  grep -Fq 'vps-terminal shell integration' "${HOME}/.bashrc" 2>/dev/null &&
+    printf 'yes' || printf 'no'
+)
+
 cat <<EOF
 install.sh: PASS
 
@@ -171,6 +184,12 @@ Next (first-time VPS path):
      (Caddy sketch: examples/caddy/Caddyfile.snippet).
   3. Inject X-Vps-Authenticated-Email only after successful authentication.
   4. Open ${origin_required} on your phone and install the PWA.
+
+Shell integration (Run on a command you already ran): ${integration_hooked}
+  Add to ~/.bashrc:   . "${state_root}/shell-integration.bash"
+  Add to ~/.tmux.conf: set -g allow-passthrough on
+  Both are needed: tmux consumes some OSC 133 marks itself, so the rest reach
+  the browser only as a passthrough copy. See docs/faq.md.
 
 Keep SSH working as recovery. See SECURITY.md.
 EOF

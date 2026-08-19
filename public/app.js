@@ -13629,6 +13629,7 @@ async function refreshSessions(selectFirst = false, quiet = false) {
   try {
     const value = await api('/api/sessions');
     sessions = value.sessions;
+    noteForegroundCommandForSemanticState();
     if (
       activeSession &&
       !sessions.some((session) => session.name === activeSession)
@@ -13717,6 +13718,8 @@ async function ensureTerminal() {
       }
       terminal.open(terminalElement);
       terminal.parser?.registerOscHandler?.(52, handleClipboardOsc);
+      terminal.parser?.registerOscHandler?.(133, handleSemanticPromptOsc);
+      terminal.parser?.registerOscHandler?.(4133, handleReportedCommandOsc);
       terminal.registerLinkProvider?.({ provideLinks: provideTerminalLinks });
       installTerminalLinkModifierTracking();
       terminalElement.addEventListener('paste', handleTerminalPasteEvent, {
@@ -15796,6 +15799,7 @@ async function openSessionSocket(name) {
   }
   activeSession = name;
   resetKeyStateForSession();
+  resetSemanticPromptState();
   setConnectionState('connecting', `Connecting to ${name}…`);
   setStatus(`Connecting to ${name}…`, { sticky: true });
   armConnectionWatch(name);
@@ -16285,6 +16289,9 @@ function buildTerminalLinkLine(startNumber, anchorNumber, getLine) {
     const text = currentLine.translateToString(!continues);
     segments.push({
       bufferLineNumber: currentNumber,
+      // Whether the terminal itself wrapped onto this row, as opposed to this row
+      // being joined by the geometric guess below. Run needs to tell those apart.
+      isWrapped: currentLine.isWrapped === true,
       text,
       startIndex: nextStartIndex,
       endIndex: nextStartIndex + text.length,
@@ -16368,27 +16375,6 @@ function terminalLinkRangeContains(range, column, bufferLineNumber) {
   return true;
 }
 
-/**
- * The link covering a cell, or null. Used by the touch path, which has no hover to
- * lean on and must decide from a tap position alone.
- */
-function findTerminalLinkAtCell(bufferLineNumber, column, getLine) {
-  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, getLine);
-  if (!wrappedLine) {
-    return null;
-  }
-  for (const match of extractTerminalLinks(wrappedLine.text)) {
-    const range = resolveWrappedTerminalLinkRange(wrappedLine, match);
-    if (terminalLinkRangeContains(range, column, bufferLineNumber)) {
-      // The joined line travels with the match. The link alone is not always
-      // what you came for: `! bash /tmp/.../apply.sh` is a command, and the path
-      // by itself will not run.
-      return { ...match, range, line: wrappedLine.text };
-    }
-  }
-  return null;
-}
-
 // Longest line the Type chip will send. A wrapped command runs to a few hundred
 // characters; a run of rows a full-screen program drew can be thousands, and
 // pushing that at a prompt is a paste bomb rather than a command.
@@ -16425,20 +16411,212 @@ function terminalTypableLine(text) {
   return trimmed;
 }
 
+// The mark that makes a line runnable. Agent output writes a command you are meant
+// to run as `! <command>`, because `!` is what sends it to the shell instead of to
+// the agent as a message.
+//
+// Requiring the mark is what makes the chip quiet, and it is what lets the chip
+// say Run. Gated on nothing but a line with text, it appeared on prose, which is
+// most of a terminal's output, and a chip on every tap is worth less than no chip.
+const terminalRunnableLinePattern = /^!\s+\S/;
+
 /**
- * The line Type line should offer for this match, or an empty string for no chip.
+ * The command Run should offer for this tap, or an empty string for no chip.
  *
- * A line that is only the link itself is declined: on a bare `/etc/hosts` the
- * whole line *is* the path, so the chip would repeat Copy at the cost of a wider
- * row. The same call decides whether to show the chip and what it types, so the
- * button can never send something other than what it offered.
+ * The same call decides whether to show the chip and what it sends, so the chip
+ * cannot offer one command and send another.
+ *
+ * The mark is part of what is offered, because at an agent's prompt `bash x.sh` is
+ * a message and `! bash x.sh` is a command. `terminalRunPayload` decides separately
+ * whether to send it: at a shell prompt, where the shell reports one, it comes off.
+ *
+ * A second `!` anywhere is refused, because Run presses Enter. An interactive
+ * shell has history expansion on and `histverify` off, so `! echo a-!ec` reaches
+ * bash, becomes `! echo a-echo <the previous command>`, and runs — a different
+ * command than the one on screen. Refusing the shape is the only way to keep the
+ * promise above once there is no chance to read the line first.
  */
-function terminalLineChipText(match) {
-  const line = terminalTypableLine(match?.line);
-  if (!line || line === match?.text) {
+function terminalLineChipText(target, knownCommands) {
+  const line = terminalTypableLine(target?.line);
+  if (!line) {
     return '';
   }
-  return line;
+  // Two ways to qualify. The mark is a claim in the text, so it works on advice an
+  // agent printed and never ran; the whole line is the command.
+  if (terminalRunnableLinePattern.test(line)) {
+    // Past the leading mark, no further `!` at all — see the note above.
+    return line.slice(1).includes('!') ? '' : line;
+  }
+  // The other way is a command the shell itself reported. No mark needed, because
+  // the shell said what it was.
+  const known = terminalKnownCommandInLine(line, knownCommands);
+  if (!known || known.includes('!')) {
+    return '';
+  }
+  return known;
+}
+
+/**
+ * The rows the terminal actually wrapped onto, around the tapped row.
+ *
+ * `buildTerminalLinkLine` joins two kinds of run together: rows the terminal wrapped,
+ * which carry a wrap flag, and rows a full-screen program drew separately that only
+ * *look* continued. The second kind is what makes a login URL drawn across rows
+ * clickable, and it is a guess.
+ *
+ * A command must not be read out of a guess. Left to the joined text, a wrapped
+ * `! bash x.sh` lost its chip whenever the row above it happened to end mid-path:
+ * the guess glued that row on, the line no longer started with the mark, and the
+ * chip went away. Measured in the QA suite, where an error message above the probe
+ * did exactly that.
+ */
+function terminalWrappedOnlyText(wrappedLine, anchorNumber) {
+  const segments = wrappedLine.segments;
+  const anchor = segments.findIndex(
+    (segment) => segment.bufferLineNumber === anchorNumber
+  );
+  if (anchor < 0) {
+    return wrappedLine.text;
+  }
+  let first = anchor;
+  while (first > 0 && segments[first].isWrapped) {
+    first -= 1;
+  }
+  let last = anchor;
+  while (last + 1 < segments.length && segments[last + 1].isWrapped) {
+    last += 1;
+  }
+  let text = '';
+  for (let index = first; index <= last; index += 1) {
+    text += segments[index].text;
+  }
+  return text;
+}
+
+/**
+ * Does the text before a reported command look like a shell prompt ending?
+ *
+ * The boundary rule alone still let a short command match the tail of ordinary
+ * output: after one `make`, any row ending in ` make` grew a chip. The rows that
+ * genuinely show a command have a prompt immediately before it, so that is what is
+ * required.
+ *
+ * Unknown sigils fail closed — no chip rather than a wrong one — so a PS1 ending in
+ * something exotic loses the offer instead of misfiring on output.
+ */
+function terminalTextEndsPrompt(text) {
+  return text.length === 0 || /[$#%>\]❯][ ]$/u.test(text);
+}
+
+/**
+ * The longest reported command this line ends with, or an empty string.
+ *
+ * A suffix, not the whole line. The row that shows a command also shows the prompt
+ * in front of it, so whole-line equality never matches the rows where commands
+ * actually appear.
+ *
+ * The suffix has to start the line or follow whitespace. Without that, `ls` — the
+ * most-run command there is — matched `Aug 19 10:00 tools` and `Cloning into
+ * /home/dev/utils`, so ordinary output grew a Run chip and tapping it ran a command
+ * nobody pointed at. It also matched `!npm test`, quietly dropping the mark.
+ *
+ * Longest wins, or `test` would be offered where `npm test` was reported.
+ */
+function terminalKnownCommandInLine(line, knownCommands) {
+  if (!knownCommands || knownCommands.size === 0) {
+    return '';
+  }
+  let longest = '';
+  for (const command of knownCommands) {
+    if (command.length <= longest.length || !line.endsWith(command)) {
+      continue;
+    }
+    const before = line.length - command.length;
+    if (terminalTextEndsPrompt(line.slice(0, before))) {
+      longest = command;
+    }
+  }
+  return longest;
+}
+
+/**
+ * What Run should actually send for a line it offered.
+ *
+ * At a shell prompt the leading mark has to come off. `!` is bash's negation word
+ * there, so `! x && y` runs `y` when `x` *fails* — the command runs either way, but
+ * a chained branch inverts. The mark only means "run the rest as a shell command"
+ * at an agent's prompt, which is what it was written for.
+ *
+ * Only when the shell reports itself through OSC 133. No marks means unknown, not
+ * "not a shell", so an unreported session sends the line exactly as offered.
+ */
+function terminalRunPayload(line, atShellPrompt) {
+  if (!atShellPrompt) {
+    return line;
+  }
+  return line.replace(/^!\s+/, '');
+}
+
+/**
+ * Did the tap land on the row's text, or on the blank space around it?
+ *
+ * Every buffer row is the terminal's full width, and output is usually indented,
+ * so a tap in the empty space beside a line still resolves to a cell on that row.
+ * Without this, a tap anywhere level with some output would offer it.
+ */
+function terminalCellOnRowText(wrappedLine, bufferLineNumber, column) {
+  const segment = wrappedLine.segments.find(
+    (entry) => entry.bufferLineNumber === bufferLineNumber
+  );
+  if (!segment) {
+    return false;
+  }
+  // A continued row is stored untrimmed, and a full row of glyphs trims to
+  // itself, so this only ever shortens the row a tap actually ended on.
+  const trimmed = segment.text.replace(/\s+$/, '');
+  if (trimmed.length === 0) {
+    return false;
+  }
+  const indent = segment.text.length - segment.text.replace(/^\s+/, '').length;
+  // First glyph's first cell to the last glyph's last cell, so a wide glyph at
+  // either end still counts.
+  return (
+    column >= terminalLinkColumnFor(segment, indent, false) &&
+    column <= terminalLinkColumnFor(segment, trimmed.length - 1, true)
+  );
+}
+
+/**
+ * What a tap at this cell offers: the whole logical line, and the link under the
+ * tap if there is one.
+ *
+ * Two results, because the chips are gated differently. Open and Copy need a
+ * link — they act on a URL or a path. Run needs a line carrying the `!` mark, and
+ * a marked command is often not a link at all: `! scripts/install-vps-terminal`
+ * has no extension on its last segment, so the path pattern refuses it. Refusing
+ * it is right, because widening the pattern would linkify `and/or` and
+ * `read/write`. Run hung off link detection at first, which left that command with
+ * no chip of any kind.
+ */
+function terminalTapTarget(bufferLineNumber, column, getLine) {
+  const wrappedLine = collectWrappedTerminalLinkLine(bufferLineNumber, getLine);
+  if (!wrappedLine) {
+    return null;
+  }
+  if (!terminalCellOnRowText(wrappedLine, bufferLineNumber, column)) {
+    return null;
+  }
+  let match = null;
+  for (const candidate of extractTerminalLinks(wrappedLine.text)) {
+    const range = resolveWrappedTerminalLinkRange(wrappedLine, candidate);
+    if (terminalLinkRangeContains(range, column, bufferLineNumber)) {
+      match = { ...candidate, range, line: wrappedLine.text };
+      break;
+    }
+  }
+  // Links get the joined text, guessed rows and all. Run gets only what the
+  // terminal wrapped.
+  return { line: terminalWrappedOnlyText(wrappedLine, bufferLineNumber), match };
 }
 
 // End of the pure terminal-link block.
@@ -16801,7 +16979,7 @@ function hideTerminalLinkChip() {
   }
 }
 
-function terminalLinkAtClientPoint(clientX, clientY) {
+function terminalTapTargetAtClientPoint(clientX, clientY) {
   const buffer = terminal?.buffer?.active;
   if (!buffer || !terminalElement) {
     return null;
@@ -16824,7 +17002,7 @@ function terminalLinkAtClientPoint(clientX, clientY) {
   // Rows are viewport-relative; the link helpers work in absolute buffer lines.
   const bufferLineNumber = buffer.viewportY + row;
   const reusableCell = buffer.getNullCell?.();
-  return findTerminalLinkAtCell(bufferLineNumber, column, (index) => {
+  return terminalTapTarget(bufferLineNumber, column, (index) => {
     const line = buffer.getLine(index);
     if (!line) {
       return undefined;
@@ -16845,21 +17023,50 @@ function terminalLinkAtClientPoint(clientX, clientY) {
   });
 }
 
-function showTerminalLinkChip(match, clientX, clientY) {
+function showTerminalLinkChip(target, clientX, clientY) {
   if (!terminalLinkChip) {
     return;
   }
-  terminalLinkChipTarget = match;
-  const label = match.kind === 'url' ? 'Open link' : 'Open file';
-  terminalLinkChip.textContent = label;
-  // The chip carries the whole accessible name; the target text is deliberately
-  // left out of it, since a path or URL read aloud in full is noise.
-  terminalLinkChip.setAttribute('aria-label', label);
-  if (terminalLinkCopyChip) {
-    terminalLinkCopyChip.setAttribute(
-      'aria-label',
-      match.kind === 'url' ? 'Copy link' : 'Copy path'
-    );
+  const match = target.match;
+  const row = match
+    ? [terminalLinkChip, terminalLinkCopyChip].filter(Boolean)
+    : [];
+  // Run needs no link, only a line carrying the run mark.
+  //
+  // The mark is also what keeps it out of a full-screen program, where the keys
+  // would reach that program: a row of a vim buffer or a pager almost never starts
+  // with `! `. There is no screen-type gate to lean on instead. This terminal
+  // always attaches to tmux, tmux holds xterm on the alternate screen for the whole
+  // session, and it turns `mouse on` on globally, so both of those signals report
+  // the same thing at a prompt as inside `vim`. See docs/faq.md.
+  if (terminalLineChip && terminalLineChipText(target, terminalSemanticCommands)) {
+    row.push(terminalLineChip);
+  }
+  // Hide the whole row before deciding what to show. Only unhiding leaves a chip
+  // that dropped out of the row sitting at its old position with its old target
+  // already cleared, which is a button that looks live and does nothing.
+  for (const chip of [terminalLinkChip, terminalLinkCopyChip, terminalLineChip]) {
+    if (chip) {
+      chip.hidden = true;
+    }
+  }
+  if (row.length === 0) {
+    hideTerminalLinkChip();
+    return;
+  }
+  terminalLinkChipTarget = target;
+  if (match) {
+    const label = match.kind === 'url' ? 'Open link' : 'Open file';
+    terminalLinkChip.textContent = label;
+    // The chip carries the whole accessible name; the target text is deliberately
+    // left out of it, since a path or URL read aloud in full is noise.
+    terminalLinkChip.setAttribute('aria-label', label);
+    if (terminalLinkCopyChip) {
+      terminalLinkCopyChip.setAttribute(
+        'aria-label',
+        match.kind === 'url' ? 'Copy link' : 'Copy path'
+      );
+    }
   }
   const margin = 12;
   const x = Math.min(
@@ -16877,10 +17084,6 @@ function showTerminalLinkChip(match, clientX, clientY) {
     ? window.visualViewport.offsetTop + window.visualViewport.height
     : window.innerHeight;
   const clampedY = Math.min(y, Math.max(margin, visibleBottom - margin));
-  const row = [terminalLinkChip, terminalLinkCopyChip].filter(Boolean);
-  if (terminalLineChip && terminalLineChipText(match)) {
-    row.push(terminalLineChip);
-  }
   // Unhide before measuring: a hidden button has no width, and the row is
   // centred on the tap, so every width has to be known first.
   for (const chip of row) {
@@ -16926,16 +17129,16 @@ function offerTerminalLinkOnTap(clientX, clientY) {
   if (window.matchMedia?.('(pointer: fine)').matches) {
     return;
   }
-  const match = terminalLinkAtClientPoint(clientX, clientY);
-  if (!match) {
+  const target = terminalTapTargetAtClientPoint(clientX, clientY);
+  if (!target) {
     hideTerminalLinkChip();
     return;
   }
-  showTerminalLinkChip(match, clientX, clientY);
+  showTerminalLinkChip(target, clientX, clientY);
 }
 
 function activateTerminalLinkChip() {
-  const match = terminalLinkChipTarget;
+  const match = terminalLinkChipTarget?.match;
   hideTerminalLinkChip();
   if (!match) {
     return;
@@ -16955,7 +17158,7 @@ function activateTerminalLinkChip() {
  * a full-screen program drew across several rows.
  */
 async function copyTerminalLinkChip() {
-  const match = terminalLinkChipTarget;
+  const match = terminalLinkChipTarget?.match;
   hideTerminalLinkChip();
   if (!match) {
     return;
@@ -16969,19 +17172,23 @@ async function copyTerminalLinkChip() {
 }
 
 /**
- * Type the whole line the chip is offering at the prompt.
+ * Run the command the chip is offering.
  *
- * No terminator. The line is read out of terminal output, and output is not
- * always a command — the detection that found the link cannot know. Landing it on
- * the prompt lets you read it, edit it, or Ctrl+C it, which a carriage return
- * here would take away.
+ * A carriage return, not a line feed, because Run means "and press Enter" and that
+ * is what the Enter key sends. A shell cannot tell the two apart, but anything in
+ * raw mode can, and reads a line feed as "insert a newline" rather than "submit" —
+ * which is a Run adding a blank line to an agent's prompt instead of running.
+ *
+ * It submits because the run mark says the line is a command. Without the mark the
+ * chip is not offered at all, so there is no case where this presses Enter on
+ * something that was never meant to run.
  *
  * Reads the target before hiding, because hiding clears it.
  */
-function typeTerminalLineChip() {
-  const match = terminalLinkChipTarget;
+function runTerminalLineChip() {
+  const target = terminalLinkChipTarget;
   hideTerminalLinkChip();
-  const line = terminalLineChipText(match);
+  const line = terminalLineChipText(target, terminalSemanticCommands);
   if (!line) {
     return;
   }
@@ -16993,11 +17200,131 @@ function typeTerminalLineChip() {
   }
   clearTerminalSelection();
   setArmedModifier(null);
-  if (!sendInput(line)) {
-    setStatus('Could not send the line');
+  // The mark comes off at a shell prompt, where it would negate instead of run.
+  const payload = terminalRunPayload(
+    line,
+    terminalSemanticMarksSeen && terminalShellPromptLive
+  );
+  if (!sendInput(`${payload}\r`)) {
+    setStatus('Could not send the command');
     return;
   }
-  setStatus('Line typed — press Enter to run it');
+  setStatus('Ran the command');
+}
+
+// OSC 133, the FinalTerm semantic prompt marks, plus OSC 4133, which is ours.
+//
+// A shell that emits them says where its prompt starts (A), where the command line
+// starts (B), when the command began running (C), and how it exited (D;status).
+// Why at all: the chip can otherwise only guess a command from its text, and a
+// shell that reports its own commands removes the guess for every command the
+// session has run.
+//
+// The command *text* arrives on 4133 rather than being read out of the buffer
+// between B and C. Reading the buffer cannot work through tmux: tmux forwards a
+// passthrough sequence the moment it parses it but repaints the pane on its own
+// redraw cycle, so B arrives while the cursor is still at column 0 and the prompt
+// is read in as part of the command. It recorded `dev@host:/$ echo probe` and Run
+// sent that whole row. VS Code's shell integration carries the same extension
+// (`OSC 633;E`) for the same reason.
+//
+// Positions are not stored either, for a related reason: tmux redraws on resize, on
+// window switch and on `clear` without re-emitting anything, so a remembered row
+// would end up pointing at whatever text landed there later. Only text is stored,
+// and a tapped line qualifies by matching it.
+//
+// vps-terminal/shell-integration.bash emits all of these.
+const terminalSemanticCommandLimit = 200;
+const terminalSemanticCommands = new Set();
+// Whether a shell prompt is currently waiting for input, and whether any mark has
+// ever arrived. Without the second flag, "no shell prompt" cannot be told from "the
+// shell does not report".
+let terminalShellPromptLive = false;
+let terminalSemanticMarksSeen = false;
+
+/**
+ * Forget everything the marks taught us, on every session change.
+ *
+ * Two things go wrong without this. Commands learned in one session are offered as
+ * Run on another session's rows, which the chip has no business doing. And the
+ * prompt flag survives: leaving a shell prompt for a session sitting in an agent,
+ * where no mark arrives because tmux repaints without re-emitting, leaves the flag
+ * true — so Run strips the `!` from a command meant for that agent and sends it as a
+ * message.
+ *
+ * This covers a session change only. A tmux window switch inside one session keeps
+ * the same socket, and `noteForegroundCommandForSemanticState` is what catches that.
+ */
+function resetSemanticPromptState() {
+  terminalSemanticCommands.clear();
+  terminalShellPromptLive = false;
+  terminalSemanticMarksSeen = false;
+}
+
+// The foreground command of the active session, as the rail poll last reported it.
+let terminalSemanticForegroundCommand = null;
+
+/**
+ * Forget the marks when the pane's foreground command changes.
+ *
+ * The second source of truth the prompt flag needs. A tmux window switch inside one
+ * session does not reopen the socket, so `resetSemanticPromptState` never runs, and
+ * tmux repaints the new window without re-emitting any mark. Leaving a bash prompt
+ * for a window running an agent therefore left the flag true, and Run stripped the
+ * `!` from a command meant for that agent and sent it as a message.
+ *
+ * `pane_current_command` resolves against the session's active pane, which is what
+ * makes it see the switch. It arrives on the rail poll, so the flag corrects itself
+ * within one poll rather than instantly — a narrower window than never.
+ */
+function noteForegroundCommandForSemanticState() {
+  const current = activeSessionCommand();
+  if (current === terminalSemanticForegroundCommand) {
+    return;
+  }
+  terminalSemanticForegroundCommand = current;
+  resetSemanticPromptState();
+}
+
+function rememberSemanticCommand(command) {
+  if (!command || terminalSemanticCommands.has(command)) {
+    return;
+  }
+  // Oldest out first. A long session would otherwise hold every command it ever
+  // ran, and the set is walked on every tap.
+  if (terminalSemanticCommands.size >= terminalSemanticCommandLimit) {
+    const oldest = terminalSemanticCommands.values().next().value;
+    terminalSemanticCommands.delete(oldest);
+  }
+  terminalSemanticCommands.add(command);
+}
+
+// Returning true marks the sequence handled. An unhandled OSC is logged and
+// dropped, not printed, so the cost of returning false is silence rather than junk —
+// but a handler that declines its own sequence has nothing to say.
+function handleSemanticPromptOsc(payload) {
+  terminalSemanticMarksSeen = true;
+  const kind = String(payload ?? '').charAt(0);
+  if (kind === 'A' || kind === 'B') {
+    terminalShellPromptLive = true;
+    return true;
+  }
+  if (kind === 'C' || kind === 'D') {
+    terminalShellPromptLive = false;
+  }
+  return true;
+}
+
+/**
+ * The command line a reporting shell is about to run.
+ *
+ * Raw text, not base64: a typed command carries no ESC and no control characters,
+ * and `terminalTypableLine` declines a payload that does rather than storing it.
+ */
+function handleReportedCommandOsc(payload) {
+  terminalSemanticMarksSeen = true;
+  rememberSemanticCommand(terminalTypableLine(String(payload ?? '')));
+  return true;
 }
 
 function installTerminalLinkModifierTracking() {
@@ -18302,7 +18629,7 @@ terminalLinkChip?.addEventListener('click', activateTerminalLinkChip);
 terminalLinkCopyChip?.addEventListener('click', () => {
   void copyTerminalLinkChip();
 });
-terminalLineChip?.addEventListener('click', typeTerminalLineChip);
+terminalLineChip?.addEventListener('click', runTerminalLineChip);
 selectionCopyChip?.addEventListener('click', handleSelectionCopyChipClick);
 // Prefer pointerup so iOS grants clipboard activation reliably for the chip.
 selectionCopyChip?.addEventListener(

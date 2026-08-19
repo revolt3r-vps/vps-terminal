@@ -31,6 +31,9 @@ node --check "${root}/public/viewport-init.js"
 # `done` behind, which is a syntax error rather than a missing check.
 node --check "${root}/bin/vps-terminal-focus"
 bash -n "${root}/attach-session"
+# Sourced into every interactive bash on the host by the installer, so a syntax
+# error here breaks every new shell rather than one feature.
+bash -n "${root}/shell-integration.bash"
 bash -n "${root}/scripts/install.sh"
 bash -n "${root}/scripts/vendor-assets.sh"
 

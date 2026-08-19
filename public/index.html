@@ -466,14 +466,14 @@
     >Copy</button>
     <!-- Copy hands you the link and nothing else, but a link is often only part of
          what you need: `! bash /tmp/.../apply.sh` is a command, and the path on its
-         own will not run. This types the whole line at the prompt and stops there,
-         so you read it before Enter. -->
+         own will not run. This sends the whole line, mark included, and presses
+         Enter. Only offered on a line carrying the `!` run mark. -->
     <button
       id="terminal-line-chip"
       type="button"
-      aria-label="Type the whole line at the prompt"
+      aria-label="Run this command in the session"
       hidden
-    >Type line</button>
+    >Run</button>
     <!-- One-tap Copy after long-press selection (reliable iOS clipboard path). -->
     <button id="selection-copy-chip" type="button" hidden>Copy</button>
     <!-- Names the session a horizontal swipe is heading for, because one terminal
