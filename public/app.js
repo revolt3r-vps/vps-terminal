@@ -4996,8 +4996,11 @@ function renderKeyPanelDebug(page) {
   const keyboardNote = document.createElement('p');
   keyboardNote.className = 'key-panel-note';
   keyboardNote.textContent =
-    'Test closes this panel, asks for the keyboard five different ways, then ' +
-    'comes back. The line that says opened=true is the one that worked.';
+    'Always recording. Every tap on the key bar while typing logs three ' +
+    'bar-tap lines: focus is where typing went, gap is how much the keyboard ' +
+    'covers, and gap=0 means no keyboard. Test closes this panel, asks for the ' +
+    'keyboard five different ways, then comes back. The line that says ' +
+    'opened=true is the one that worked.';
 
   const keyboardOutput = document.createElement('pre');
   keyboardOutput.className = 'key-panel-debug-log';
@@ -6330,6 +6333,34 @@ function keyboardOpenDecision(flags) {
   };
 }
 
+/**
+ * The keyboard has gone and the input still has focus.
+ *
+ * Chrome does this deliberately. crbug.com/41177736 is the report that hiding the
+ * virtual keyboard leaves the focused element focused and fires no blur, and
+ * Android's Back button is the everyday way in. Nothing else in this file can see
+ * it: keyboardOpenDecision() keeps `keyboard-open` on for as long as a lock
+ * exists, and the release branch in updateVisualViewport() requires focus to be
+ * gone. So the layout stays frozen at a keyboard height with no keyboard under
+ * it, and the footer button still says Hide.
+ *
+ * A lock is required, which is what keeps a hardware-keyboard tablet out: its
+ * pointer is coarse and its viewport never shrinks, so it never captures one.
+ *
+ * A selection owns the frozen height for its own reasons and is left alone.
+ */
+function keyboardVanishedWithoutBlur(flags) {
+  return Boolean(
+    flags?.layoutLock &&
+      flags?.terminalFocused &&
+      !flags?.keyboardReduced &&
+      !flags?.dismissing &&
+      !flags?.selectionLock &&
+      !flags?.holdForSelection &&
+      !flags?.hasSelection
+  );
+}
+
 function keyboardFlagState(flags) {
   return keyboardTransitionFlagNames
     .map((name) => (flags?.[name] ? '1' : '0'))
@@ -6838,13 +6869,60 @@ function applySelectionViewportLockStyles() {
   document.documentElement.style.setProperty('--app-top', `${top}px`);
 }
 
+/**
+ * Hold typing focus while a button is pressed, so the keyboard stays.
+ *
+ * Registered for `mousedown` as well as `pointerdown`, and the mousedown is the
+ * one that matters on iOS. A log off an iPhone: the pointerdown was cancelled
+ * (`cancelable=true`, preventDefault ran) and 78 ms later
+ * `input-focusout from=textarea.xterm-helper-textarea to=none` — focus dropped to
+ * the body, not to the button. 78 ms is the compatibility mousedown, which iOS
+ * fires after touchend and does not suppress for a cancelled pointerdown. Blur
+ * runs before click, so by the time the chip's own handler ran the keyboard was
+ * already going.
+ *
+ * preventDefault() on mousedown is the documented way to stop that focus change:
+ * https://blog.mobiscroll.com/annoying-ios-safari-input-issues-with-workarounds/
+ * On Android the cancelled pointerdown already suppresses the compatibility
+ * mousedown, so this never runs there. With a real mouse it does run, and it
+ * stops the button taking focus — the same thing the pointerdown branch is for,
+ * on the one event a mouse actually sends.
+ */
 function preserveKeyboardState(event) {
   const button = event.target.closest?.('button');
   if (!button) {
     return;
   }
-  if (terminalInputIsFocused()) {
-    event.preventDefault();
+  // The two key rows only, and only where there is a soft keyboard to lose.
+  // Not the whole <footer>: that also holds #keyboard, #settings, the Files
+  // controls and all of #key-panel. #keyboard is the sharp one — it blurs, so
+  // arming a re-raise there would rest on blurTerminalInput() having already
+  // dropped the lock by the time the timer could start. Naming the rows is what
+  // the Debug tab and docs/qa.md promise, and it needs no such coincidence.
+  const onKeyBar = Boolean(
+    usesSoftKeyboard() && button.closest('#footer-pins, #footer-drawer')
+  );
+  // Before the focus guard, deliberately. This line is the evidence for the whole
+  // diagnosis, and behind the guard it could only ever say yes: a mousedown that
+  // arrived *after* the blur would take the guard and write nothing, which reads
+  // exactly like no mousedown at all. Logged where it can say either, so an
+  // absent line means one thing — the event never reached us.
+  if (onKeyBar && event.type === 'mousedown') {
+    keyboardDebug(
+      `bar-mousedown cancelable=${event.cancelable} ` +
+        `focus=${terminalInputIsFocused()} ` +
+        `active=${describeElementForDebug(document.activeElement)} ` +
+        `gap=${keyboardViewportGap()}`
+    );
+  }
+  if (!terminalInputIsFocused()) {
+    return;
+  }
+  event.preventDefault();
+  // One burst of samples per tap, and the pointerdown is what opens it. The
+  // mousedown is the same tap arriving a second time.
+  if (onKeyBar && event.type === 'pointerdown') {
+    noteBarTap(button, event.cancelable);
   }
 }
 
@@ -8655,6 +8733,11 @@ function setOnscreenTerminalInput(on) {
 function handleTerminalInputFocused(reason) {
   recordKeyboardTransition(reason);
   terminalInputFocusedAt = window.performance.now();
+  // A focus is a fresh request for the keyboard, whatever the last one did, so
+  // the button goes back to being a plain toggle. Cleared here as well as in
+  // captureKeyboardLayoutLock() because a raise that opens nothing never reaches
+  // a capture, and a button stuck on revive would never let go of focus.
+  keyboardVanishedWhileFocused = false;
   keyboardDismissing = false;
   clearTimeout(keyboardDismissPollTimer);
   keyboardDismissPollTimer = null;
@@ -8976,15 +9059,281 @@ async function runKeyboardProbe() {
 }
 // ---- End of the soft keyboard diagnostic block. ----
 
+// ---- Start of the vanished-keyboard block. ----
+/*
+ * The keyboard leaving without a blur, and what to do about it.
+ *
+ * Reported from a phone: tapping a key in the bar above the keyboard closes the
+ * keyboard. The tap itself is not the app blurring anything — a Pixel 7 profile
+ * measured the chip tap keeping focus on the bridge input, because
+ * preserveKeyboardState() cancels the pointerdown and no compatibility mousedown
+ * follows it. What the same measurement did show is the state left behind: with
+ * the viewport back to full height and focus still on the input, the app holds
+ * the frozen keyboard height forever and the footer button still says Hide, so
+ * the next press on it hides a keyboard that is already gone.
+ *
+ * Two things happen here, in this order:
+ *
+ * - A bar tap arms one re-raise. If the keyboard measurably goes within
+ *   barTapReraiseWindowMilliseconds of it, it is asked for again — once. Nobody
+ *   taps Esc to dismiss the keyboard, so a keyboard that leaves right after a bar
+ *   tap is not what was asked for.
+ * - Otherwise the lock is dropped, the layout grows back and the button says
+ *   Show. That is the Back-button case, which toggleKeyboard() deliberately does
+ *   not chase; it only stops the geometry being stuck.
+ *
+ * The reading is confirmed after a delay rather than acted on immediately: iOS
+ * rubber-banding reports full height mid-gesture, and releasing on that is the
+ * jump keyboardOpenDecision()'s lock clause exists to prevent.
+ */
+/**
+ * How long full height must hold before the keyboard counts as gone.
+ *
+ * Shorter than keyboardOpenSettleMilliseconds, and that is safe only because
+ * every raise path blurs first and the blur drops the lock — so a keyboard still
+ * rising has no lock for this to find. Anything that raises without blurring
+ * would need this to be the longer of the two.
+ */
+const keyboardVanishConfirmMilliseconds = 250;
+/** Only a bar tap this recent may cause a re-raise. */
+const barTapReraiseWindowMilliseconds = 700;
+/** Long enough for the raise, its own 700 ms check, and the escalation after it. */
+const barTapReraiseVerdictMilliseconds = 1100;
+let keyboardVanishTimer = null;
+let barTapReraiseTimer = null;
+/** The pending bar-tap samples, dropped by the next tap so a burst cannot stack. */
+let barTapSampleTimers = [];
+let barTapArmedAt = Number.NEGATIVE_INFINITY;
+let barTapReraiseSpent = true;
+/**
+ * The keyboard went while the input kept focus, and nothing has asked for one
+ * since. What the footer button has to press for.
+ *
+ * A flag rather than a live measurement, because the live one cannot tell this
+ * state from a tablet with a hardware keyboard: that tablet's pointer is coarse
+ * and its viewport never shrinks, so "focus held, viewport full" is its whole
+ * life and every press of the button would try to raise a keyboard instead of
+ * dropping focus. This is only ever set after a lock existed, which means a soft
+ * keyboard was measurably up.
+ */
+let keyboardVanishedWhileFocused = false;
+
+/*
+ * What took the focus, whenever typing focus leaves the terminal.
+ *
+ * On the document rather than on the element, because there are two elements: the
+ * bridge on a Chrome that will not raise a keyboard for xterm's, and xterm's own
+ * helper textarea everywhere else, iOS included. A listener on the bridge would
+ * have said nothing at all on the platform this was reported from.
+ *
+ * focusout rather than blur, for relatedTarget: by the time blur runs
+ * document.activeElement is already the body. That name is the whole difference
+ * between "the app blurred the input" and "the keyboard went on its own", which is
+ * what a bar-tap report has to answer.
+ */
+function traceTerminalInputFocusOut(event) {
+  const target = event.target;
+  const isTerminalInput =
+    target === keyboardBridgeInput ||
+    (terminal?.textarea && target === terminal.textarea);
+  if (!isTerminalInput) {
+    return;
+  }
+  keyboardDebug(
+    `input-focusout from=${describeElementForDebug(target)} ` +
+      `to=${describeElementForDebug(event.relatedTarget)} ` +
+      `gap=${keyboardViewportGap()}`
+  );
+}
+
+/** The flags keyboardVanishedWithoutBlur() reads, without a second layout read. */
+function keyboardVanishFlags(keyboardReduced) {
+  return {
+    layoutLock: Boolean(keyboardLayoutLock),
+    terminalFocused: terminalInputIsFocused(),
+    keyboardReduced,
+    dismissing: keyboardDismissing,
+    selectionLock: Boolean(selectionViewportLock),
+    holdForSelection: holdKeyboardLayoutForSelection,
+    hasSelection: Boolean(terminal?.hasSelection?.())
+  };
+}
+
+/**
+ * A tap on the bar arms one re-raise and logs what the keyboard does next.
+ *
+ * The log is the point as much as the arming is. The Keyboard log is always
+ * recording and the Debug tab can copy it off the phone, so a report can say
+ * whether focus left the input or the keyboard went while focus stayed — two
+ * different faults with two different fixes, and no way to tell them apart from
+ * the outside.
+ */
+function noteBarTap(button, cancelable) {
+  barTapArmedAt = window.performance.now();
+  barTapReraiseSpent = false;
+  const label =
+    button.dataset.shortcutId ||
+    button.dataset.chordId ||
+    (button.id ? `#${button.id}` : '') ||
+    button.textContent.trim().slice(0, 12) ||
+    'button';
+  // Whether the tap could be cancelled, not whether it was: preventDefault() has
+  // already run one line above the caller, so "was it prevented" is the constant
+  // true. A pointerdown that is not cancelable is the state where
+  // preserveKeyboardState() had no way to hold the focus.
+  keyboardDebug(
+    `bar-tap ${label} cancelable=${cancelable} gap=${keyboardViewportGap()} ` +
+      `vh=${keyboardVisualHeight()}`
+  );
+  // After the tap has been handled, and again after the keyboard has had time to
+  // go. Both readings, because "focus left" and "the keyboard left" look
+  // identical from the terminal and are fixed in different places.
+  //
+  // The previous tap's samples are dropped first. Ordinary typing on the bar is a
+  // burst of taps and the log holds 140 lines, so the samples worth keeping are
+  // the last tap's.
+  for (const timer of barTapSampleTimers) {
+    clearTimeout(timer);
+  }
+  barTapSampleTimers = [150, 600].map((delay) =>
+    window.setTimeout(() => {
+      keyboardDebug(
+        `bar-tap ${label} +${delay} focus=${terminalInputIsFocused()} ` +
+          `active=${describeElementForDebug(document.activeElement)} ` +
+          `gap=${keyboardViewportGap()} vh=${keyboardVisualHeight()}`
+      );
+    }, delay)
+  );
+}
+
+/** Watch, or stop watching, from one viewport frame. */
+function trackVanishedKeyboard(keyboardReduced) {
+  if (!keyboardVanishedWithoutBlur(keyboardVanishFlags(keyboardReduced))) {
+    clearTimeout(keyboardVanishTimer);
+    keyboardVanishTimer = null;
+    return;
+  }
+  if (keyboardVanishTimer !== null) {
+    return;
+  }
+  keyboardVanishTimer = window.setTimeout(
+    confirmVanishedKeyboard,
+    keyboardVanishConfirmMilliseconds
+  );
+}
+
+/**
+ * The one end state for "focus is here and the keyboard is not".
+ *
+ * Two ways in write it: the release branch below, and a re-raise that opened
+ * nothing. The button reads Show from here, and toggleKeyboard() reads the flag
+ * so that it means it — without the flag it would blur instead, because focus is
+ * still on the input, which is a button promising a keyboard and taking typing
+ * away.
+ */
+function markKeyboardGoneWhileFocused() {
+  // releaseKeyboardLayoutLock() declines only for a selection, so a focused input
+  // does not stop it. Its dismiss poll sees the focus and stops on the first
+  // tick, which is right — the geometry has already been cleared by then, and
+  // there is no closing animation to follow.
+  releaseKeyboardLayoutLock();
+  keyboardVanishedWhileFocused = true;
+  setKeyboardButtonState(false);
+}
+
+function confirmVanishedKeyboard() {
+  keyboardVanishTimer = null;
+  // runKeyboardProbe() opens and resets a keyboard fourteen times, and a reset is
+  // this exact shape. scheduleKeyboardRaiseCheck() stands down for the probe for
+  // the same reason: answering it here would flip the footer button and set the
+  // flag underneath a measurement in progress.
+  if (keyboardProbeRunning) {
+    return;
+  }
+  if (
+    !keyboardVanishedWithoutBlur(
+      keyboardVanishFlags(keyboardViewportIsReduced())
+    )
+  ) {
+    // The keyboard came back, or the state moved on. Nothing to answer.
+    return;
+  }
+  const sinceBarTap = window.performance.now() - barTapArmedAt;
+  if (
+    !barTapReraiseSpent &&
+    sinceBarTap <= barTapReraiseWindowMilliseconds &&
+    // Only where a focus() from a timer can raise a keyboard at all. This runs at
+    // least 250 ms after the tap, so the user gesture is long over, and iOS
+    // Safari raises nothing for a programmatic focus outside one — the raise would
+    // blur the textarea, get no keyboard back, and cost a press rather than save
+    // one. The bridge exists precisely because that Chrome does raise on a focus
+    // of its own input, timer or not, so it is the platform test that is already
+    // measured rather than a user-agent guess. iOS takes the release branch
+    // below, and the button then raises inside its own press.
+    keyboardBridgeIsActive()
+  ) {
+    // Spent before the raise, not after: a raise that opens nothing must not
+    // arm a second one off the same tap.
+    barTapReraiseSpent = true;
+    recordKeyboardTransition('bar-tap-reraise');
+    keyboardDebug(`vanish reraise after=${Math.round(sinceBarTap)}ms`);
+    focusTerminalForTyping('bar-tap-reraise');
+    // And a verdict on it. The raise blurs first, so the lock this branch was
+    // reading is gone either way — nothing can arm the check a second time, and a
+    // raise that opened nothing would leave the button reading Hide with no
+    // keyboard behind it. That is one press worse than never having tried, so the
+    // failure is written back to the same end state the release branch reaches.
+    clearTimeout(barTapReraiseTimer);
+    barTapReraiseTimer = window.setTimeout(
+      settleBarTapReraise,
+      barTapReraiseVerdictMilliseconds
+    );
+    return;
+  }
+  recordKeyboardTransition('vanish-release');
+  keyboardDebug(
+    `vanish release gap=${keyboardViewportGap()} vh=${keyboardVisualHeight()}`
+  );
+  markKeyboardGoneWhileFocused();
+}
+
+/** Did the re-raise get a keyboard? If not, say so where the button can read it. */
+function settleBarTapReraise() {
+  barTapReraiseTimer = null;
+  if (!terminalInputIsFocused() || keyboardProbeRunning) {
+    // Focus moved on, and the question with it.
+    return;
+  }
+  if (keyboardViewportIsReduced()) {
+    keyboardDebug('reraise-result opened=true');
+    return;
+  }
+  keyboardDebug(`reraise-result opened=false gap=${keyboardViewportGap()}`);
+  recordKeyboardTransition('reraise-failed');
+  markKeyboardGoneWhileFocused();
+}
+// ---- End of the vanished-keyboard block. ----
+
 function toggleKeyboard() {
   if (!terminal || !activeSession) {
     return;
   }
-  // A plain toggle, deliberately. The Back-button state — focus held, keyboard
-  // gone — is answered by tapping the terminal, which is the gesture for it. If
-  // the button re-showed instead of blurring there, a tablet with a hardware
-  // keyboard could never drop focus at all: its pointer is coarse and its
-  // viewport never shrinks, so every press would read as that same state.
+  // Nearly a plain toggle. The one exception is the state where focus is held and
+  // the keyboard has gone, which used to be answered by tapping the terminal
+  // because the button had no safe way to tell that state apart: read live, it is
+  // also the whole life of a tablet with a hardware keyboard — coarse pointer, a
+  // viewport that never shrinks — and every press there would try to raise a
+  // keyboard instead of dropping focus. keyboardVanishedWhileFocused is set only
+  // after a lock existed, so it makes the distinction the live reading could not,
+  // and the button already reads Show by the time it is consulted.
+  if (terminalInputIsFocused() && keyboardVanishedWhileFocused) {
+    keyboardDebug('button revive');
+    // The same order the show path below uses: a selection left up would decline
+    // the release inside the raise's own blur.
+    clearTerminalSelection();
+    focusTerminalForTyping('button-revive');
+    return;
+  }
   if (terminalInputIsFocused()) {
     keyboardDebug('button blur');
     blurTerminalInput();
@@ -13971,6 +14320,8 @@ function captureKeyboardLayoutLock() {
     recordKeyboardTransition('capture-declined');
     return;
   }
+  // A lock means the viewport really is short, so a keyboard is really there.
+  keyboardVanishedWhileFocused = false;
   // They are the same space, so they are never both. A keyboard that comes back
   // — tapping the terminal behind the panel does it — takes its place back.
   setKeyPanelOpen(false);
@@ -19157,7 +19508,15 @@ window.addEventListener('appinstalled', () => {
   updateInstallSettings();
 });
 
-document.addEventListener('pointerdown', preserveKeyboardState, {
+// Both events, capture. The pointerdown is what holds focus on a desktop and on
+// Android; the mousedown is what holds it on iOS, where a cancelled pointerdown
+// does not suppress the compatibility mousedown that moves the focus.
+for (const type of ['pointerdown', 'mousedown']) {
+  document.addEventListener(type, preserveKeyboardState, { capture: true });
+}
+// Capture, so it runs whatever else handles the focus change, and on the document
+// so it covers both elements the terminal types through.
+document.addEventListener('focusout', traceTerminalInputFocusOut, {
   capture: true
 });
 const resizeObserver = new ResizeObserver(scheduleFit);
@@ -19288,6 +19647,11 @@ function updateVisualViewport() {
   // One layout read for the whole frame; keyboardViewportIsReduced() reads
   // clientHeight and three branches below need the answer.
   const keyboardReduced = keyboardViewportIsReduced();
+  // Before the branches below, because none of them can see a keyboard that left
+  // without a blur: the release branch requires focus to be gone, and
+  // keyboardOpenDecision() holds `keyboard-open` on for as long as the lock
+  // exists. This only starts a timer — the frame itself is left alone.
+  trackVanishedKeyboard(keyboardReduced);
   // Soft keyboard dismissed (viewport full again) while a lock remains —
   // e.g. Find field still focused after the OS hid the keyboard. Drop the
   // frozen short height so the UI moves back down.
