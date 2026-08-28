@@ -1559,6 +1559,26 @@ async function readGameSlugs() {
   return slugs;
 }
 
+/**
+ * The game studio repository itself, not a game in it.
+ *
+ * GameLab Mode keeps the studio's own working session on the rail, so the
+ * session that maintains the studio — the `game-lab` repository, where the
+ * `new-game` skill and the games stack live — is reachable without leaving the
+ * view. The working directory decides it, the same rule `gameForSession` uses,
+ * because that is what the session is actually doing; a name rule would lose a
+ * renamed session and catch nothing else reliably.
+ */
+function sessionInGameStudio(candidatePath) {
+  if (typeof candidatePath !== 'string' || !candidatePath.startsWith('/')) {
+    return false;
+  }
+  return (
+    candidatePath === gameStudioDirectory ||
+    candidatePath.startsWith(`${gameStudioDirectory}/`)
+  );
+}
+
 function slugForGamePath(candidatePath, slugs) {
   if (typeof candidatePath !== 'string' || !candidatePath.startsWith('/')) {
     return null;
@@ -1650,7 +1670,12 @@ async function listSessions() {
           // a server setting and the page must not carry a copy of the pattern.
           // GameLab Mode keeps these rows: an interview has no game yet, and a
           // row is the only way back to one that is still running.
-          studio: studioSessionPattern.test(session.name)
+          studio: studioSessionPattern.test(session.name),
+          // The studio repository's own session, marked the same way the games
+          // are: by where it works. GameLab Mode keeps this row too.
+          gameLab:
+            sessionInGameStudio(session.sessionPath) ||
+            sessionInGameStudio(session.panePath)
         };
       })
       .filter((session) => validatedSessionName(session.name));
