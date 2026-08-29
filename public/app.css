@@ -1664,6 +1664,66 @@ button:active {
   transform: translateY(1px);
 }
 
+/*
+ * The invisible label that makes a tap buzz, and the one switch it names.
+ *
+ * iOS Safari has never implemented navigator.vibrate, so the only route from a
+ * web page to the Taptic Engine is `<input type="checkbox" switch>`: Safari
+ * 17.4 added the control, and toggling it buzzes. iOS 26.5 stopped honouring a
+ * toggle sent from script, so the toggle has to come from a finger.
+ *
+ * The finger lands on a label, not on the switch. T037 put a switch under every
+ * finger and that took the swipe away from every scroller in the app; a label
+ * has no thumb to drag and no gesture of its own, so it takes nothing from the
+ * pan underneath it, and tapping one still activates the control it points at.
+ * Measured on an iPhone across five rounds: every swipe scrolls, a tap buzzes,
+ * a scroll does not.
+ *
+ * Not display:none and not visibility:hidden, on either element. Both take a
+ * control out of hit testing and out of the tree that would buzz it. Opacity
+ * keeps the label hit-testable and keeps the switch real.
+ *
+ * Last child and positioned, which puts the label above the button's own
+ * content in paint order without a z-index. Measured, not assumed: every icon
+ * button on the footer holds an <svg>, and qa/haptics.js reads elementFromPoint
+ * at the centre of each one.
+ */
+[data-haptic-host] {
+  position: relative;
+}
+
+.haptic-tap {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/*
+ * Parked, and never tapped directly. It is activated through a label, so it
+ * needs no size on screen and no pointer of its own — but it does need to be
+ * rendered, because a switch that is not in the render tree buzzes nothing.
+ */
+.haptic-parked-switch {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  width: 44px;
+  height: 32px;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* A disabled button must not buzz. Its own events are suppressed; the label is
+ * a separate element and would still take the tap. */
+button:disabled .haptic-tap {
+  pointer-events: none;
+}
+
 button:disabled {
   opacity: 0.4;
 }

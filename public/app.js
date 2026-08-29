@@ -1465,10 +1465,21 @@ document.documentElement.classList.toggle(
   nativeTouchSelection
 );
 
-function shouldUseNativeTouchSelection() {
-  const appleTouchDevice =
+/**
+ * An iPhone, an iPod, or an iPad reporting itself as a Mac.
+ *
+ * iPadOS sends a desktop user agent, so the platform pair is the half that
+ * catches an iPad.
+ */
+function isAppleTouchDevice() {
+  return (
     /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
+  );
+}
+
+function shouldUseNativeTouchSelection() {
+  const appleTouchDevice = isAppleTouchDevice();
   return Boolean(
     appleTouchDevice &&
     window.matchMedia?.('(hover: none) and (pointer: coarse)').matches
@@ -5205,6 +5216,27 @@ function renderKeyPanelAppearance(page) {
     keyPanelGroupLabel('Theme'),
     grid
   );
+
+  // Only where there is hardware behind it. On a desktop browser the switch
+  // would promise a buzz that no device can produce.
+  if (hapticsAreSupported()) {
+    page.append(
+      keyPanelGroupLabel('Feedback'),
+      keyPanelSwitch(
+        'appearance-option-haptics',
+        'Vibrate on tap',
+        hapticsEnabled,
+        (next) => {
+          setHapticsEnabled(next);
+          // Patched in place, like the Files switches: rebuilding the page
+          // inside the switch's own click handler drops focus to <body>.
+          document
+            .querySelector('#appearance-option-haptics')
+            ?.setAttribute('aria-checked', String(next));
+        }
+      )
+    );
+  }
 }
 
 /** The stepper half of what pinch-to-zoom already does, sharing its state. */
@@ -5351,7 +5383,11 @@ function installChipLongPress(button, { onTap, onHold }) {
     longPressFired = false;
   });
   button.addEventListener('click', (event) => {
-    event.preventDefault();
+    // stopPropagation only. Cancelling the click would also cancel the
+    // activation behaviour of the haptic label inside this button, and that
+    // activation is the buzz — the keys would be the one surface that never
+    // buzzed, which is the surface the feature is for. A `type="button"` click
+    // has no default action worth cancelling in the first place.
     event.stopPropagation();
     dragDebug(
       `hold-click ${button.dataset.reorderId || ''} afterHold=${longPressFired}`
@@ -6964,6 +7000,495 @@ function preserveKeyboardState(event) {
   if (onKeyBar && event.type === 'pointerdown') {
     noteBarTap(button, event.cancelable);
   }
+}
+
+/**
+ * A tap on a button buzzes, the way the iOS keyboard does.
+ *
+ * iOS Safari has never shipped `navigator.vibrate` — still undefined on iOS
+ * 18.7 with Safari 27.0, measured, whatever mdn/browser-compat-data#29166 saw.
+ * The one route from a web page to the Taptic Engine is
+ * `<input type="checkbox" switch>`, the control Safari 17.4 added, which buzzes
+ * when a tap toggles it: https://webkit.org/blog/15054/an-html-switch-control/
+ *
+ * iOS 26.5 stopped honouring a toggle sent from script, so the toggle has to
+ * come from a finger. T037 put a switch under every finger by stretching one
+ * across each button, and that took the swipe away from every scroller in the
+ * app: the key bar, the drawer and the settings pages all stopped scrolling,
+ * and it was reverted in T042.
+ *
+ * What is under the finger here is a `<label>` instead, and the switch it names
+ * is a single parked one that sits outside everything that scrolls. A label is
+ * not a form control. It has no thumb to drag and no gesture of its own, so it
+ * takes nothing from the pan underneath it, and tapping one still activates the
+ * control it points at.
+ *
+ * Measured on the device across five rounds, iOS 18.7 / Safari 27.0: a strip of
+ * chips wearing this overlay scrolled every swipe, buzzed on a tap, buzzed not
+ * at all while scrolling, and left no more stray presses than the same strip
+ * with no overlay on it.
+ *
+ * Android needs none of this and takes `navigator.vibrate`. A desktop browser
+ * is offered nothing, because vibrate exists there and does nothing.
+ *
+ * Two things this deliberately does not do. It does not fire on the terminal
+ * surface: every keystroke there already buzzes on the real keyboard, and the
+ * grid is thousands of spans. It does not chain ticks for a pattern, because
+ * iOS 26.5 plays the first segment of one and drops the rest.
+ */
+const hapticsStorageKey = 'vps-terminal-haptics';
+
+/**
+ * Buttons, and the listbox options that behave like buttons.
+ *
+ * The same set `button:active` in app.css already treats as pressable, so the
+ * buzz and the press travel do not disagree about what a button is.
+ *
+ * `[role="option"]` is the command palette. The Files listing uses the same
+ * role and is excluded in the sweep, because a file row is a container you tap
+ * to open something rather than a control, and it is built from spans, so there
+ * is nothing inside it to cover.
+ */
+const hapticTargetSelector = 'button, [role="option"]';
+
+/** Short enough to read as a tick rather than a buzz. The iOS key click. */
+const hapticTickMs = 8;
+
+/** The id the overlay labels point at. One switch serves all of them. */
+const hapticSwitchId = 'haptic-parked-switch';
+
+/**
+ * Safari takes the label; everywhere else vibrate is the whole API.
+ *
+ * The runtime version is asked about as well as the device. `switch` arrived in
+ * Safari 17.4, and below that the attribute is ignored: the control is a plain
+ * checkbox that buzzes nothing. Without this an older iPhone would carry a
+ * label in every button, bounce focus through a hidden input on every tap, and
+ * be offered a setting for a buzz it cannot produce.
+ */
+const hapticsUseLabel = isAppleTouchDevice() && appleRuntimeHasSwitchControl();
+
+/**
+ * Old enough to have the switch control, read out of the user agent.
+ *
+ * Two tokens, because neither is always there. `Version/17.4` is Safari's own,
+ * and the app is installed to the Home Screen, where the standalone user agent
+ * drops both `Version/` and `Safari/` — gating on that token alone would turn
+ * the feature off in exactly the configuration it is for. `CPU iPhone OS 17_4`
+ * survives standalone, and iOS and Safari ship their versions together, so
+ * either answers the same question.
+ *
+ * A user agent with neither token is assumed modern. The cost of being wrong
+ * that way is a label in every button on a phone that will not buzz; the cost
+ * of the other way is the feature missing on the device it was built for.
+ *
+ * The agent is a parameter so `gate.survives-standalone` can ask this same
+ * function about the Home Screen user agent rather than about a copy of its
+ * pattern, which would pass whatever this function did.
+ */
+function appleRuntimeHasSwitchControl(agent = navigator.userAgent) {
+  const found =
+    /CPU (?:iPhone )?OS (\d+)_(\d+)/.exec(agent) ||
+    /Version\/(\d+)\.(\d+)/.exec(agent);
+  if (!found) {
+    return true;
+  }
+  const major = Number(found[1]);
+  const minor = Number(found[2]);
+  return major > 17 || (major === 17 && minor >= 4);
+}
+
+/**
+ * Vibrate, and something to feel it with.
+ *
+ * `typeof navigator.vibrate === 'function'` is true in desktop Chrome and
+ * Firefox, where the call returns true and nothing happens. Offering the
+ * setting there would promise a buzz no machine can produce, so the touch
+ * screen is asked about as well.
+ */
+const hapticsUseVibrate =
+  !hapticsUseLabel &&
+  typeof navigator.vibrate === 'function' &&
+  navigator.maxTouchPoints > 0 &&
+  window.matchMedia?.('(pointer: coarse)').matches === true;
+
+let hapticsEnabled = loadHapticsPreference();
+/**
+ * Nodes arriving, and dialogs opening.
+ *
+ * `showModal()` and `close()` change one attribute and nothing else, so a
+ * childList-only observer never sees them — and the parked switch has to move
+ * when they happen, or it is left inert inside a modal it is outside of, or
+ * stranded inside a closed dialog where `display: none` stops it buzzing at
+ * all. Closing the command palette did exactly that: every tap in the app went
+ * silent until some unrelated insertion scheduled the next sweep.
+ */
+const hapticObserverOptions = {
+  childList: true,
+  subtree: true,
+  attributes: true,
+  attributeFilter: ['open']
+};
+
+let hapticSweepHandle = 0;
+let hapticObserver = null;
+/** Who had focus when the finger went down. The fallback. */
+let hapticFocusBeforeTap = null;
+/** Where the click left focus, once every handler has run. The one to restore. */
+let hapticFocusAfterClick = null;
+/**
+ * Which of the three the last restore actually used.
+ *
+ * Diagnostic, and the only way qa/haptics.js can tell the per-button listener
+ * from the fallbacks: in Chromium `relatedTarget` answers correctly on its own,
+ * so a check that only reads where focus ended up passes even with the listener
+ * deleted. It is WebKit that reports a null `relatedTarget`, and WebKit is the
+ * one engine this path runs on.
+ */
+let hapticRestoreSource = '';
+
+function loadHapticsPreference() {
+  try {
+    // On by default, so what gets stored is the refusal. A browser that denies
+    // storage lands on the default rather than on silence.
+    return window.localStorage.getItem(hapticsStorageKey) !== 'off';
+  } catch {
+    return true;
+  }
+}
+
+function rememberHapticsPreference() {
+  try {
+    window.localStorage.setItem(
+      hapticsStorageKey,
+      hapticsEnabled ? 'on' : 'off'
+    );
+  } catch {
+    // Continue without persistence when browser storage is unavailable.
+  }
+}
+
+/** True when this build can actually reach the hardware. Gates the setting. */
+function hapticsAreSupported() {
+  return hapticsUseLabel || hapticsUseVibrate;
+}
+
+/**
+ * One rule for both paths, so the two platforms buzz on the same things.
+ *
+ * Placement only. Whether a control is disabled is not asked here: on the label
+ * path a button's `disabled` comes and goes long after the sweep ran, so
+ * app.css takes the pointer off the label instead, and the vibrate path checks
+ * it on the tap where the answer is current.
+ */
+function isHapticHost(element) {
+  return Boolean(
+    element &&
+      !element.closest('#terminal') &&
+      // The Files listing gives its rows role="option". A row is a container
+      // you tap to open something rather than a control, and it is built from
+      // spans, so there is nothing inside it to cover.
+      !element.closest('#files-list')
+  );
+}
+
+/**
+ * Where the parked switch has to live to be activatable.
+ *
+ * `showModal()` makes everything outside the dialog inert, and an inert control
+ * cannot be activated by a label — the toggle silently does not happen, so
+ * nothing buzzes inside a dialog. The switch therefore follows the topmost open
+ * modal, and comes back to <body> when it closes. The sweep runs on the same
+ * mutations that open and close one.
+ */
+function hapticSwitchHost() {
+  const dialogs = [...document.querySelectorAll('dialog[open]')].filter(
+    (dialog) => dialog.matches(':modal')
+  );
+  return dialogs.at(-1) || document.body;
+}
+
+/**
+ * The one switch every label points at.
+ *
+ * Parked at zero opacity and out of the pointer's reach. It is never tapped
+ * directly; it is activated through a label, and it exists only to be the thing
+ * that buzzes. Rendered rather than hidden: `display: none` and
+ * `visibility: hidden` both take a control out of the tree that would buzz it.
+ */
+function ensureParkedHapticSwitch() {
+  const host = hapticSwitchHost();
+  const existing = document.querySelector(`#${hapticSwitchId}`);
+  if (existing) {
+    if (existing.parentElement !== host) {
+      host.append(existing);
+    }
+    return existing;
+  }
+  const control = document.createElement('input');
+  control.type = 'checkbox';
+  // setAttribute, not a property: `switch` is not reflected as an IDL member,
+  // which is also why there is no clean way to feature-detect it and why this
+  // asks the user agent instead.
+  control.setAttribute('switch', '');
+  control.id = hapticSwitchId;
+  control.className = 'haptic-parked-switch';
+  control.tabIndex = -1;
+  control.setAttribute('aria-hidden', 'true');
+  host.append(control);
+  return control;
+}
+
+function attachHapticLabel(element) {
+  // The label, not the marker. `installAppButton.textContent = ...` replaces
+  // every child of a button it has already been given one, and the marker would
+  // survive that to say the work was done.
+  if (element.querySelector(':scope > .haptic-tap')) {
+    return;
+  }
+  // The label covers the host and sits above its content, so a host with
+  // something tappable inside would lose that control to the overlay. A button
+  // may not contain one and none here does, which makes this a guard against
+  // markup that does not exist yet rather than a case being handled.
+  if (element.querySelector('a[href], button, input, select, textarea')) {
+    return;
+  }
+  element.dataset.hapticHost = '1';
+  // A <label> inside a <button> is against the content model: label is
+  // interactive content, and a button may not contain any. It is deliberate.
+  // The alternative is a wrapper element around every button in the app so the
+  // label can be a sibling, which is a much larger change to the layout for a
+  // rule no engine enforces. Measured working on iOS 18.7 / Safari 27.0, and
+  // qa/haptics.js asserts the behaviour rather than the markup.
+  const label = document.createElement('label');
+  label.className = 'haptic-tap';
+  label.setAttribute('for', hapticSwitchId);
+  label.setAttribute('aria-hidden', 'true');
+  element.append(label);
+  // After the host's own handler, and inside any stopPropagation it does. See
+  // noteFocusAfterHapticClick.
+  element.addEventListener('click', noteFocusAfterHapticClick);
+}
+
+function detachHapticLabels() {
+  for (const label of document.querySelectorAll('.haptic-tap')) {
+    label.remove();
+  }
+  for (const host of document.querySelectorAll('[data-haptic-host]')) {
+    delete host.dataset.hapticHost;
+  }
+  document.querySelector(`#${hapticSwitchId}`)?.remove();
+}
+
+function sweepHapticTargets() {
+  hapticSweepHandle = 0;
+  if (!hapticsEnabled || !hapticsUseLabel) {
+    return;
+  }
+  ensureParkedHapticSwitch();
+  for (const element of document.querySelectorAll(hapticTargetSelector)) {
+    if (!isHapticHost(element)) {
+      continue;
+    }
+    attachHapticLabel(element);
+  }
+}
+
+/**
+ * One sweep per frame, however many nodes arrived.
+ *
+ * renderKeyPanel() replaces every tile on the page it rebuilds and the reorder
+ * drag rebuilds on every hold, so a per-record attach would run hundreds of
+ * times for one rebuild. A frame later, once, reaches the same state. The sweep
+ * also sees its own insertions; it is idempotent, so that settles in one extra
+ * frame instead of looping.
+ */
+function scheduleHapticSweep() {
+  if (hapticSweepHandle) {
+    return;
+  }
+  hapticSweepHandle = window.requestAnimationFrame(sweepHapticTargets);
+}
+
+/**
+ * Terminal output is not a reason to sweep, and it is most of the mutations.
+ *
+ * xterm's DOM renderer rewrites its rows as output arrives, so an observer on
+ * <body> wakes on every frame of a build log. The sweep it would schedule reads
+ * every button in the document to find nothing new. Filtering the records first
+ * is a few ancestor hops per batch against a whole-document query per frame,
+ * and the terminal has no buttons in it either way.
+ */
+function onHapticMutations(records) {
+  for (const record of records) {
+    if (!isHapticNoiseSource(record.target)) {
+      scheduleHapticSweep();
+      return;
+    }
+  }
+}
+
+/**
+ * The two places that mutate on every frame and never hold a button.
+ *
+ * #terminal is xterm's own rows. #scroll-position is the readout beside them,
+ * a sibling rather than a child, and showScrollPosition() writes its
+ * textContent on every scroll event — so scrolling the terminal was scheduling
+ * a whole-document sweep per frame, each one reading every button in the page
+ * to find nothing new.
+ */
+function isHapticNoiseSource(target) {
+  return Boolean(
+    target.closest?.('#terminal') || target.closest?.('#scroll-position')
+  );
+}
+
+function setHapticsEnabled(enabled) {
+  hapticsEnabled = enabled;
+  rememberHapticsPreference();
+  if (!hapticsUseLabel) {
+    return;
+  }
+  if (enabled) {
+    // Reconnected before the sweep, so nodes added between the two are seen.
+    hapticObserver?.observe(document.body, hapticObserverOptions);
+    scheduleHapticSweep();
+    return;
+  }
+  // Disconnected as well as detached. Left running it would wake on every
+  // rebuild for the rest of the session to decide it has nothing to do.
+  hapticObserver?.disconnect();
+  detachHapticLabels();
+}
+
+/**
+ * The tap gives focus to the parked switch, and this gives it straight back.
+ *
+ * Activating a control through its label focuses that control, and focus
+ * leaving the terminal's textarea on a phone closes the keyboard. So the switch
+ * is `tabindex=-1`, which keeps it out of the tab order and does nothing about
+ * a tap, and the focus the tap displaced is put back after.
+ *
+ * Focus is put back rather than the event being cancelled. preventDefault on
+ * the click is the usual way to stop a control being activated, and being
+ * activated is the buzz. This repairs after the fact instead, so nothing about
+ * the tap changes.
+ *
+ * Which focus gets put back is the whole difficulty. A label's activation
+ * behaviour runs *after* the click has finished bubbling, so the button's own
+ * handler has already run by then — and some of them move focus on purpose.
+ * #keyboard blurs the terminal to close the keyboard; #footer-find focuses the
+ * Find field it just opened. Restoring what was focused when the finger went
+ * down would undo both: hide-keyboard would become a no-op, and the Find field
+ * would lose focus the instant it got it.
+ *
+ * So the snapshot that matters is taken at the end of the click, once every
+ * handler has had its say and before the switch takes focus. The pointerdown
+ * snapshot stays as the fallback for a tap that somehow produces no click.
+ */
+function noteFocusBeforeHapticTap(event) {
+  if (event.target.classList?.contains('haptic-tap')) {
+    hapticFocusBeforeTap = document.activeElement;
+  }
+}
+
+/**
+ * On the button itself, and on the document as a backstop.
+ *
+ * The button's listener is what carries this: several of them call
+ * `stopPropagation()` — the key chips, the tiles, the snippets, the connection
+ * dot — so a document-level listener never hears their clicks at all. A second
+ * listener on the same element is not stopped by that; only
+ * `stopImmediatePropagation` would do it, and nothing here uses it.
+ *
+ * Order matters and comes out right by construction: the app registers a
+ * button's own click handler when it builds the button, and the sweep attaches
+ * this one a frame later, so the app's handler has already run when this fires.
+ * `document.activeElement` here is therefore where the tap meant to leave
+ * focus, which is what the restore should honour — including <body>, when a
+ * handler deliberately blurred something.
+ */
+function noteFocusAfterHapticClick(event) {
+  if (event.target.classList?.contains('haptic-tap')) {
+    hapticFocusAfterClick = document.activeElement;
+  }
+}
+
+function restoreFocusFromHapticSwitch(event) {
+  if (event.target.id !== hapticSwitchId) {
+    return;
+  }
+  // In order: where the click left focus, then WebKit's own answer, then where
+  // the finger started. `relatedTarget` is the obvious source and WebKit has
+  // shipped it as null on focusin more than once (webkit.org/b/254655,
+  // webkit.org/b/109176), which is why it is not the only one.
+  const previous =
+    hapticFocusAfterClick || event.relatedTarget || hapticFocusBeforeTap;
+  hapticRestoreSource = hapticFocusAfterClick
+    ? 'after-click'
+    : event.relatedTarget
+      ? 'related-target'
+      : hapticFocusBeforeTap
+        ? 'before-tap'
+        : 'none';
+  hapticFocusBeforeTap = null;
+  hapticFocusAfterClick = null;
+  if (
+    previous &&
+    previous !== event.target &&
+    previous !== document.body &&
+    previous.isConnected &&
+    typeof previous.focus === 'function'
+  ) {
+    previous.focus({ preventScroll: true });
+    return;
+  }
+  // Nothing to go back to, or the tap meant to leave focus on <body>. Blurring
+  // the switch is the honest end of both: what it must not do is hold focus.
+  event.target.blur();
+}
+
+function installHapticFeedback() {
+  if (hapticsUseLabel) {
+    document.addEventListener('pointerdown', noteFocusBeforeHapticTap, {
+      capture: true
+    });
+    document.addEventListener('click', noteFocusAfterHapticClick);
+    document.addEventListener('focusin', restoreFocusFromHapticSwitch);
+    hapticObserver = new MutationObserver(onHapticMutations);
+    // Built either way, so the setting can turn it on later, but not started
+    // for someone who already turned haptics off.
+    if (hapticsEnabled) {
+      hapticObserver.observe(document.body, hapticObserverOptions);
+      scheduleHapticSweep();
+    }
+    return;
+  }
+  if (!hapticsUseVibrate) {
+    return;
+  }
+  // `click`, not `pointerdown`. The iOS keyboard buzzes on the way down and
+  // pointerdown is the closer imitation, but pointerdown also fires at the
+  // start of every swipe — so a scroll that begins on a key would buzz, which
+  // is the stray press the label path was measured not to produce. A scroll
+  // suppresses the click, so this fires on taps and nothing else.
+  //
+  // Capture phase, so a handler that stops propagation still buzzes: the tap
+  // happened either way.
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (!hapticsEnabled || event.detail === 0) {
+        return;
+      }
+      const target = event.target.closest?.(hapticTargetSelector);
+      if (!isHapticHost(target) || target.disabled) {
+        return;
+      }
+      navigator.vibrate(hapticTickMs);
+    },
+    { capture: true }
+  );
 }
 
 function setKeyboardButtonState(visible) {
@@ -10102,9 +10627,7 @@ function updateInstallSettings() {
   installAppButton.textContent = deferredInstallPrompt
     ? 'Install web app'
     : 'Installation steps';
-  const appleTouchDevice =
-    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const appleTouchDevice = isAppleTouchDevice();
   installHelpElement.textContent = appleTouchDevice
     ? 'In Safari, tap Share, choose Add to Home Screen, keep Open as Web App enabled, then launch VPS from its Home Screen icon.'
     : deferredInstallPrompt
@@ -19271,7 +19794,8 @@ headerSummaryButton.addEventListener('click', () => {
   refreshSessions(false, true);
 });
 connectionDotElement.addEventListener('click', (event) => {
-  event.preventDefault();
+  // stopPropagation only: a cancelled click would cancel the haptic label's
+  // activation inside this button. See installChipLongPress.
   event.stopPropagation();
   // Inert while connected. It used to reconnect from any state, which meant a
   // stray tap on a healthy session tore down its socket and redrew for nothing.
@@ -19361,7 +19885,8 @@ pasteButton.addEventListener('pointercancel', () => {
   pasteHoldFired = false;
 });
 pasteButton.addEventListener('click', (event) => {
-  event.preventDefault();
+  // Not cancelled: see installChipLongPress. A cancelled click takes the haptic
+  // label's activation with it, and this button is one of the ones that buzzes.
   if (pasteHoldFired) {
     pasteHoldFired = false;
     return;
@@ -19537,6 +20062,9 @@ if (viewMode === 'files') {
   void ensureFilesRoots();
 }
 openControlChannel();
+// After setViewMode, so the first sweep sees the view that is actually on
+// screen. Everything built later arrives through the observer.
+installHapticFeedback();
 installAppButton.addEventListener('click', installWebApp);
 window.addEventListener('beforeinstallprompt', (event) => {
   event.preventDefault();
