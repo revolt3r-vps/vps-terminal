@@ -7034,7 +7034,9 @@ function preserveKeyboardState(event) {
  * Two things this deliberately does not do. It does not fire on the terminal
  * surface: every keystroke there already buzzes on the real keyboard, and the
  * grid is thousands of spans. It does not chain ticks for a pattern, because
- * iOS 26.5 plays the first segment of one and drops the rest.
+ * iOS 26.5 plays the first segment of one and drops the rest — which is also
+ * why there is no strength setting, only hapticKeySurfaces deciding how often
+ * the one tick there is gets played.
  */
 const hapticsStorageKey = 'vps-terminal-haptics';
 
@@ -7042,14 +7044,30 @@ const hapticsStorageKey = 'vps-terminal-haptics';
  * Buttons, and the listbox options that behave like buttons.
  *
  * The same set `button:active` in app.css already treats as pressable, so the
- * buzz and the press travel do not disagree about what a button is.
- *
- * `[role="option"]` is the command palette. The Files listing uses the same
- * role and is excluded in the sweep, because a file row is a container you tap
- * to open something rather than a control, and it is built from spans, so there
- * is nothing inside it to cover.
+ * buzz and the press travel do not disagree about what a button is. Which of
+ * them actually buzz is the narrower question hapticKeySurfaces answers.
  */
 const hapticTargetSelector = 'button, [role="option"]';
+
+/**
+ * The keys, and nothing else.
+ *
+ * iOS plays one fixed haptic for a switch and gives no way to soften it — the
+ * light, medium and heavy presets the libraries offer are multi-tick patterns,
+ * and iOS 26.5 plays only the first tick of one. So the only thing left to tune
+ * is how often it fires, and the answer is: on the things that send a
+ * keystroke, the way a keyboard buzzes, and on nothing else. Every button in
+ * the app buzzing was too much of it.
+ *
+ * The three surfaces that send a key: the bar, the drawer above it, and the
+ * Keys tab of the panel, whose tiles call activateShortcut() on a tap exactly
+ * as the chips do.
+ *
+ * This also settles two exclusions that used to be written out by hand. The
+ * terminal is not in here, and neither is the Files listing.
+ */
+const hapticKeySurfaces =
+  '#footer-pins, #footer-drawer, .key-panel-page[data-panel-page="keys"]';
 
 /** Short enough to read as a tick rather than a buzz. The iOS key click. */
 const hapticTickMs = 8;
@@ -7182,14 +7200,7 @@ function hapticsAreSupported() {
  * it on the tap where the answer is current.
  */
 function isHapticHost(element) {
-  return Boolean(
-    element &&
-      !element.closest('#terminal') &&
-      // The Files listing gives its rows role="option". A row is a container
-      // you tap to open something rather than a control, and it is built from
-      // spans, so there is nothing inside it to cover.
-      !element.closest('#files-list')
-  );
+  return Boolean(element?.closest(hapticKeySurfaces));
 }
 
 /**
