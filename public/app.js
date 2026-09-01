@@ -349,6 +349,9 @@ const nativeTapMaximumMilliseconds = 350;
 const nativeSelectionLongPressMilliseconds = 480;
 const headerAutoCollapseMilliseconds = 4000;
 const sessionRefreshMilliseconds = 30000;
+// While the picker is open the busy mark has to move at human pace, not once
+// every half minute. Closed, the 30s poll is enough: the icon is not on screen.
+const sessionBusyRefreshMilliseconds = 3000;
 const sessionLongPressMilliseconds = 500;
 const sessionLongPressMoveTolerance = 10;
 const filesEntryLongPressMilliseconds = 520;
@@ -1403,6 +1406,7 @@ let filesWritable = true;
 let filesListing = null;
 let filesActionTarget = null;
 let filesLoadPromise = null;
+let filesNavigationIsBookmark = false;
 let filesVisibleEntries = [];
 let filesSelectedIndex = -1;
 let filesSelectedName = '';
@@ -1780,6 +1784,30 @@ function headerPickerOpen() {
   return !appHeaderElement.classList.contains('collapsed');
 }
 
+let sessionPollTimer = null;
+let sessionPollGeneration = 0;
+
+function sessionPollMilliseconds() {
+  return headerPickerOpen()
+    ? sessionBusyRefreshMilliseconds
+    : sessionRefreshMilliseconds;
+}
+
+function scheduleSessionPoll() {
+  if (qaShellMode) {
+    return;
+  }
+  clearTimeout(sessionPollTimer);
+  const generation = ++sessionPollGeneration;
+  sessionPollTimer = window.setTimeout(() => {
+    void refreshSessions(false, true).finally(() => {
+      if (generation === sessionPollGeneration) {
+        scheduleSessionPoll();
+      }
+    });
+  }, sessionPollMilliseconds());
+}
+
 /**
  * The scrim only exists to take the dismissing tap away from the session, so
  * it appears exactly when the picker overlays a live terminal.
@@ -1816,6 +1844,10 @@ function setHeaderCollapsed(collapsed) {
   const hadFocusInside = headerExpandedElement?.contains(document.activeElement);
   appHeaderElement.classList.toggle('collapsed', collapsed);
   headerSummaryButton.setAttribute('aria-expanded', String(!collapsed));
+  scheduleSessionPoll();
+  if (!collapsed && !qaShellMode) {
+    void refreshSessions(false, true);
+  }
   if (collapsed) {
     // Hiding the picker must not leave focus on a display:none control. In
     // Files mode the summary is hidden too, so focus goes to the view switch.
@@ -7716,7 +7748,6 @@ function commandPaletteCommands() {
       keywords: 'sessions list picker',
       run: () => {
         setHeaderCollapsed(false);
-        refreshSessions(false, true);
       }
     },
     {
@@ -11738,6 +11769,7 @@ function clearFilesSelection() {
  */
 function beginFilesNavigation() {
   filesListing = null;
+  filesNavigationIsBookmark = false;
   refreshFilesUpButtonState();
 }
 
@@ -11866,7 +11898,7 @@ function currentFolderIsBookmarked() {
   );
 }
 
-function goToFilesLocation(root, path) {
+function goToFilesLocation(root, path, options = {}) {
   const target = gamesViewFilesTarget(root, path, gamesViewEnabled);
   closeFilesPreview({ restoreFocus: false });
   filesRootId = target.root;
@@ -11875,6 +11907,7 @@ function goToFilesLocation(root, path) {
   filesSelectedIndex = -1;
   filesRestoreSelectionName = '';
   beginFilesNavigation();
+  filesNavigationIsBookmark = options.bookmark === true;
   saveFilesNav();
   renderFilesRoots();
   void refreshFilesListing();
@@ -11957,7 +11990,7 @@ function renderFilesBookmarks() {
         name,
         filesDisplayPath(entry.root, entry.path),
         () => {
-          goToFilesLocation(entry.root, entry.path);
+          goToFilesLocation(entry.root, entry.path, { bookmark: true });
           closeFilesBookmarks();
         },
         () => {
@@ -12516,7 +12549,7 @@ function renderFilesRoots() {
       filesRootId === entry.root && (filesPath || '') === (entry.path || '')
     );
     button.addEventListener('click', () => {
-      goToFilesLocation(entry.root, entry.path);
+      goToFilesLocation(entry.root, entry.path, { bookmark: true });
     });
     filesRootsElement.append(button);
   }
@@ -12918,11 +12951,15 @@ async function refreshFilesListing() {
       while (true) {
         const wantedRoot = filesRootId;
         const wantedPath = filesPath || '';
+        const wantedIsBookmark = filesNavigationIsBookmark;
         try {
           const query = new URLSearchParams({
             root: wantedRoot,
             path: wantedPath
           });
+          if (wantedIsBookmark) {
+            query.set('closest', '1');
+          }
           const listing = await api(`/api/fs/list?${query.toString()}`);
           if (filesRootId !== wantedRoot || (filesPath || '') !== wantedPath) {
             if (retargets >= retargetLimit) {
@@ -12933,11 +12970,22 @@ async function refreshFilesListing() {
             triedRootFallback = false;
             continue;
           }
+          const bookmarkFallback =
+            wantedIsBookmark && listing.fallback === true;
+          filesNavigationIsBookmark = false;
           filesRootId = listing.root || filesRootId;
           filesPath = typeof listing.path === 'string' ? listing.path : '';
           saveFilesNav();
           renderFilesListing(listing);
-          if (listing.truncated) {
+          if (bookmarkFallback) {
+            const openedPath =
+              listing.displayPath || filesDisplayPath(filesRootId, filesPath);
+            const truncation = listing.truncated ? '. Folder truncated' : '';
+            setStatus(
+              `Bookmark not found. Opened ${openedPath}${truncation}`,
+              { sticky: true }
+            );
+          } else if (listing.truncated) {
             setStatus('Folder truncated (too many entries)');
           }
           break;
@@ -12953,15 +13001,21 @@ async function refreshFilesListing() {
             triedRootFallback = false;
             continue;
           }
-          // A remembered path may disappear between visits. Retry its root
-          // within the same guarded load so a second refresh cannot race it.
-          if (filesPath && !triedRootFallback) {
+          // Remembered paths predate nearest-folder bookmark lookup. Keep their
+          // bounded root fallback, while bookmark requests resolve in one call.
+          if (
+            !wantedIsBookmark &&
+            error.status === 404 &&
+            wantedPath &&
+            !triedRootFallback
+          ) {
             closeFilesPreview({ restoreFocus: false });
             filesPath = '';
             saveFilesNav();
             triedRootFallback = true;
             continue;
           }
+          filesNavigationIsBookmark = false;
           setStatus(error.message || 'Could not list files');
           if (filesListElement) {
             filesListElement.replaceChildren();
@@ -14460,9 +14514,65 @@ function sendGameFeedback() {
   setStatus(`Feedback sent to ${session?.game?.slug || target}`);
 }
 
+function sessionPickerSignature(rows) {
+  return `${gamesViewEnabled ? 'g' : 'n'}|${activeSession || ''}|${rows
+    .map((session) =>
+      [
+        session.name,
+        sessionRowLabel(session, gamesViewEnabled),
+        session.game?.slug || '',
+        session.game?.url || '',
+        session.game?.devUrl || '',
+        session.studio ? '1' : '0',
+        session.gameLab ? '1' : '0'
+      ].join('\x1f')
+    )
+    .join('\0')}`;
+}
+
+function sessionRowTitle(session) {
+  return (
+    `${session.windows} window(s), ${session.attached} client(s). ` +
+    'Long-press to rename.' +
+    (session.busy ? ' Working.' : '')
+  );
+}
+
+function sessionRowAriaLabel(session) {
+  const label = sessionRowLabel(session, gamesViewEnabled);
+  return session.busy ? `${label}, working` : label;
+}
+
+function applySessionBusy(item, session) {
+  const busy = Boolean(session.busy);
+  item.classList.toggle('session-busy', busy);
+  const button = item.querySelector('button.session');
+  if (button) {
+    button.title = sessionRowTitle(session);
+    button.setAttribute('aria-label', sessionRowAriaLabel(session));
+  }
+}
+
 function renderSessions() {
+  const rows = visibleSessions();
+  const signature = sessionPickerSignature(rows);
+  if (
+    sessionsElement.dataset.signature === signature &&
+    sessionsElement.children.length === rows.length
+  ) {
+    rows.forEach((session, index) => {
+      const item = sessionsElement.children[index];
+      if (item) {
+        applySessionBusy(item, session);
+      }
+    });
+    keyboardButton.disabled = !activeSession;
+    renderHeaderSummary();
+    return;
+  }
+  sessionsElement.dataset.signature = signature;
   sessionsElement.replaceChildren();
-  for (const session of visibleSessions()) {
+  for (const session of rows) {
     const item = document.createElement('div');
     item.className = 'session-item';
     const button = document.createElement('button');
@@ -14470,16 +14580,17 @@ function renderSessions() {
     const isActive = session.name === activeSession;
     item.classList.toggle('active', isActive);
     button.className = isActive ? 'session active' : 'session';
+    const busyMark = document.createElement('span');
+    busyMark.className = 'session-busy-mark';
+    busyMark.setAttribute('aria-hidden', 'true');
     const sessionName = document.createElement('span');
     sessionName.className = 'session-name';
     sessionName.textContent = sessionRowLabel(session, gamesViewEnabled);
-    button.append(sessionName);
-    button.title =
-      `${session.windows} window(s), ${session.attached} client(s). ` +
-      'Long-press to rename.';
+    button.append(busyMark, sessionName);
     button.addEventListener('click', () => connect(session.name));
     installSessionRenameLongPress(button, session.name);
     item.append(button);
+    applySessionBusy(item, session);
     // Games view swaps the row's actions for the one a player wants: open the
     // game. Rename and Delete are still reachable — the long-press renames, and
     // the Menu is where it always was.
@@ -19802,7 +19913,6 @@ headerSummaryButton.addEventListener('click', () => {
     return;
   }
   setHeaderCollapsed(false);
-  refreshSessions(false, true);
 });
 connectionDotElement.addEventListener('click', (event) => {
   // stopPropagation only: a cancelled click would cancel the haptic label's
@@ -20373,8 +20483,5 @@ window.setTimeout(() => {
 }, 400);
 if (!qaShellMode) {
   refreshSessions(true);
-  window.setInterval(
-    () => refreshSessions(false, true),
-    sessionRefreshMilliseconds
-  );
+  scheduleSessionPoll();
 }

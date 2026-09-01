@@ -156,6 +156,43 @@ async function resolveJailedPath(rootPath, relativePath, options = {}) {
   }
 }
 
+/**
+ * Resolve a directory, or the nearest existing directory above it.
+ *
+ * Only a missing entry or a file in the requested directory's place moves the
+ * search upward. Permission and jail failures still fail at the exact path.
+ */
+async function resolveClosestJailedDirectory(rootPath, relativePath) {
+  const requestedPath = normalizeRelativePath(relativePath);
+  let candidatePath = requestedPath;
+  while (true) {
+    try {
+      const resolved = await resolveJailedPath(rootPath, candidatePath, {
+        mustExist: true
+      });
+      if (resolved.stats.isDirectory()) {
+        return {
+          ...resolved,
+          fallback: candidatePath !== requestedPath
+        };
+      }
+      if (!candidatePath) {
+        const error = new Error('root is not a directory');
+        error.statusCode = 400;
+        throw error;
+      }
+    } catch (error) {
+      const canTryParent =
+        candidatePath &&
+        (error.statusCode === 404 || error.code === 'ENOTDIR');
+      if (!canTryParent) {
+        throw error;
+      }
+    }
+    candidatePath = parentRelativePath(candidatePath);
+  }
+}
+
 function parentRelativePath(relativePath) {
   const rel = normalizeRelativePath(relativePath);
   if (!rel) {
@@ -347,6 +384,7 @@ function toDisplayPath(displayPrefix, relativePath) {
 module.exports = {
   normalizeRelativePath,
   resolveJailedPath,
+  resolveClosestJailedDirectory,
   parentRelativePath,
   normalizeEntryName,
   createJailedDirectory,

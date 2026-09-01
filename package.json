@@ -1,6 +1,6 @@
 {
   "name": "vps-terminal",
-  "version": "1.30.1",
+  "version": "1.30.3",
   "private": false,
   "description": "Mobile-first tmux terminal PWA for a Linux host (reverse-proxy auth)",
   "license": "MIT",
@@ -38,6 +38,9 @@
     "THIRD_PARTY_NOTICES.md",
     "README.md"
   ],
+  "allowScripts": {
+    "node-pty@1.1.0": true
+  },
   "dependencies": {
     "@fontsource/jetbrains-mono": "5.3.0",
     "@xterm/addon-fit": "0.11.0",

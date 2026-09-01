@@ -1754,6 +1754,26 @@ button.active {
   white-space: nowrap;
 }
 
+.session-busy-mark {
+  flex: 0 0 10px;
+  width: 10px;
+  height: 10px;
+  border: 2px solid color-mix(in srgb, var(--muted) 50%, transparent);
+  border-right-color: var(--accent);
+  border-radius: 50%;
+  visibility: hidden;
+}
+
+.session-item.session-busy .session-busy-mark {
+  visibility: visible;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .session-item.session-busy .session-busy-mark {
+    animation: files-spin var(--duration-spin) linear infinite;
+  }
+}
+
 .session.active {
   border-color: transparent;
   background: transparent;

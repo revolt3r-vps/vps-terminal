@@ -17,6 +17,7 @@ const {
 const {
   normalizeRelativePath,
   resolveJailedPath,
+  resolveClosestJailedDirectory,
   parentRelativePath,
   createJailedDirectory,
   renameJailedEntry,
@@ -1158,11 +1159,13 @@ function isProbablyTextBuffer(buffer) {
   return weird / Math.max(sample.length, 1) < 0.05;
 }
 
-async function listFsDirectory(rootId, relativePath) {
+async function listFsDirectory(rootId, relativePath, options = {}) {
   const root = fsRootFromQuery(rootId);
-  const resolved = await resolveJailedPath(root.rootPath, relativePath, {
-    mustExist: true
-  });
+  const resolved = options.closest
+    ? await resolveClosestJailedDirectory(root.rootPath, relativePath)
+    : await resolveJailedPath(root.rootPath, relativePath, {
+        mustExist: true
+      });
   if (!resolved.stats.isDirectory()) {
     const error = new Error('not a directory');
     error.statusCode = 400;
@@ -1231,6 +1234,7 @@ async function listFsDirectory(rootId, relativePath) {
     displayPrefix: rootDisplayPrefix(root),
     parent: parentRelativePath(resolved.relativePath),
     writable: root.writable !== false,
+    fallback: resolved.fallback === true,
     truncated: dirents.length > maximumFsListEntries,
     entries
   };
@@ -1524,6 +1528,119 @@ function sanitizedPaneCommand(value) {
   return /^[A-Za-z0-9._-]+$/.test(base) ? base.toLowerCase() : null;
 }
 
+// A login shell sitting at a prompt is not work in progress.
+const idlePaneCommands = new Set([
+  'ash',
+  'bash',
+  'csh',
+  'dash',
+  'fish',
+  'ksh',
+  'mksh',
+  'sh',
+  'tcsh',
+  'zsh'
+]);
+// Busy means the pane is scrolling: tmux history grew, or the visible capture
+// gained body lines. Agent TUIs sit on the alternate screen, so history_size
+// stays 0 and only capture-pane sees new output. `window_activity` fires when
+// you attach, and a process-tree walk stays true while Grok/Copilot wait.
+const paneScrollState = new Map();
+
+function capturedPaneLines(stdout) {
+  if (typeof stdout !== 'string' || stdout.length === 0) {
+    return [];
+  }
+  const lines = stdout.split('\n').map((line) => line.trimEnd());
+  while (lines.length > 0 && lines[lines.length - 1] === '') {
+    lines.pop();
+  }
+  return lines;
+}
+
+function paneHasNewLines(previous, current) {
+  if (!Array.isArray(previous) || previous.length === 0) {
+    return false;
+  }
+  if (!Array.isArray(current) || current.length === 0) {
+    return false;
+  }
+  const sameLength = previous.length === current.length;
+  if (sameLength && previous.every((line, index) => line === current[index])) {
+    return false;
+  }
+  const lastRowOnly =
+    sameLength &&
+    previous.length > 0 &&
+    previous.slice(0, -1).every((line, index) => line === current[index]);
+  if (lastRowOnly) {
+    return false;
+  }
+  const previousSet = new Set(previous);
+  const added = current.filter(
+    (line) => line.length > 0 && !previousSet.has(line)
+  );
+  if (added.length === 0) {
+    return false;
+  }
+  const currentSet = new Set(current.filter((line) => line.length > 0));
+  const previousBody = previous.filter((line) => line.length > 0);
+  if (previousBody.length === 0) {
+    return true;
+  }
+  let overlap = 0;
+  for (const line of previousBody) {
+    if (currentSet.has(line)) {
+      overlap += 1;
+    }
+  }
+  // A full TUI paint shares almost none of the previous body.
+  return overlap / previousBody.length >= 0.3;
+}
+
+async function capturePaneLines(name) {
+  try {
+    const { stdout } = await execFileAsync(
+      'tmux',
+      ['capture-pane', '-t', `=${name}:`, '-p', '-J'],
+      { timeout: 2000, maxBuffer: 256 * 1024 }
+    );
+    return capturedPaneLines(stdout);
+  } catch {
+    return [];
+  }
+}
+
+function sessionIsBusy(command, historySize, previous, lines) {
+  if (!command || idlePaneCommands.has(command)) {
+    return false;
+  }
+  const previousHistory =
+    previous && Number.isFinite(previous.historySize)
+      ? previous.historySize
+      : null;
+  if (
+    Number.isFinite(historySize) &&
+    previousHistory !== null &&
+    historySize > previousHistory
+  ) {
+    return true;
+  }
+  return paneHasNewLines(previous && previous.lines, lines);
+}
+
+function rememberPaneScroll(name, historySize, lines, previous) {
+  const size = Number.isFinite(historySize) ? historySize : 0;
+  if (lines.length > 0 || !previous) {
+    paneScrollState.set(name, { historySize: size, lines });
+    return;
+  }
+  paneScrollState.set(name, {
+    historySize: size,
+    lines: previous.lines
+  });
+}
+
 /**
  * Directory names under the games root, which are the slugs.
  *
@@ -1634,13 +1751,16 @@ async function listSessions() {
         '-F',
         // pane_current_command resolves against the session's active pane, so the
         // footer rail gets the foreground command without a second tmux call.
+        // history_size and alternate_on sit before the paths so a pipe in a
+        // path cannot masquerade as a history count.
         '#{session_name}|#{session_windows}|#{session_attached}|' +
-          '#{pane_current_command}|#{session_path}|#{pane_current_path}'
+          '#{pane_current_command}|#{history_size}|#{alternate_on}|' +
+          '#{session_path}|#{pane_current_path}'
       ],
       { timeout: 3000, maxBuffer: 64 * 1024 }
     );
     const slugs = await readGameSlugs();
-    return stdout
+    const rows = stdout
       .trim()
       .split('\n')
       .filter(Boolean)
@@ -1648,23 +1768,50 @@ async function listSessions() {
         const fields = line.split('|');
         const [name, windows, attached, command] = fields;
         // A working directory may legally contain '|', which would shift every
-        // field after it. Six exactly means the split is trustworthy; anything
-        // else keeps the session and drops only the paths, so the name rule in
-        // gameForSession decides instead of a misread directory.
-        const trustPaths = fields.length === 6;
-        const session = {
+        // field after it. Eight exactly means the paths are trustworthy.
+        const trustPaths = fields.length === 8;
+        const historySize = fields.length >= 5 ? Number(fields[4]) : NaN;
+        return {
           name,
           windows: Number(windows),
           attached: Number(attached),
           command: sanitizedPaneCommand(command),
-          sessionPath: trustPaths ? fields[4] : null,
-          panePath: trustPaths ? fields[5] : null
+          historySize,
+          sessionPath: trustPaths ? fields[6] : null,
+          panePath: trustPaths ? fields[7] : null
         };
+      })
+      .filter((session) => validatedSessionName(session.name));
+    const seen = new Set();
+    const sessions = await Promise.all(
+      rows.map(async (session) => {
+        seen.add(session.name);
+        const previous = paneScrollState.get(session.name) || null;
+        const mayScroll =
+          Boolean(session.command) && !idlePaneCommands.has(session.command);
+        const lines = mayScroll ? await capturePaneLines(session.name) : [];
+        const busy = sessionIsBusy(
+          session.command,
+          session.historySize,
+          previous,
+          lines
+        );
+        if (mayScroll) {
+          rememberPaneScroll(
+            session.name,
+            session.historySize,
+            lines,
+            previous
+          );
+        } else {
+          paneScrollState.delete(session.name);
+        }
         return {
           name: session.name,
           windows: session.windows,
           attached: session.attached,
           command: session.command,
+          busy,
           game: gameForSession(session, slugs),
           // A game-studio interview. The server marks it, because the naming is
           // a server setting and the page must not carry a copy of the pattern.
@@ -1678,7 +1825,13 @@ async function listSessions() {
             sessionInGameStudio(session.panePath)
         };
       })
-      .filter((session) => validatedSessionName(session.name));
+    );
+    for (const name of [...paneScrollState.keys()]) {
+      if (!seen.has(name)) {
+        paneScrollState.delete(name);
+      }
+    }
+    return sessions;
   } catch (error) {
     if (error.code === 1) {
       return [];
@@ -2827,7 +2980,8 @@ const server = http.createServer(async (request, response) => {
     if (request.method === 'GET' && url.pathname === '/api/fs/list') {
       const listing = await listFsDirectory(
         url.searchParams.get('root'),
-        url.searchParams.get('path') || ''
+        url.searchParams.get('path') || '',
+        { closest: url.searchParams.get('closest') === '1' }
       );
       sendJson(response, 200, listing);
       return;
