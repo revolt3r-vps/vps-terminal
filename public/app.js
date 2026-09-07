@@ -58,6 +58,15 @@ const filesPreviewPane = document.querySelector('#files-preview-pane');
 const filesPreviewPaneTitle = document.querySelector('#files-preview-pane-title');
 const filesPreviewPaneBody = document.querySelector('#files-preview-pane-body');
 const filesPreviewPaneClose = document.querySelector('#files-preview-pane-close');
+const filesImageDialog = document.querySelector('#files-image-dialog');
+const filesImageTitle = document.querySelector('#files-image-title');
+const filesImageStage = document.querySelector('#files-image-stage');
+const filesImageView = document.querySelector('#files-image-view');
+const filesImageClose = document.querySelector('#files-image-close');
+const filesImageZoomOut = document.querySelector('#files-image-zoom-out');
+const filesImageZoomIn = document.querySelector('#files-image-zoom-in');
+const filesImageZoomLevel = document.querySelector('#files-image-zoom-level');
+const filesImageFit = document.querySelector('#files-image-fit');
 const filesHeaderNav = document.querySelector('#files-header-nav');
 const filesToolbarElement = document.querySelector('#files-toolbar');
 const filesUpNavButton = document.querySelector('#files-up-nav');
@@ -1413,6 +1422,7 @@ let filesSelectedName = '';
 let filesRestoreSelectionName = '';
 let filesRestoreSelectionIndex = -1;
 let filesPreviewTargetName = '';
+let filesPreviewImageTarget = null;
 let filesPreviewRequestedName = '';
 let filesPreviewRequestId = 0;
 let filesNameMode = '';
@@ -13159,6 +13169,7 @@ function closeFilesActions(options = {}) {
 
 function closeFilesPreview(options = {}) {
   filesPreviewRequestId += 1;
+  closeFilesImageViewer();
   clearFilesPreviewImage();
   filesPreviewTargetName = '';
   filesPreviewRequestedName = '';
@@ -13569,6 +13580,110 @@ const FILES_DELETE_FAILED_MESSAGE = 'Delete failed';
  */
 const previewableImagePattern = /\.(png|jpe?g|gif|webp|avif|bmp|ico)$/i;
 
+// Image viewer geometry: pure functions. Everything from here to the
+// end-of-block marker is free of DOM and browser globals, so `test/` can slice
+// it out of the shipped source and assert on it directly — the same way the
+// terminal-link block is tested.
+//
+// One state shape throughout. `scale` multiplies the *fitted* size, so 1 is the
+// whole picture on screen and there is no smaller useful value. `x` and `y` are
+// the pan offset in CSS pixels, applied after the scale and measured from the
+// stage's centre, which is where `transform-origin: center` leaves the image
+// when both are 0.
+const IMAGE_ZOOM_FIT = 1;
+const IMAGE_ZOOM_MAXIMUM = 8;
+// One press of the zoom buttons.
+const IMAGE_ZOOM_BUTTON_STEP = 1.6;
+// Where a double tap lands from the fitted view. 2.5x reads terminal text in a
+// phone screenshot, which is the picture this viewer exists for.
+const IMAGE_ZOOM_DOUBLE_TAP = 2.5;
+
+function clampImageZoomScale(scale) {
+  if (!Number.isFinite(scale)) {
+    return IMAGE_ZOOM_FIT;
+  }
+  return Math.min(Math.max(scale, IMAGE_ZOOM_FIT), IMAGE_ZOOM_MAXIMUM);
+}
+
+/**
+ * Pull the pan offsets back inside the picture.
+ *
+ * An axis with nothing hidden is pinned to 0, and one that overflows may move by
+ * half its overflow either way. Without this a flick parks the image off screen
+ * and the way back is not obvious.
+ */
+function clampImageZoomOffsets(state, viewport, fitted) {
+  const scale = clampImageZoomScale(state?.scale);
+  const overflow = (content, available) => {
+    if (!Number.isFinite(content) || !Number.isFinite(available)) {
+      return 0;
+    }
+    return Math.max(0, (content - available) / 2);
+  };
+  const limitX = overflow((fitted?.width || 0) * scale, viewport?.width);
+  const limitY = overflow((fitted?.height || 0) * scale, viewport?.height);
+  const pin = (value, limit) => {
+    if (!Number.isFinite(value)) {
+      return 0;
+    }
+    const pinned = Math.min(Math.max(value, -limit), limit);
+    // `-0` is what a negative offset clamped against a zero limit produces. It
+    // renders the same, but it is not 0, and a state that compares unequal to a
+    // fresh one is a trap for anything that checks whether the view moved.
+    return pinned === 0 ? 0 : pinned;
+  };
+  return { scale, x: pin(state?.x, limitX), y: pin(state?.y, limitY) };
+}
+
+/**
+ * Change the scale with one stage point held still.
+ *
+ * `point` is measured from the stage's top-left corner, which is what a pointer
+ * event gives once the stage's own rect is subtracted. Scaling about the centre
+ * instead slides whatever was being examined off screen, which is why a pinch
+ * implemented as scale alone feels broken.
+ */
+function imageZoomAt(state, point, nextScale, viewport, fitted) {
+  const current = clampImageZoomScale(state?.scale);
+  const scale = clampImageZoomScale(nextScale);
+  const ratio = current > 0 ? scale / current : 1;
+  const centerX = (viewport?.width || 0) / 2;
+  const centerY = (viewport?.height || 0) / 2;
+  const anchorX = Number.isFinite(point?.x) ? point.x : centerX;
+  const anchorY = Number.isFinite(point?.y) ? point.y : centerY;
+  return clampImageZoomOffsets(
+    {
+      scale,
+      x: (state?.x || 0) * ratio + (anchorX - centerX) * (1 - ratio),
+      y: (state?.y || 0) * ratio + (anchorY - centerY) * (1 - ratio)
+    },
+    viewport,
+    fitted
+  );
+}
+
+function imageZoomPanned(state, deltaX, deltaY, viewport, fitted) {
+  return clampImageZoomOffsets(
+    {
+      scale: state?.scale,
+      x: (state?.x || 0) + (Number.isFinite(deltaX) ? deltaX : 0),
+      y: (state?.y || 0) + (Number.isFinite(deltaY) ? deltaY : 0)
+    },
+    viewport,
+    fitted
+  );
+}
+
+function imageZoomFitted(scale) {
+  return clampImageZoomScale(scale) <= IMAGE_ZOOM_FIT;
+}
+
+function imageZoomLabel(scale) {
+  return `${Math.round(clampImageZoomScale(scale) * 100)}%`;
+}
+
+// End of the pure image zoom block.
+
 function showFilesPreviewImage(target) {
   const query = new URLSearchParams({
     root: target.root,
@@ -13576,11 +13691,15 @@ function showFilesPreviewImage(target) {
     inline: '1'
   });
   const source = `/api/fs/download?${query.toString()}`;
+  // Kept so the full-screen viewer opens the same bytes without asking the
+  // server again, and so a click on the preview knows what it is a preview of.
+  filesPreviewImageTarget = { name: target.name, source };
   for (const image of [filesPreviewImage, filesPreviewPaneImage]) {
     if (image) {
       image.src = source;
       image.alt = target.name;
       image.hidden = false;
+      image.setAttribute('aria-label', `Open ${target.name} full screen`);
     }
   }
   for (const body of [filesPreviewBody, filesPreviewPaneBody]) {
@@ -13592,9 +13711,11 @@ function showFilesPreviewImage(target) {
 }
 
 function clearFilesPreviewImage() {
+  filesPreviewImageTarget = null;
   for (const image of [filesPreviewImage, filesPreviewPaneImage]) {
     if (image) {
       image.hidden = true;
+      image.removeAttribute('aria-label');
       // Dropped, not just hidden, so a closed preview stops holding the bytes.
       image.removeAttribute('src');
     }
@@ -13604,6 +13725,313 @@ function clearFilesPreviewImage() {
       body.hidden = false;
     }
   }
+}
+
+// Full-screen image viewer. The inline preview answers "which file is this";
+// nothing smaller than the screen answers "what does it say". A screenshot of a
+// phone terminal is the case that forced it — fitted into the preview pane, its
+// text is unreadable.
+let filesImageZoom = { scale: IMAGE_ZOOM_FIT, x: 0, y: 0 };
+// Live pointers on the stage, by pointerId. Two of them are a pinch; one is a
+// drag. Each entry keeps where it started, so a drag is not mistaken for a tap.
+const filesImagePointers = new Map();
+let filesImagePinchSpread = 0;
+// Set as soon as a second finger lands, cleared when the last one leaves. The
+// finger that ends a pinch often has not moved, so without this a quick pinch
+// counted as a tap and two of them fired the double-tap zoom toggle.
+let filesImageGestureWasPinch = false;
+let filesImageTapTime = 0;
+let filesImageTapPoint = null;
+// Two taps closer together than this, and near enough to each other, are one
+// gesture. 320ms is the usual double-tap window.
+const FILES_IMAGE_DOUBLE_TAP_MS = 320;
+const FILES_IMAGE_TAP_SLOP = 14;
+
+/**
+ * Stage size, and the image's fitted size.
+ *
+ * `offsetWidth` is the layout size, which a CSS transform does not change — so
+ * it stays the fitted size however far the picture is zoomed, which is exactly
+ * what the geometry needs.
+ */
+function filesImageMetrics() {
+  return {
+    viewport: {
+      width: filesImageStage?.clientWidth || 0,
+      height: filesImageStage?.clientHeight || 0
+    },
+    fitted: {
+      width: filesImageView?.offsetWidth || 0,
+      height: filesImageView?.offsetHeight || 0
+    }
+  };
+}
+
+function applyFilesImageZoom() {
+  const { scale, x, y } = filesImageZoom;
+  if (filesImageView) {
+    filesImageView.style.transform =
+      `translate(${Math.round(x)}px, ${Math.round(y)}px) scale(${scale})`;
+  }
+  if (filesImageZoomLevel) {
+    // Only on a real change. The label is an `aria-live` region, and a drag calls
+    // this on every pointer frame with the scale unchanged. Chromium coalesces an
+    // identical `textContent` write itself — measured with a MutationObserver, a
+    // two-move drag produces no records either way — so this guard is for the
+    // engines that do not, and there is deliberately no check for it: one would
+    // pass with the guard deleted.
+    const label = imageZoomLabel(scale);
+    if (filesImageZoomLevel.textContent !== label) {
+      filesImageZoomLevel.textContent = label;
+    }
+  }
+  const fitted = imageZoomFitted(scale);
+  // Drives the grab cursor, and tells CSS whether a drag can pan.
+  filesImageStage?.classList.toggle('is-zoomed', !fitted);
+  setFilesImageControlDisabled(filesImageZoomOut, fitted);
+  setFilesImageControlDisabled(filesImageFit, fitted);
+  setFilesImageControlDisabled(
+    filesImageZoomIn,
+    scale >= IMAGE_ZOOM_MAXIMUM
+  );
+}
+
+/**
+ * Disable a zoom control without losing the keyboard's place.
+ *
+ * A browser blurs an element the moment it is disabled, and focus then lands on
+ * `<body>` — outside the dialog, so the next Tab starts the modal over and a
+ * screen reader loses where it was. Pressing Enter on Fit disables Fit, which
+ * made that the ordinary case rather than an edge one. The two ends of the range
+ * are mutually exclusive, so the other control is always live: Zoom in at the
+ * fitted end, Fit at the far end.
+ */
+function setFilesImageControlDisabled(control, disabled) {
+  if (!control || control.disabled === disabled) {
+    return;
+  }
+  if (disabled && document.activeElement === control) {
+    const successor = control === filesImageZoomIn ? filesImageFit : filesImageZoomIn;
+    successor?.focus({ preventScroll: true });
+  }
+  control.disabled = disabled;
+}
+
+function setFilesImageZoom(next) {
+  filesImageZoom = next;
+  applyFilesImageZoom();
+}
+
+function fitFilesImage() {
+  setFilesImageZoom({ scale: IMAGE_ZOOM_FIT, x: 0, y: 0 });
+}
+
+function zoomFilesImageTo(scale, point) {
+  const { viewport, fitted } = filesImageMetrics();
+  setFilesImageZoom(imageZoomAt(filesImageZoom, point, scale, viewport, fitted));
+}
+
+function zoomFilesImageBy(factor, point) {
+  zoomFilesImageTo(filesImageZoom.scale * factor, point);
+}
+
+function toggleFilesImageZoom(point) {
+  if (imageZoomFitted(filesImageZoom.scale)) {
+    zoomFilesImageTo(IMAGE_ZOOM_DOUBLE_TAP, point);
+    return;
+  }
+  fitFilesImage();
+}
+
+/** Re-clamp after the stage changes size, so a rotation cannot leave a gap. */
+function reclampFilesImageZoom() {
+  if (!filesImageDialog?.open) {
+    return;
+  }
+  const { viewport, fitted } = filesImageMetrics();
+  setFilesImageZoom(clampImageZoomOffsets(filesImageZoom, viewport, fitted));
+}
+
+/** Stage-relative coordinates for a pointer or wheel event. */
+function filesImageEventPoint(event) {
+  const rect = filesImageStage?.getBoundingClientRect();
+  if (!rect) {
+    return null;
+  }
+  return { x: event.clientX - rect.left, y: event.clientY - rect.top };
+}
+
+function openFilesImageViewer(target) {
+  if (!filesImageDialog || !filesImageView || !target?.source) {
+    return;
+  }
+  if (filesImageTitle) {
+    filesImageTitle.textContent = target.name || 'Image';
+  }
+  filesImageView.alt = target.name || '';
+  if (filesImageView.getAttribute('src') !== target.source) {
+    filesImageView.src = target.source;
+  }
+  fitFilesImage();
+  if (!filesImageDialog.open) {
+    filesImageDialog.showModal();
+  }
+}
+
+function closeFilesImageViewer() {
+  filesImagePointers.clear();
+  filesImagePinchSpread = 0;
+  filesImageGestureWasPinch = false;
+  filesImageTapTime = 0;
+  filesImageTapPoint = null;
+  if (filesImageDialog?.open) {
+    filesImageDialog.close();
+  }
+  // Dropped rather than hidden, so a closed viewer stops holding the bytes.
+  filesImageView?.removeAttribute('src');
+  fitFilesImage();
+}
+
+function openFilesPreviewImageViewer() {
+  if (filesPreviewImageTarget) {
+    openFilesImageViewer(filesPreviewImageTarget);
+  }
+}
+
+function filesImagePointerSpread() {
+  const [first, second] = [...filesImagePointers.values()];
+  if (!first || !second) {
+    return 0;
+  }
+  return Math.hypot(second.x - first.x, second.y - first.y);
+}
+
+function filesImagePointerMidpoint() {
+  const [first, second] = [...filesImagePointers.values()];
+  if (!first || !second) {
+    return null;
+  }
+  return { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+}
+
+function handleFilesImagePointerDown(event) {
+  const point = filesImageEventPoint(event);
+  if (!point) {
+    return;
+  }
+  // Captured so a drag that leaves the stage — or the image's own edge — keeps
+  // arriving here instead of stopping mid-pan.
+  try {
+    filesImageStage?.setPointerCapture?.(event.pointerId);
+  } catch {
+    // Refused only for a pointerId that is not an active pointer, which in
+    // practice means a synthetic event — the QA suite's own pinch and drag. The
+    // gesture is still tracked, because refusing to track it is what would make
+    // that layer untestable. A pointer that never sends its pointerup does hold
+    // an entry, and `closeFilesImageViewer` clears the map, so the cost is
+    // bounded by this dialog's lifetime.
+  }
+  filesImagePointers.set(event.pointerId, {
+    ...point,
+    originX: point.x,
+    originY: point.y
+  });
+  if (filesImagePointers.size === 2) {
+    filesImagePinchSpread = filesImagePointerSpread();
+    filesImageGestureWasPinch = true;
+  }
+}
+
+function handleFilesImagePointerMove(event) {
+  const previous = filesImagePointers.get(event.pointerId);
+  const point = filesImageEventPoint(event);
+  if (!previous || !point) {
+    return;
+  }
+  filesImagePointers.set(event.pointerId, { ...previous, ...point });
+  if (filesImagePointers.size >= 2) {
+    const spread = filesImagePointerSpread();
+    // Ratio against the last frame, not against the gesture's start: no base
+    // state to hold, and the clamp at either end cannot then strand the pinch.
+    if (filesImagePinchSpread > 0 && spread > 0) {
+      zoomFilesImageBy(spread / filesImagePinchSpread, filesImagePointerMidpoint());
+    }
+    filesImagePinchSpread = spread;
+    return;
+  }
+  const { viewport, fitted } = filesImageMetrics();
+  setFilesImageZoom(
+    imageZoomPanned(
+      filesImageZoom,
+      point.x - previous.x,
+      point.y - previous.y,
+      viewport,
+      fitted
+    )
+  );
+}
+
+function handleFilesImagePointerUp(event) {
+  const tracked = filesImagePointers.get(event.pointerId);
+  filesImagePointers.delete(event.pointerId);
+  if (filesImageStage?.hasPointerCapture?.(event.pointerId)) {
+    filesImageStage.releasePointerCapture(event.pointerId);
+  }
+  if (filesImagePointers.size < 2) {
+    filesImagePinchSpread = 0;
+  }
+  if (filesImagePointers.size > 0) {
+    // Still mid-gesture. The first finger of a pinch coming off is not a tap.
+    return;
+  }
+  // The gesture is over however it ended, so the pinch flag is read and dropped
+  // here rather than behind the pointerup check below: a cancelled pinch that
+  // kept the flag would eat the next real tap.
+  const wasPinch = filesImageGestureWasPinch;
+  filesImageGestureWasPinch = false;
+  // Anything but a still, uncancelled, single-finger release ends the gesture
+  // without offering a tap.
+  const notATap =
+    wasPinch ||
+    event.type !== 'pointerup' ||
+    !tracked ||
+    Math.hypot(tracked.x - tracked.originX, tracked.y - tracked.originY) >
+      FILES_IMAGE_TAP_SLOP;
+  handleFilesImageTap(
+    tracked ? { x: tracked.x, y: tracked.y } : null,
+    notATap,
+    event.timeStamp
+  );
+}
+
+/** Double tap toggles between fitted and a readable zoom at the tapped point. */
+function handleFilesImageTap(point, moved, when) {
+  if (moved || !point) {
+    filesImageTapTime = 0;
+    filesImageTapPoint = null;
+    return;
+  }
+  const second =
+    filesImageTapPoint &&
+    when - filesImageTapTime < FILES_IMAGE_DOUBLE_TAP_MS &&
+    Math.hypot(point.x - filesImageTapPoint.x, point.y - filesImageTapPoint.y) <
+      FILES_IMAGE_TAP_SLOP * 3;
+  filesImageTapTime = second ? 0 : when;
+  filesImageTapPoint = second ? null : point;
+  if (second) {
+    toggleFilesImageZoom(point);
+  }
+}
+
+function handleFilesImageWheel(event) {
+  if (!filesImageDialog?.open) {
+    return;
+  }
+  // The stage has nothing to scroll, so the wheel is the zoom. A trackpad pinch
+  // arrives as ctrl+wheel and a mouse wheel does not; both mean the same thing
+  // here, so only the sign is read.
+  event.preventDefault();
+  zoomFilesImageBy(event.deltaY < 0 ? 1.15 : 1 / 1.15, filesImageEventPoint(event));
 }
 
 async function previewFilesTarget(target) {
@@ -17126,6 +17554,21 @@ async function renameSession(name) {
 // diagnostics, so a wrong link that navigates somewhere unexpected is worse
 // than a path left as plain text.
 const terminalLinkUrlPattern = /https?:\/\/[^\s"'`<>]+/g;
+// `file:///home/dev/notes.md` names the same file as `/home/dev/notes.md`, and
+// every agent CLI on this host prints the scheme form when it reports an image
+// it just wrote. It is collected as a path, not a URL: there is no page to open
+// in a tab, and the Files view is the destination.
+//
+// The host part must be empty or `localhost`. Anything else names another
+// machine, whose paths this app cannot reach. A `?` or `#` ends the path,
+// because in a URL both are delimiters and a filename containing either arrives
+// percent-escaped.
+//
+// The same word guard as the path pattern below, not `\b`: `\b` sits happily
+// between the `-` and the `f` of `x-file:///etc/hosts`, so a longer token ending
+// in `file` would have matched from the middle.
+const terminalLinkFileUrlPattern =
+  /(?<![A-Za-z0-9._~-])file:\/\/(?:localhost)?\/[^\s"'`<>?#]+/gi;
 // How far a link may be followed across rows that carry no wrap flag. xterm
 // asks for links per row while hovering, so an unbounded walk would re-read the
 // scrollback on every mouse move. A login URL is a few rows; this is far more.
@@ -17172,6 +17615,26 @@ function trimTerminalLinkDelimiters(value) {
   return output;
 }
 
+/**
+ * The path a `file://` URL names, or undefined for anything else.
+ *
+ * Percent-decoded, because a space in a filename reaches the terminal as `%20`
+ * and `/api/fs/resolve` wants the real name. A malformed escape throws, and the
+ * undecoded path is then a better guess than refusing the click: a producer that
+ * printed a bare `%` meant it literally.
+ */
+function terminalLinkPathFromFileUrl(value) {
+  const match = /^file:\/\/(?:localhost)?(\/[^\s]*)$/i.exec(String(value || ''));
+  if (!match) {
+    return undefined;
+  }
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return match[1];
+  }
+}
+
 function terminalLinkRangesOverlap(first, second) {
   return first.start < second.end && second.start < first.end;
 }
@@ -17201,10 +17664,11 @@ function collectTerminalLinkMatches(line, kind, pattern, existing) {
       continue;
     }
     // A sigil path must not continue a word, or `Proceed? y/n` yields `/n`,
-    // `and/or` yields `/or`, and `1/10` yields `/10`. Done here rather than with a
-    // RegExp lookbehind: iOS Safari below 16.4 cannot parse one, and that fails
-    // the whole file rather than degrading. Bare matches need no such check —
-    // their first character class already starts them at a word boundary.
+    // `and/or` yields `/or`, and `1/10` yields `/10`. `terminalLinkPathPattern`
+    // carries the same rule as a lookbehind and reaches these cases first, so
+    // this repeats it for any pattern routed through here without one. Bare
+    // matches need no such check — their first character class already starts
+    // them at a word boundary.
     if (
       kind === 'path' &&
       start > 0 &&
@@ -17226,19 +17690,33 @@ function collectTerminalLinkMatches(line, kind, pattern, existing) {
 }
 
 function extractTerminalLinks(line) {
+  // http URLs are collected first, because one can carry a `file://` inside it:
+  // `https://host/?u=file:///etc/passwd` is one link to a web page, not a link
+  // to a local file. Whichever pattern runs first keeps the range.
   const urlMatches = collectTerminalLinkMatches(
     line,
     'url',
     terminalLinkUrlPattern,
     []
   );
+  // Then file URLs, ahead of the path pattern: that one would otherwise match
+  // `///home/dev` inside one and its `//` guard would drop the whole thing as
+  // some other scheme's tail.
+  const fileMatches = collectTerminalLinkMatches(
+    line,
+    'path',
+    terminalLinkFileUrlPattern,
+    urlMatches
+  );
   const pathMatches = collectTerminalLinkMatches(
     line,
     'path',
     terminalLinkPathPattern,
-    urlMatches
+    [...urlMatches, ...fileMatches]
   );
-  return [...urlMatches, ...pathMatches].sort((a, b) => a.start - b.start);
+  return [...urlMatches, ...fileMatches, ...pathMatches].sort(
+    (a, b) => a.start - b.start
+  );
 }
 
 // `app.js:12:34`, `app.js:12`, or neither. A single trailing number is a line,
@@ -17925,7 +18403,9 @@ const TERMINAL_PATH_LINK_UNRESOLVED_MESSAGE = 'That path is not available in Fil
  * arbitrary text.
  */
 async function openTerminalPathLink(rawPath) {
-  const { path: pathText, line } = splitTerminalLinkPosition(rawPath);
+  const { path: pathText, line } = splitTerminalLinkPosition(
+    terminalLinkPathFromFileUrl(rawPath) ?? rawPath
+  );
   const query = new URLSearchParams({ path: pathText });
   if (activeSession) {
     query.set('session', activeSession);
@@ -18015,7 +18495,11 @@ function activateTerminalLink(event, text, kind = 'url') {
   if (!terminalLinkModifierActive(event)) {
     return;
   }
-  if (kind === 'path') {
+  // Scheme, not just kind. A `file://` target is a path however the caller
+  // labelled it, and the URL opener refuses it in silence. xterm's OSC 8 handler
+  // labels every target `url` and blocks non-http schemes itself, so nothing
+  // reaches this today — it holds if that option ever changes.
+  if (kind === 'path' || terminalLinkPathFromFileUrl(text)) {
     void openTerminalPathLink(text);
     return;
   }
@@ -19828,6 +20312,50 @@ filesPreviewClose?.addEventListener('click', () => {
 filesPreviewPaneClose?.addEventListener('click', () => {
   closeFilesPreview();
 });
+// The preview picture is the way into the viewer. It stays an `<img>` with a
+// button role rather than becoming a wrapped button, so the show/hide path that
+// drops its `src` is untouched.
+for (const image of [filesPreviewImage, filesPreviewPaneImage]) {
+  image?.addEventListener('click', () => {
+    openFilesPreviewImageViewer();
+  });
+  image?.addEventListener('keydown', (event) => {
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    event.preventDefault();
+    openFilesPreviewImageViewer();
+  });
+}
+filesImageClose?.addEventListener('click', () => {
+  closeFilesImageViewer();
+});
+filesImageDialog?.addEventListener('cancel', (event) => {
+  event.preventDefault();
+  closeFilesImageViewer();
+});
+filesImageZoomIn?.addEventListener('click', () => {
+  zoomFilesImageBy(IMAGE_ZOOM_BUTTON_STEP);
+});
+filesImageZoomOut?.addEventListener('click', () => {
+  zoomFilesImageBy(1 / IMAGE_ZOOM_BUTTON_STEP);
+});
+filesImageFit?.addEventListener('click', () => {
+  fitFilesImage();
+});
+// New bytes are a new fitted size, so the zoom starts over.
+filesImageView?.addEventListener('load', () => {
+  fitFilesImage();
+});
+filesImageStage?.addEventListener('pointerdown', handleFilesImagePointerDown);
+filesImageStage?.addEventListener('pointermove', handleFilesImagePointerMove);
+filesImageStage?.addEventListener('pointerup', handleFilesImagePointerUp);
+filesImageStage?.addEventListener('pointercancel', handleFilesImagePointerUp);
+// Not passive: the wheel is the zoom here, and the page must not scroll instead.
+filesImageStage?.addEventListener('wheel', handleFilesImageWheel, {
+  passive: false
+});
+window.addEventListener('resize', reclampFilesImageZoom);
 filesNameClose?.addEventListener('click', () => {
   closeFilesNameDialog();
 });

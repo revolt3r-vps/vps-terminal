@@ -104,6 +104,10 @@ See [docs/auth-google.md](docs/auth-google.md) and
 - Hardware keyboard support when focus is on chrome
 - Files workspace with jailed Locations, preview, rename, new folders, and
   folder-scoped Terminal/Codex/Grok/Claude session launch
+- Full-screen image viewer: tap a picture in the preview to fill the screen,
+  then pinch, drag, double-tap or use the zoom buttons
+- Paths and URLs printed in the terminal are links. A path opens in Files, and
+  `file:///home/dev/shot.png` counts as a path
 - `vps-terminal-focus <session>`: a host command that moves the open browser
   tab to a tmux session, over a one-way control channel
 - GameLab Mode: an optional per-login setting on its own GameLab tab. It lists

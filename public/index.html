@@ -322,7 +322,14 @@
                 ×
               </button>
             </div>
-            <img id="files-preview-pane-image" alt="" hidden>
+            <img
+              id="files-preview-pane-image"
+              class="files-preview-zoomable"
+              alt=""
+              role="button"
+              tabindex="0"
+              hidden
+            >
           <pre id="files-preview-pane-body"></pre>
           </aside>
         </div>
@@ -351,8 +358,54 @@
           <strong id="files-preview-title">Preview</strong>
           <button id="files-preview-close" class="icon-button" type="button" title="Close">×</button>
         </div>
-        <img id="files-preview-image" alt="" hidden>
+        <img
+          id="files-preview-image"
+          class="files-preview-zoomable"
+          alt=""
+          role="button"
+          tabindex="0"
+          hidden
+        >
         <pre id="files-preview-body"></pre>
+      </dialog>
+      <dialog id="files-image-dialog" aria-label="Image viewer">
+        <div class="files-image-bar">
+          <strong id="files-image-title">Image</strong>
+          <button
+            id="files-image-close"
+            class="icon-button"
+            type="button"
+            title="Close"
+            aria-label="Close image"
+          >
+            ×
+          </button>
+        </div>
+        <div id="files-image-stage">
+          <img id="files-image-view" alt="" draggable="false">
+        </div>
+        <div class="files-image-controls">
+          <button
+            id="files-image-zoom-out"
+            class="icon-button"
+            type="button"
+            title="Zoom out"
+            aria-label="Zoom out"
+          >
+            &#8722;
+          </button>
+          <span id="files-image-zoom-level" aria-live="polite">100%</span>
+          <button
+            id="files-image-zoom-in"
+            class="icon-button"
+            type="button"
+            title="Zoom in"
+            aria-label="Zoom in"
+          >
+            +
+          </button>
+          <button id="files-image-fit" type="button">Fit</button>
+        </div>
       </dialog>
       <dialog
         id="files-session-dialog"

@@ -404,6 +404,12 @@ const sessionLauncherCommands = Object.freeze({
 });
 const sessionLoginShell = process.env.SHELL || '/bin/bash';
 const sessionBrowserOpener = process.env.BROWSER || '';
+// Claude Code 2.1.193+ can reap a background Bash task after a transient Linux
+// memory-pressure event. A foreground command moved to the background after ten
+// minutes then loses its exit status and review marker. Keep that userspace
+// reaper off; kernel OOM and cgroup limits still apply.
+const claudeBackgroundPressureReapOptOut =
+  'CLAUDE_CODE_DISABLE_BG_SHELL_PRESSURE_REAP=1';
 const authenticatedEmailPattern = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 // The game studio: the directory the `new-game` skill lives in, and how the
 // sessions the Settings button starts are named. Both have defaults, so an
@@ -2034,9 +2040,7 @@ function nextStudioSessionName(taken) {
  */
 async function openStudioSession(command, email) {
   const pane = studioPaneCommand(command);
-  const environment = sessionBrowserOpener
-    ? ['-e', `BROWSER=${sessionBrowserOpener}`]
-    : [];
+  const environment = sessionEnvironmentArguments();
   let taken = (await readSessionStates()).map((session) => session.name);
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const name = nextStudioSessionName(taken);
@@ -2131,6 +2135,14 @@ async function sessionWorkingDirectory(rootId, relativePath) {
 
 function shellQuote(value) {
   return `'${String(value).replace(/'/g, "'\\''")}'`;
+}
+
+function sessionEnvironmentArguments() {
+  const args = ['-e', claudeBackgroundPressureReapOptOut];
+  if (sessionBrowserOpener) {
+    args.push('-e', `BROWSER=${sessionBrowserOpener}`);
+  }
+  return args;
 }
 
 // tmux runs a pane command with no shell around it, so an agent CLI launched
@@ -2321,12 +2333,8 @@ async function createSession(name, options = {}) {
     options.path
   );
   const args = ['new-session', '-d', '-s', name, '-c', workingDirectory];
-  // Web links from an agent CLI belong in the streamed browser workspace. The
-  // shell startup file that exports this only runs for interactive shells, so
-  // pass it to tmux directly rather than hoping the pane inherits it.
-  if (sessionBrowserOpener) {
-    args.push('-e', `BROWSER=${sessionBrowserOpener}`);
-  }
+  // Shell startup files are not a reliable source for session-wide variables.
+  args.push(...sessionEnvironmentArguments());
   const command = await resolvedSessionLauncherCommand(launcher);
   if (command) {
     args.push(sessionPaneCommand(command));
