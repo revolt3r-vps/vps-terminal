@@ -17806,9 +17806,14 @@ function terminalRowFillsWidth(line) {
  *
  * Read from the last space, so it sees the token being written rather than the
  * whole line.
+ *
+ * `file://` counts, and for the same reason http does. An agent CLI draws its
+ * own rows, so the path of an image it just wrote arrives with no wrap flag and
+ * one row is a fragment. Those paths are long — a generated-image name runs past
+ * 120 characters — so on a phone this is the ordinary case, not the rare one.
  */
 function terminalTailOpensUrl(text) {
-  return /^https?:\/\/\S+$/i.test(text.slice(text.lastIndexOf(' ') + 1));
+  return /^(?:https?|file):\/\/\S+$/i.test(text.slice(text.lastIndexOf(' ') + 1));
 }
 
 /**
