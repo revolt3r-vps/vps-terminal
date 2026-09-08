@@ -1873,6 +1873,10 @@ function setHeaderCollapsed(collapsed) {
     scheduleHeaderCollapse();
   }
   syncPickerScrim();
+  // The line the "session list is tiny" report reads: the picker's computed
+  // max-height next to the numbers it is made from, taken once the class has
+  // applied.
+  scheduleLayoutDebug(collapsed ? 'picker-close' : 'picker-open');
 }
 
 /**
@@ -3606,11 +3610,11 @@ function prefersReducedMotion() {
  * Every reorder fault reported so far has been iOS-only, and the QA browser is
  * Chromium, so the evidence that settles them is what the device itself did.
  *
- * Read it in the panel's Debug tab, which is also where it is switched on. The
- * home-screen app cannot be given a query string, so a URL flag would have meant
- * opening the app in Safari to set a storage key and then reopening it — worth
- * avoiding for something that has to be usable mid-report. `?debug=drag` and
- * `?debug=off` still work, because the QA suites use them.
+ * Switched on with `?debug=drag` and off with `?debug=off`, and read through
+ * `window.__dragDebugDump`. That is how qa/key-reorder.js asserts on the gesture
+ * rather than only its result. The Debug tab used to show it too, with a Record
+ * button; T060 took that out with the other finished investigations, and git has
+ * it if a reorder fault comes back on a phone.
  *
  * Off by default and one boolean per call, so the log points can stay in the
  * gesture code rather than being added and removed each time a report comes in.
@@ -3639,6 +3643,9 @@ function dragDebugActive() {
   return dragDebugState;
 }
 
+// No caller in this file since T060 took the Record button out of the Debug tab.
+// qa/key-reorder.js calls it through the page (`evaluate('setDragDebugActive(true)')`),
+// which is why a search of this file alone reads it as dead.
 function setDragDebugActive(on) {
   dragDebugState = on;
   try {
@@ -5060,105 +5067,105 @@ function createKeyPanelPasteItem(label, detail, mode, onTap) {
  * the point of the page rather than a convenience on it.
  */
 function renderKeyPanelDebug(page) {
-  const heading = document.createElement('p');
-  heading.className = 'key-panel-group-label';
-  heading.textContent = 'Gesture log';
+  // Every log here is always recording. A keyboard that never opens, or a layout
+  // stuck the wrong size, leaves no way to switch a log on first and reproduce:
+  // this tab lives in the panel that stands in for the keyboard, and opening the
+  // panel is itself a layout change.
+  const section = (title, noteText, lines, emptyText) => {
+    const heading = document.createElement('p');
+    heading.className = 'key-panel-group-label';
+    heading.textContent = title;
+    const note = document.createElement('p');
+    note.className = 'key-panel-note';
+    note.textContent = noteText;
+    const output = document.createElement('pre');
+    output.className = 'key-panel-debug-log';
+    // Selectable so the log can be taken by hand if the clipboard is refused. Not
+    // a field: a field in the panel summons the keyboard the panel stands in for.
+    output.tabIndex = 0;
+    output.textContent = lines.length ? lines.join('\n') : emptyText;
+    return [heading, note, output];
+  };
 
-  const note = document.createElement('p');
-  note.className = 'key-panel-note';
-  note.textContent = dragDebugActive()
-    ? 'Recording. Reproduce the problem, come back, then Copy.'
-    : 'Off. Turn it on, reproduce the problem, then come back and Copy.';
+  // Read at each use rather than once: opening the panel itself schedules a
+  // key-panel layout line that lands after this render, and Copy should carry it.
+  const decisionLinesNow = () =>
+    formatKeyboardTransitions(keyboardTransitionLog.entries(), {
+      dropped: keyboardTransitionLog.dropped(),
+      headCount: keyboardTransitionLog.headCount()
+    }).split('\n');
+  const layoutLines = layoutDebugLog.lines();
+  const decisionLines = decisionLinesNow();
 
-  const output = document.createElement('pre');
-  output.className = 'key-panel-debug-log';
-  // Selectable so the log can be taken by hand if the clipboard is refused. Not
-  // a field: a field in the panel summons the keyboard the panel stands in for.
-  output.tabIndex = 0;
-  output.textContent = dragDebugLines.length
-    ? dragDebugLines.join('\n')
-    : 'No lines recorded yet.';
+  const layout = section(
+    'Layout',
+    'One line per layout change. Open the session list, then come back: the ' +
+      'picker-open line shows max= (the room the list gets) and the app=, foot= ' +
+      'and safe= values it is made from. Type, then come back: focus-settled ' +
+      'shows whether vv= shrank and app= followed. Lines after key-panel ' +
+      'describe this panel, not the problem.',
+    layoutLines,
+    'Nothing recorded yet.'
+  );
+  const keyboard = section(
+    'Keyboard',
+    'Every tap on the key bar while typing logs bar-tap lines. focus is where ' +
+      'typing went, gap is how much the keyboard covers, and gap=0 means no ' +
+      'keyboard.',
+    keyboardDebugLines,
+    'Nothing recorded yet. Tap the terminal.'
+  );
+  const decisions = section(
+    'Keyboard decisions',
+    'Each line is one decision about the frozen keyboard layout. blockedBy ' +
+      'names the flag that stopped a release. x40 means the same decision ' +
+      'repeated.',
+    decisionLines,
+    '(no keyboard transitions recorded)'
+  );
 
-  // Always recording, unlike the gesture log above. A keyboard that never opens
-  // leaves no way to switch a log on first and reproduce, because this tab lives
-  // in the panel that stands in for the keyboard.
-  const keyboardHeading = document.createElement('p');
-  keyboardHeading.className = 'key-panel-group-label';
-  keyboardHeading.textContent = 'Keyboard log';
-
-  const keyboardNote = document.createElement('p');
-  keyboardNote.className = 'key-panel-note';
-  keyboardNote.textContent =
-    'Always recording. Every tap on the key bar while typing logs three ' +
-    'bar-tap lines: focus is where typing went, gap is how much the keyboard ' +
-    'covers, and gap=0 means no keyboard. Test closes this panel, asks for the ' +
-    'keyboard five different ways, then comes back. The line that says ' +
-    'opened=true is the one that worked.';
-
-  const keyboardOutput = document.createElement('pre');
-  keyboardOutput.className = 'key-panel-debug-log';
-  keyboardOutput.tabIndex = 0;
-  keyboardOutput.textContent = keyboardDebugLines.length
-    ? keyboardDebugLines.join('\n')
-    : 'Nothing recorded yet. Tap the terminal, or run Test.';
-
-  const copyLines = () =>
-    [
+  const copyLines = () => {
+    const layoutNow = layoutDebugLog.lines();
+    return [
+      layoutNow.length ? '# layout' : '',
+      ...layoutNow,
       keyboardDebugLines.length ? '# keyboard' : '',
       ...keyboardDebugLines,
-      dragDebugLines.length ? '# gesture' : '',
-      ...dragDebugLines
+      '# decisions',
+      ...decisionLinesNow()
     ].filter(Boolean);
+  };
 
   page.replaceChildren(
-    keyboardHeading,
-    keyboardNote,
-    keyboardOutput,
     createKeyPanelActions(
-      keyPanelAction('Test', () => {
-        // The panel is standing in the keyboard's space, so it has to go before
-        // anything can measure a keyboard arriving. The probe reopens it here.
-        setKeyPanelOpen(false);
-        setStatus('Testing the keyboard…');
-        void runKeyboardProbe().then(() => {
-          setKeyPanelOpen(true);
-          setKeyPanelTab('debug');
-          renderKeyPanel();
-          setStatus('Keyboard test done');
-        });
-      }),
       keyPanelAction('Copy', async () => {
-        const text = copyLines().join('\n');
-        if (!text) {
+        if (
+          !layoutDebugLog.lines().length &&
+          !keyboardDebugLines.length &&
+          !keyboardTransitionLog.entries().length
+        ) {
           setStatus('Nothing recorded yet');
           return;
         }
+        const text = copyLines().join('\n');
         try {
           await navigator.clipboard.writeText(text);
           setStatus(`Copied ${copyLines().length} lines`);
         } catch {
-          keyboardOutput.focus();
-          setStatus('Clipboard refused — long-press the log to select it');
+          layout[2].focus();
+          setStatus('Clipboard refused — long-press a log to select it');
         }
       }),
       keyPanelAction('Clear', () => {
+        layoutDebugLog.clear();
         keyboardDebugLines.length = 0;
+        keyboardTransitionLog.clear();
         renderKeyPanel();
       })
     ),
-    heading,
-    note,
-    output,
-    createKeyPanelActions(
-      keyPanelAction(dragDebugActive() ? 'Stop' : 'Record', () => {
-        setDragDebugActive(!dragDebugActive());
-        renderKeyPanel();
-      }),
-      keyPanelAction('Clear', () => {
-        dragDebugLines.length = 0;
-        renderKeyPanel();
-      })
-    )
+    ...layout,
+    ...keyboard,
+    ...decisions
   );
 }
 
@@ -6248,21 +6255,181 @@ function clientDebug(event, detail = {}) {
   shipClientDebugEntries([entry]);
 }
 
+// ---- Start of the pure layout debug block. ----
+/**
+ * The Debug tab's Layout log, written free of DOM globals so the test can slice
+ * it out of this file the way the keyboard transition block is.
+ *
+ * It exists because two phone reports could not be answered from the device:
+ * a session picker squeezed to its 88px floor, and a footer that stayed under
+ * the keyboard. Both come down to a handful of numbers — the two viewport
+ * heights, the inline --app-height and --footer-height the app applied, the
+ * flags that freeze the keyboard layout, and the picker's computed max-height —
+ * and until this log none of them was readable on the phone. layoutDebugSnapshot
+ * already gathered most of them for the opt-in server log; this is the same
+ * snapshot, one line each, kept on the device.
+ */
+const maximumLayoutDebugLines = 120;
+
+/** `120px` and 120 both read as 120; anything unparseable reads as null. */
+function layoutDebugPixels(value) {
+  const parsed =
+    typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? Math.round(parsed) : null;
+}
+
+/**
+ * One snapshot as one line, in the order a reader checks it: what happened, what
+ * the browser reports, what the app applied, the flags that decide the keyboard
+ * layout, then the boxes and the session picker.
+ *
+ * `app=css` means no inline --app-height is set, so the stylesheet's 100dvh is
+ * in force; likewise `foot=css`. `picker max=` is the menu's computed
+ * max-height: the room the session list actually gets, whatever its inputs were.
+ * The time stamp is left to the log, so a repeat of the same geometry folds.
+ */
+function formatLayoutDebugLine(snapshot) {
+  const s = snapshot || {};
+  const yn = (value) => (value ? 'y' : 'n');
+  const px = (value) => (value === null || value === undefined ? '?' : String(value));
+  const lock = s.layoutLock ? px(s.layoutLockHeight) : 'n';
+  const selection = s.selectionLock ? px(s.selectionLockHeight) : 'n';
+  const panel = s.keyPanelOpen ? px(s.keyPanelHeight) : 'n';
+  const picker = s.pickerOpen
+    ? `picker max=${px(s.pickerMaxHeight)} h=${px(s.pickerHeight)} ` +
+      `nav=${px(s.pickerNavHeight)}/${px(s.pickerNavScrollHeight)}`
+    : 'picker=closed';
+  return [
+    s.reason || '?',
+    `vis=${s.visibility || '?'}`,
+    `${s.displayMode || '?'} ${s.orientation || '?'}/${s.pointer || '?'} ${s.viewMode || '?'}`,
+    `lay=${px(s.layoutHeight)} vv=${px(s.viewportHeight)} vvTop=${px(s.viewportTop)} ` +
+      `sc=${s.scale ?? '?'} in=${px(s.innerHeight)} scr=${px(s.screenHeight)}`,
+    `app=${s.appHeight ?? 'css'} appTop=${s.appTop ?? 'css'} ` +
+      `foot=${s.footerHeightVar ?? 'css'} applied=${px(s.lastAppliedHeight)}`,
+    `kb=${yn(s.keyboardOpen)} lock=${lock} sel=${selection} dis=${yn(s.dismissing)} ` +
+      `focus=${yn(s.terminalFocused)} hold=${yn(s.holdForSelection)} ` +
+      `panel=${panel} row2=${yn(s.rowTwoOpen)}`,
+    `safe=${px(s.safeTop)}/${px(s.safeBottom)}/${px(s.layoutSafeBottom)}`,
+    `body=${px(s.bodyHeight)}@${px(s.bodyTop)} hdr=${px(s.headerHeight)} ` +
+      `main=${px(s.mainHeight)} footer=${px(s.footerHeight)} term=${px(s.terminalHeight)}`,
+    `${picker} sessions=${px(s.sessionCount)}`
+  ].join(' ');
+}
+
+/**
+ * A ring of lines where a repeat of the previous line folds into it with a
+ * count. The time stamp sits outside the compared text, so the same geometry
+ * reported on every viewport frame is one line rather than a page of them.
+ */
+function createLayoutDebugLog(limit = maximumLayoutDebugLines) {
+  const entries = [];
+  let dropped = 0;
+  return {
+    push(at, text) {
+      const previous = entries[entries.length - 1];
+      if (previous && previous.text === text) {
+        previous.count += 1;
+        previous.lastAt = at;
+        return previous;
+      }
+      const entry = { at, lastAt: at, text, count: 1 };
+      entries.push(entry);
+      if (entries.length > limit) {
+        dropped += entries.length - limit;
+        entries.splice(0, entries.length - limit);
+      }
+      return entry;
+    },
+    lines() {
+      const lines = [];
+      if (dropped > 0) {
+        lines.push(`... ${dropped} earlier line(s) dropped`);
+      }
+      for (const entry of entries) {
+        const repeat =
+          entry.count > 1 ? ` x${entry.count} (last +${entry.lastAt}ms)` : '';
+        lines.push(`+${entry.at}ms ${entry.text}${repeat}`);
+      }
+      return lines;
+    },
+    clear() {
+      entries.length = 0;
+      dropped = 0;
+    }
+  };
+}
+
+/**
+ * Reasons that are worth a line even when nothing measured has changed. A resume
+ * with the same geometry as before is still the fact that resuming changed
+ * nothing, and the picker-open line is the one the session-list report reads.
+ */
+const layoutDebugMarkerReasons = new Set([
+  'picker-open',
+  'picker-close',
+  'resume',
+  'hide',
+  'focus',
+  'focus-settled'
+]);
+
+/**
+ * One frame, one line: which reason the frame reports when two arrive before it.
+ * A marker already waiting is not overwritten by a plain viewport tick that lands
+ * in the same frame; anything else takes the latest reason, as before.
+ */
+function nextLayoutDebugReason(pending, incoming) {
+  if (
+    layoutDebugMarkerReasons.has(pending) &&
+    !layoutDebugMarkerReasons.has(incoming)
+  ) {
+    return pending;
+  }
+  return incoming;
+}
+
+/** A line is written when the geometry moved, or when the reason is a marker. */
+function shouldRecordLayoutDebug(changed, reason) {
+  return Boolean(changed) || layoutDebugMarkerReasons.has(reason);
+}
+// ---- End of the pure layout debug block. ----
+
+const layoutDebugLog = createLayoutDebugLog();
+
 function layoutDebugSnapshot(reason) {
   const root = document.documentElement;
   const rootStyle = window.getComputedStyle(root);
+  const viewport = window.visualViewport;
+  const bodyBounds = document.body.getBoundingClientRect();
   const headerBounds = appHeaderElement.getBoundingClientRect();
   const mainBounds = document.querySelector('main').getBoundingClientRect();
   const footerBounds = document.querySelector('footer').getBoundingClientRect();
   const terminalBounds = terminalElement.getBoundingClientRect();
   const cssPixels = (name) =>
     Math.round(Number.parseFloat(rootStyle.getPropertyValue(name)) || 0);
+  // The inline value, or null: the stylesheet's own value is not the question,
+  // what the app last wrote there is.
+  const inline = (name) => root.style.getPropertyValue(name).trim() || null;
+  const pickerOpen = headerPickerOpen();
+  const pickerBounds =
+    pickerOpen && headerExpandedElement
+      ? headerExpandedElement.getBoundingClientRect()
+      : null;
+  const pickerStyle =
+    pickerOpen && headerExpandedElement
+      ? window.getComputedStyle(headerExpandedElement)
+      : null;
   return {
     reason,
-    viewportWidth: Math.round(window.visualViewport?.width || window.innerWidth),
-    viewportHeight: Math.round(
-      window.visualViewport?.height || window.innerHeight
-    ),
+    at: Math.round(window.performance?.now?.() || 0),
+    visibility: document.visibilityState,
+    viewportWidth: Math.round(viewport?.width || window.innerWidth),
+    viewportHeight: Math.round(viewport?.height || window.innerHeight),
+    viewportTop: Math.round(viewport?.offsetTop || 0),
+    scale: (viewport?.scale ?? 1).toFixed(2),
+    innerHeight: Math.round(window.innerHeight || 0),
+    screenHeight: Math.round(window.screen?.height || 0),
     layoutWidth: Math.round(root.clientWidth || window.innerWidth),
     layoutHeight: Math.round(root.clientHeight || window.innerHeight),
     orientation: window.matchMedia('(orientation: landscape)').matches
@@ -6273,12 +6440,28 @@ function layoutDebugSnapshot(reason) {
       : 'fine',
     displayMode: root.dataset.displayMode || 'browser',
     viewMode,
+    appHeight: inline('--app-height'),
+    appTop: inline('--app-top'),
+    footerHeightVar: inline('--footer-height'),
+    lastAppliedHeight: lastAppliedViewportHeight,
     keyboardOpen: root.classList.contains('keyboard-open'),
+    layoutLock: Boolean(keyboardLayoutLock),
+    layoutLockHeight: keyboardLayoutLock?.height ?? null,
+    selectionLock: Boolean(selectionViewportLock),
+    selectionLockHeight: selectionViewportLock?.height ?? null,
+    dismissing: keyboardDismissing,
+    terminalFocused: terminalInputIsFocused(),
+    holdForSelection: holdKeyboardLayoutForSelection,
+    keyPanelOpen,
+    keyPanelHeight: layoutDebugPixels(inline('--key-panel-height')),
     rowTwoOpen: !footerDrawerElement?.hidden,
     safeTop: cssPixels('--safe-top'),
     safeRight: cssPixels('--safe-right'),
     safeBottom: cssPixels('--safe-bottom'),
     safeLeft: cssPixels('--safe-left'),
+    layoutSafeBottom: cssPixels('--layout-safe-bottom'),
+    bodyHeight: Math.round(bodyBounds.height),
+    bodyTop: Math.round(bodyBounds.top),
     headerWidth: Math.round(headerBounds.width),
     headerHeight: Math.round(headerBounds.height),
     mainWidth: Math.round(mainBounds.width),
@@ -6286,24 +6469,43 @@ function layoutDebugSnapshot(reason) {
     footerWidth: Math.round(footerBounds.width),
     footerHeight: Math.round(footerBounds.height),
     terminalWidth: Math.round(terminalBounds.width),
-    terminalHeight: Math.round(terminalBounds.height)
+    terminalHeight: Math.round(terminalBounds.height),
+    pickerOpen,
+    pickerMaxHeight: layoutDebugPixels(pickerStyle?.maxHeight),
+    pickerHeight: pickerBounds ? Math.round(pickerBounds.height) : null,
+    pickerNavHeight: sessionsElement ? sessionsElement.clientHeight : null,
+    pickerNavScrollHeight: sessionsElement ? sessionsElement.scrollHeight : null,
+    sessionCount: sessionsElement
+      ? sessionsElement.querySelectorAll('.session-item').length
+      : null
   };
 }
 
-function scheduleLayoutDebug(reason = 'viewport') {
-  layoutDebugReason = reason;
-  if (layoutDebugFrame !== null) {
+/** Measure now and write the line if it is due. The frame callback and 'hide' share it. */
+function recordLayoutDebug(reason) {
+  const snapshot = layoutDebugSnapshot(reason);
+  const signature = JSON.stringify({
+    ...snapshot,
+    reason: undefined,
+    at: undefined
+  });
+  if (!shouldRecordLayoutDebug(signature !== lastLayoutDebugSignature, reason)) {
     return;
   }
+  lastLayoutDebugSignature = signature;
+  layoutDebugLog.push(snapshot.at, formatLayoutDebugLine(snapshot));
+  clientDebug('layout', snapshot);
+}
+
+function scheduleLayoutDebug(reason = 'viewport') {
+  if (layoutDebugFrame !== null) {
+    layoutDebugReason = nextLayoutDebugReason(layoutDebugReason, reason);
+    return;
+  }
+  layoutDebugReason = reason;
   layoutDebugFrame = window.requestAnimationFrame(() => {
     layoutDebugFrame = null;
-    const snapshot = layoutDebugSnapshot(layoutDebugReason);
-    const signature = JSON.stringify({ ...snapshot, reason: undefined });
-    if (signature === lastLayoutDebugSignature) {
-      return;
-    }
-    lastLayoutDebugSignature = signature;
-    clientDebug('layout', snapshot);
+    recordLayoutDebug(layoutDebugReason);
   });
 }
 
@@ -9364,7 +9566,11 @@ function handleTerminalInputFocused(reason) {
   // Wait for the keyboard animation, then freeze layout so later visualViewport
   // pans cannot slide the whole page.
   scheduleVisualViewportUpdate();
+  // Before and after the animation, so the Layout log shows whether the visual
+  // viewport shrank at all and whether --app-height followed it.
+  scheduleLayoutDebug('focus');
   window.setTimeout(() => {
+    scheduleLayoutDebug('focus-settled');
     if (keyboardLayoutLock) {
       // The settle gate in updateVisualViewport() already froze a height that had
       // stopped moving. Re-capturing here would overwrite it with whatever this
@@ -9496,6 +9702,10 @@ function keyboardProbeWait() {
  * result names the one difference that mattered. Whichever line says
  * `opened=true` is the fix; a run where every line says false rules the textarea
  * out and points at the environment lines above it instead.
+ *
+ * No caller in this file since T060 took the Test button out of the Debug tab.
+ * qa/android-keyboard.js runs it through the page and asserts on every strategy
+ * line, which is why a search of this file alone reads it as dead.
  */
 async function runKeyboardProbe() {
   if (keyboardProbeRunning) {
@@ -20134,8 +20344,16 @@ document.addEventListener('visibilitychange', () => {
   if (document.hidden) {
     stopNativeDeleteRepeat();
     controlHiddenSince = Date.now();
+    // Synchronous on purpose. Browsers pause requestAnimationFrame while the
+    // document is hidden, so a scheduled snapshot would fire after the return
+    // and carry the resume's reason; the geometry the app left with would never
+    // be written.
+    recordLayoutDebug('hide');
     return;
   }
+  // Both reports began with "when I get back to the terminal", so the geometry
+  // on return is recorded whether or not it differs from the one before.
+  scheduleLayoutDebug('resume');
   // A suspended tab loses the control channel without a close event on some
   // phones, and `readyState` still reads OPEN afterwards. Long enough away and
   // the channel is replaced rather than believed; a short switch away leaves a
