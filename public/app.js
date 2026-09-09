@@ -2874,6 +2874,56 @@ function keyboardHeightFromViewport(layoutHeight, viewportHeight, scale) {
   }
   return height;
 }
+
+/**
+ * The height the app rests at when no keyboard layout is frozen.
+ *
+ * The visual viewport, normally. Two readings are refused, both from one iPhone
+ * Layout log (T060): after a rotate while the app was hidden, the resume reported
+ * the previous orientation's visual height (402 against a layout of 812), then
+ * -62px, and held that for nine seconds while the layout viewport was already
+ * right. The app applied both, froze the -62, and the session picker collapsed to
+ * its floor for as long as the frozen height lasted.
+ *
+ * A height of zero or less is garbage, so the layout viewport stands in. A gap
+ * above the toolbar threshold with no editable element focused is not a keyboard
+ * either — iOS never shows one without a focused field — so the layout viewport
+ * is the truth there too. During a dismiss the gap is a keyboard leaving, and the
+ * visual viewport is followed as before. A pinched page shrinks the visual
+ * viewport for a reason that is not a keyboard and not garbage, so it keeps the
+ * visual height, the same exemption keyboardHeightFromViewport makes.
+ *
+ * The focus gate is what refuses the stale positive height, so a resume that
+ * arrives with the terminal still focused is not refused here: the 402 would be
+ * frozen, and the vanished-keyboard path releases it 250ms after the reading
+ * corrects, because focus without a reduction is that path's definition. In the
+ * logged case that is nine seconds at the wrong height rather than the rest of
+ * the session.
+ */
+function restingViewportHeight(
+  layoutHeight,
+  visualHeight,
+  editableFocused,
+  dismissing,
+  scale = 1
+) {
+  const layout = Number.isFinite(layoutHeight) ? Math.round(layoutHeight) : 0;
+  const visual = Number.isFinite(visualHeight) ? Math.round(visualHeight) : 0;
+  if (visual <= 0) {
+    return layout;
+  }
+  const pinched = Number.isFinite(scale) && Math.abs(scale - 1) > 0.01;
+  if (
+    layout > 0 &&
+    !pinched &&
+    !editableFocused &&
+    !dismissing &&
+    layout - visual > 120
+  ) {
+    return layout;
+  }
+  return visual;
+}
 // ---- End of the pure keyboard height block. ----
 
 /** What the viewport says right now, whatever the app believes. */
@@ -6187,6 +6237,41 @@ function markCopyNeedsAttention(clientX, clientY) {
   showSelectionCopyChip(clientX, clientY);
 }
 
+/**
+ * Is anything focused that a soft keyboard would serve?
+ *
+ * iOS never shows a keyboard without one, so a shortened visual viewport with no
+ * such element is stale or transient geometry, not a keyboard. The T060 Layout
+ * log had exactly that: a resume after a rotate while hidden reported the old
+ * orientation's height and then -62px, with nothing focused, and the layout was
+ * frozen at the -62. The terminal's own textarea, the bridge input, the Find
+ * field and the dialog inputs are all covered by the element check.
+ */
+function editableElementFocused() {
+  const active = document.activeElement;
+  if (!active || active === document.body) {
+    return false;
+  }
+  if (active.isContentEditable) {
+    return true;
+  }
+  if (active.tagName === 'TEXTAREA') {
+    return true;
+  }
+  // A focused <select> opens the iOS wheel picker, which shrinks the visual
+  // viewport the way a keyboard does. Counted so the custom-key dialog's two
+  // selects keep the layout behaviour they had before this check existed.
+  if (active.tagName === 'SELECT') {
+    return true;
+  }
+  if (active.tagName === 'INPUT') {
+    return !/^(button|checkbox|radio|range|submit|reset|file|color|hidden|image)$/i.test(
+      active.type || 'text'
+    );
+  }
+  return false;
+}
+
 function terminalInputIsFocused() {
   const active = document.activeElement;
   if (!active) {
@@ -6559,6 +6644,10 @@ const maximumKeyboardTransitionsHead = 30;
 // Recorded on every entry, in the order the dump prints them.
 const keyboardTransitionFlagNames = [
   'terminalFocused',
+  // Wider than terminalFocused: the Find field and dialog inputs count. This is
+  // the flag keyboardOpenDecision() reads, so a refused capture (nothing
+  // focused) and an accepted one over the Find field print differently.
+  'editableFocused',
   'holdForSelection',
   'hasSelection',
   'selectionLock',
@@ -6638,10 +6727,15 @@ function keyboardOpenDecision(flags) {
   const layoutLock = Boolean(flags?.layoutLock);
   const dismissing = Boolean(flags?.dismissing);
   const keyboardReduced = Boolean(flags?.keyboardReduced);
+  const focused = Boolean(flags?.focused);
   // An existing lock keeps the class on while the viewport rubber-bands or the
-  // keyboard animates away; only the reduction can turn it on in the first place.
+  // keyboard animates away; only the reduction can turn it on in the first place,
+  // and only with a field focused. A reduction with nothing focused is not a
+  // keyboard: the T060 log's resume after a rotate while hidden read 402 and then
+  // -62 against a layout of 812, and the -62 was frozen for the whole session
+  // segment. See editableElementFocused().
   const open = Boolean(
-    selectionLock || layoutLock || (!dismissing && keyboardReduced)
+    selectionLock || layoutLock || (!dismissing && keyboardReduced && focused)
   );
   return {
     open,
@@ -6706,7 +6800,7 @@ function createKeyboardTransitionLog(
   return {
     /**
      * Push a transition, or fold it into the previous entry when the event name
-     * and all seven flags are unchanged.
+     * and every recorded flag are unchanged.
      *
      * Folding is what makes a stuck state readable. A release declined 200 times
      * in a row becomes one line with a count, instead of 200 lines that push
@@ -6780,6 +6874,7 @@ function formatKeyboardTransitionFlags(flags) {
   const selectionLockHeight = flags?.selectionLockHeight;
   return [
     `focus=${flags?.terminalFocused ? 'y' : 'n'}`,
+    `edit=${flags?.editableFocused ? 'y' : 'n'}`,
     `hold=${flags?.holdForSelection ? 'y' : 'n'}`,
     `sel=${flags?.hasSelection ? 'y' : 'n'}`,
     `selLock=${flags?.selectionLock ? selectionLockHeight ?? 'y' : 'n'}`,
@@ -6847,6 +6942,7 @@ function keyboardTransitionFlags() {
   const viewport = window.visualViewport;
   return {
     terminalFocused: terminalInputIsFocused(),
+    editableFocused: editableElementFocused(),
     holdForSelection: holdKeyboardLayoutForSelection,
     hasSelection: Boolean(terminal?.hasSelection?.()),
     selectionLock: Boolean(selectionViewportLock),
@@ -7139,10 +7235,14 @@ function beginLongPressTerminalSelection(clientX, clientY) {
   });
   // Freeze the current keyboard-open size BEFORE blur. Otherwise blur releases
   // the layout lock, fit() resizes rows, and the new selection is wiped.
+  // A reduction with nothing focused is not a keyboard (see
+  // editableElementFocused), so it freezes nothing here either: on the T060
+  // resume reading a long press in that window would have held 402 for as long
+  // as the selection lived.
   if (
     terminalInputIsFocused() ||
     keyboardLayoutLock ||
-    keyboardViewportIsReduced()
+    (keyboardViewportIsReduced() && editableElementFocused())
   ) {
     if (!keyboardLayoutLock) {
       captureKeyboardLayoutLock();
@@ -15697,6 +15797,9 @@ function pinPageToOrigin() {
  */
 function targetAppHeight() {
   const viewport = window.visualViewport;
+  const layout = Math.round(
+    document.documentElement.clientHeight || window.innerHeight || 0
+  );
   const visual = Math.round(
     viewport?.height ||
       window.innerHeight ||
@@ -15704,9 +15807,16 @@ function targetAppHeight() {
       0
   );
   if (keyPanelOpen && keyboardViewportIsReduced()) {
-    return Math.round(document.documentElement.clientHeight || visual);
+    return layout || visual;
   }
-  return visual;
+  // Refuses the two bad readings the T060 log caught on resume; see the rule.
+  return restingViewportHeight(
+    layout,
+    visual,
+    editableElementFocused(),
+    keyboardDismissing,
+    viewport?.scale ?? 1
+  );
 }
 
 function applyRestingAppHeight(options = {}) {
@@ -15943,8 +16053,14 @@ function lockSelectionViewportIfKeyboardOpen() {
 
 function currentVisualViewportGeometry() {
   const viewport = window.visualViewport;
+  const visual = Math.round(viewport?.height || window.innerHeight);
   return {
-    height: Math.round(viewport?.height || window.innerHeight),
+    // Never freeze a non-positive reading: the T060 log froze -62px and the
+    // session picker sat at its 88px floor until the lock went.
+    height:
+      visual > 0
+        ? visual
+        : Math.round(document.documentElement.clientHeight || window.innerHeight),
     top: Math.round(viewport?.offsetTop || 0)
   };
 }
@@ -21016,7 +21132,13 @@ window.visualViewport?.addEventListener('scroll', () => {
 
 function keyboardViewportIsReduced() {
   const viewport = window.visualViewport;
-  if (!viewport || Math.abs(viewport.scale - 1) > 0.01) {
+  // A height of zero or less is not a short viewport, it is a bad reading: iOS
+  // reported -62 for nine seconds after a rotate while hidden (T060 log).
+  if (
+    !viewport ||
+    !(viewport.height > 0) ||
+    Math.abs(viewport.scale - 1) > 0.01
+  ) {
     return false;
   }
   const layoutHeight = Math.round(
@@ -21078,6 +21200,8 @@ function updateVisualViewport() {
     // keyboard-height lock here leaves the terminal bottom halfway up the
     // screen after an iOS swipe-to-dismiss.
     recordKeyboardTransition('viewport-dismiss-follow');
+    // The rise this dismiss interrupted is over; its settle clock goes with it.
+    keyboardSettleState = null;
     applyRestingAppHeight({ force: true });
     updateEffectiveSafeAreaInsets();
     pinPageToOrigin();
@@ -21129,7 +21253,8 @@ function updateVisualViewport() {
       selectionLock: Boolean(selectionViewportLock),
       layoutLock: Boolean(keyboardLayoutLock),
       dismissing: keyboardDismissing,
-      keyboardReduced
+      keyboardReduced,
+      focused: editableElementFocused()
     });
   const pageZoomed = Boolean(
     viewport && Math.abs(viewport.scale - 1) > 0.01
@@ -21144,6 +21269,10 @@ function updateVisualViewport() {
   if (!selectionViewportLock && !keyboardOpen && !pageZoomed) {
     keyboardLayoutLock = null;
     keyboardDismissing = false;
+    // A rise abandoned before it settled must not leave its clock running: the
+    // next open would find itself overdue on its first reduced frame and freeze
+    // a half-risen height.
+    keyboardSettleState = null;
     recordKeyboardTransition('viewport-resting');
     applyRestingAppHeight();
     scheduleFit();
@@ -21178,7 +21307,10 @@ function updateVisualViewport() {
       window.scrollTo(0, 0);
       return;
     }
-  } else if (keyboardLayoutLock || !keyboardOpen) {
+  } else {
+    // Every frame that does not freeze ends the settle wait, whatever else it
+    // does. Left running, the clock makes the next open overdue on its first
+    // reduced frame and freezes a half-risen height.
     keyboardSettleState = null;
   }
   // targetAppHeight first: while the panel is open there is no keyboard height
@@ -21187,7 +21319,9 @@ function updateVisualViewport() {
     ? targetAppHeight()
     : selectionViewportLock?.height ??
       keyboardLayoutLock?.height ??
-      Math.round(viewport?.height || window.innerHeight);
+      // The guarded reader, so a -62 cannot reach --app-height through the one
+      // path the resting branch does not cover (a pinched page with no lock).
+      currentVisualViewportGeometry().height;
   const top = keyPanelOpen
     ? 0
     : selectionViewportLock?.top ?? keyboardLayoutLock?.top ?? 0;
