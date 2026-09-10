@@ -5152,8 +5152,9 @@ function renderKeyPanelDebug(page) {
     'One line per layout change. Open the session list, then come back: the ' +
       'picker-open line shows max= (the room the list gets) and the app=, foot= ' +
       'and safe= values it is made from. Type, then come back: focus-settled ' +
-      'shows whether vv= shrank and app= followed. Lines after key-panel ' +
-      'describe this panel, not the problem.',
+      'shows whether vv= shrank and app= followed, and lift= how far the grid ' +
+      'slid up for the keyboard (rows= is the cursor row it stopped at). Lines ' +
+      'after key-panel describe this panel, not the problem.',
     layoutLines,
     'Nothing recorded yet.'
   );
@@ -6366,12 +6367,21 @@ function layoutDebugPixels(value) {
 /**
  * One snapshot as one line, in the order a reader checks it: what happened, what
  * the browser reports, what the app applied, the flags that decide the keyboard
- * layout, then the boxes and the session picker.
+ * layout, then the boxes, the terminal lift and the session picker.
  *
  * `app=css` means no inline --app-height is set, so the stylesheet's 100dvh is
  * in force; likewise `foot=css`. `picker max=` is the menu's computed
  * max-height: the room the session list actually gets, whatever its inputs were.
  * The time stamp is left to the log, so a repeat of the same geometry folds.
+ *
+ * `lift=` is the slide applyTerminalCover() gave the pinned grid, in pixels, or
+ * `n` when the grid is not pinned; `pin=` is the height it is pinned to. The
+ * numbers that decide the slide follow it: `cover=` the pixels an overlay hides,
+ * `box=` the space the terminal has, `cell=` one row's height, and `rows=` the
+ * cursor's row over the resting row count over the grid's current rows. A
+ * `lift=0` with a cursor row deep in the grid is a slide that was refused; a
+ * `lift=n` under `kb=y` is a pin that never happened. Neither was readable from
+ * the phone before this.
  */
 function formatLayoutDebugLine(snapshot) {
   const s = snapshot || {};
@@ -6398,6 +6408,10 @@ function formatLayoutDebugLine(snapshot) {
     `safe=${px(s.safeTop)}/${px(s.safeBottom)}/${px(s.layoutSafeBottom)}`,
     `body=${px(s.bodyHeight)}@${px(s.bodyTop)} hdr=${px(s.headerHeight)} ` +
       `main=${px(s.mainHeight)} footer=${px(s.footerHeight)} term=${px(s.terminalHeight)}`,
+    `lift=${s.liftApplied ? px(s.liftPixels) : 'n'} ` +
+      `pin=${s.liftApplied ? px(s.pinnedHeight) : 'n'} cover=${px(s.coverHeight)} ` +
+      `box=${px(s.boxHeight)} cell=${px(s.cellHeight)} ` +
+      `rows=${px(s.usedRows)}/${px(s.restingRows)}/${px(s.terminalRows)}`,
     `${picker} sessions=${px(s.sessionCount)}`
   ].join(' ');
 }
@@ -6555,6 +6569,25 @@ function layoutDebugSnapshot(reason) {
     footerHeight: Math.round(footerBounds.height),
     terminalWidth: Math.round(terminalBounds.width),
     terminalHeight: Math.round(terminalBounds.height),
+    // The terminal lift and the numbers terminalPinFromRows() decides it from.
+    // A phone report that the keyboard "does not bring the terminal up" could
+    // not be answered without them: term= showed the grid pinned, and nothing
+    // showed how far it slid or where the cursor was. The slide stops at the
+    // cursor's row, so a program that leaves its cursor high in the grid gets a
+    // lift of 0 by design, and only these tell that case from a lift that never
+    // applied. Measured now, not read from the pin's stored box, so a stale pin
+    // shows as a mismatch rather than agreeing with itself.
+    liftApplied: terminalLiftApplied,
+    liftPixels: Number.isFinite(appliedTerminalLift)
+      ? Math.round(appliedTerminalLift)
+      : null,
+    pinnedHeight: layoutDebugPixels(inline('--terminal-pinned-height')),
+    coverHeight: measuredTerminalCover(),
+    boxHeight: terminalBoxSpace()?.height ?? null,
+    cellHeight: terminal ? Math.round(terminalCellHeight() * 10) / 10 || null : null,
+    usedRows: terminal ? terminalRowsInUse() : null,
+    restingRows: restingTerminalRows,
+    terminalRows: terminal?.rows ?? null,
     pickerOpen,
     pickerMaxHeight: layoutDebugPixels(pickerStyle?.maxHeight),
     pickerHeight: pickerBounds ? Math.round(pickerBounds.height) : null,
