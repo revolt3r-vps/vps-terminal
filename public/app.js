@@ -9620,11 +9620,28 @@ const keyboardDebugMaximumLines = 240;
 const keyboardDebugLines = [];
 // Long enough for a keyboard animation to finish and the viewport event to land.
 const keyboardRaiseCheckMilliseconds = 700;
+/**
+ * How long to wait for the browser to report a keyboard before standing in.
+ *
+ * T064 put the substitution on the raise check's own 700ms deadline, which is
+ * where the escalation decision belongs and is far too late for a layout: the
+ * keyboard animation is about 300ms, so the terminal moved up only once the
+ * keyboard was already sitting there. Reported from the phone the day it
+ * shipped.
+ *
+ * A browser that is going to report does it long before this. Measured across
+ * four raises on the iPhone this exists for, the viewport event landed 86ms,
+ * 90ms, 111ms and 111ms after the focus. keyboardOpenSettleMilliseconds is the
+ * file's existing name for "the keyboard animation is over by now", so a
+ * reading that has not arrived by then is not coming.
+ */
+const keyboardAssumeCheckMilliseconds = keyboardOpenSettleMilliseconds;
 const keyboardProbeWaitMilliseconds = 1300;
 const keyboardProbeRestMilliseconds = 500;
 /** A viewport this much shorter than the layout means a keyboard is over it. */
 const keyboardViewportGapPixels = 120;
 let keyboardRaiseCheckTimer = null;
+let keyboardAssumeCheckTimer = null;
 let keyboardOnscreenInputActive = false;
 let keyboardProbeRunning = false;
 /*
@@ -10018,6 +10035,32 @@ function setAssumedKeyboardHeight(height, reason) {
   assumedKeyboardHeight = height;
   keyboardDebug(`assume-keyboard ${reason} height=${height}`);
   recordKeyboardTransition('assume-keyboard');
+  // Frozen here rather than left to updateVisualViewport()'s settle gate. That
+  // gate exists so a height still moving under a rising keyboard is not frozen
+  // half way up; a stand-in height is a constant and has nothing to settle, so
+  // waiting for it only adds keyboardSettleMilliseconds to a layout that is
+  // already late. The measured path pairs the same two calls.
+  if (!keyboardDismissing) {
+    captureKeyboardLayoutLock();
+    // The measured path hands the clock back through keyboardSettleStep(), which
+    // returns `state: null` on the frame it settles. This path never calls it,
+    // so a clock armed by an earlier reduced frame would outlive the capture,
+    // and the next rise would be overdue on its first frame and freeze a
+    // half-risen height.
+    keyboardSettleState = null;
+    scheduleFit();
+    // Every exit of updateVisualViewport() puts the page back to the origin, and
+    // skipping that was the one thing this shortcut dropped. iOS scrolls the
+    // document to reveal the focused element when the keyboard rises; without
+    // this the frozen short height is applied to a page that is still scrolled,
+    // so the header and footer sit off screen until something else happens to
+    // run a viewport update. pinPageToOrigin() rather than that function's bare
+    // window.scrollTo(0, 0), because it also zeroes the two element scrollTops,
+    // and nothing else covers the Apple path: the only other caller is the
+    // bridge input's focus handler, and the bridge is never built there.
+    pinPageToOrigin();
+    return true;
+  }
   scheduleVisualViewportUpdate();
   return true;
 }
@@ -10314,6 +10357,7 @@ function setTerminalInputProbeClass(name, on) {
  */
 function scheduleKeyboardRaiseCheck(reason) {
   window.clearTimeout(keyboardRaiseCheckTimer);
+  window.clearTimeout(keyboardAssumeCheckTimer);
   const startedGap = keyboardViewportGap();
   const startedVisual = keyboardVisualHeight();
   const startedCounts = {
@@ -10326,6 +10370,39 @@ function scheduleKeyboardRaiseCheck(reason) {
       `active=${describeElementForDebug(document.activeElement)}`
   );
   keyboardDebug(`raise-signals ${reason} ${viewportSignalLine()}`);
+  const assumeIfBlind = () => {
+    const storedKeyboardHeight = measuredKeyboardHeightOrZero();
+    return (
+      shouldAssumeKeyboard({
+        softKeyboard: usesSoftKeyboard(),
+        // Below, the Apple path returns before the bridge and the bridge is the
+        // escalation for everything else. Both spellings mean the same thing
+        // here: there is no other way left to ask for a keyboard.
+        escalationExhausted: nativeTouchSelection || keyboardBridgeIsActive(),
+        focused: terminalInputIsFocused(),
+        // Both measurements, the way the raise check itself decides: a browser
+        // that shortens the layout viewport too leaves no gap at all, and a
+        // visual height that simply dropped counts. The late deadline guards
+        // this with its own `opened` before it gets here; the early one has no
+        // such guard, so it asks the whole question itself.
+        opened:
+          keyboardViewportGap() > keyboardViewportGapPixels ||
+          keyboardVisualHeight() < startedVisual - 100,
+        viewportResizes: visualViewportResizeCount - startedCounts.visualResizes,
+        storedHeight: storedKeyboardHeight,
+        alreadyAssumed: assumedKeyboardHeight !== null,
+        layoutLock: Boolean(keyboardLayoutLock),
+        panelOpen: keyPanelOpen
+      }) && setAssumedKeyboardHeight(storedKeyboardHeight, reason)
+    );
+  };
+  keyboardAssumeCheckTimer = window.setTimeout(() => {
+    keyboardAssumeCheckTimer = null;
+    if (keyboardProbeRunning) {
+      return;
+    }
+    assumeIfBlind();
+  }, keyboardAssumeCheckMilliseconds);
   keyboardRaiseCheckTimer = window.setTimeout(() => {
     keyboardRaiseCheckTimer = null;
     const gap = keyboardViewportGap();
@@ -10357,8 +10434,6 @@ function scheduleKeyboardRaiseCheck(reason) {
     // is what separates a stale reading from an honest one; the resize count is
     // what separates silence from a wrong number. See the 2026-09-11 iPhone log
     // in docs/qa.md, under "A keyboard the app cannot see".
-    const viewportResizes =
-      visualViewportResizeCount - startedCounts.visualResizes;
     if (usesSoftKeyboard()) {
       keyboardDebug(
         `raise-blind ${reason} since=${Math.round(
@@ -10366,24 +10441,10 @@ function scheduleKeyboardRaiseCheck(reason) {
         )}ms ${viewportSignalLine({ reflow: true, since: startedCounts })}`
       );
     }
-    const storedKeyboardHeight = measuredKeyboardHeightOrZero();
-    if (
-      shouldAssumeKeyboard({
-        softKeyboard: usesSoftKeyboard(),
-        // Below, the Apple path returns before the bridge and the bridge is the
-        // escalation for everything else. Both spellings mean the same thing
-        // here: there is no other way left to ask for a keyboard.
-        escalationExhausted: nativeTouchSelection || keyboardBridgeIsActive(),
-        focused,
-        opened,
-        viewportResizes,
-        storedHeight: storedKeyboardHeight,
-        alreadyAssumed: assumedKeyboardHeight !== null,
-        layoutLock: Boolean(keyboardLayoutLock),
-        panelOpen: keyPanelOpen
-      }) &&
-      setAssumedKeyboardHeight(storedKeyboardHeight, reason)
-    ) {
+    // Normally a no-op: the early deadline above has already stood in, or has
+    // already declined to. It runs again because a raise whose focus landed late
+    // fails the `focused` term there and can pass it here.
+    if (assumeIfBlind()) {
       return;
     }
     // The Apple path is the one that already works, and a hardware keyboard is
