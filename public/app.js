@@ -2967,11 +2967,19 @@ function rememberKeyboardHeight() {
 }
 
 /**
- * What the panel should be. The measured keyboard first, then the last one this
- * browser saw, then a guess — a fresh install has never raised a keyboard, and
- * the panel still has to open at a sane size.
+ * A keyboard height this device has actually produced, or 0.
+ *
+ * This page life first, then the validated value in storage. Deliberately
+ * without keyPanelHeight()'s final guess: that guess exists so a panel the user
+ * asked for opens at a sane size, and it is the wrong thing entirely to invent a
+ * keyboard from. shouldAssumeKeyboard() gates on this, so a device that has
+ * never raised one never has one assumed for it.
+ *
+ * A reload empties the page-life value, which is why the stored reading matters
+ * here: an iPhone that resumes into the silent-viewport state and reloads has
+ * nothing else left to stand in with.
  */
-function keyPanelHeight() {
+function measuredKeyboardHeightOrZero() {
   if (lastKeyboardHeight > 0) {
     return lastKeyboardHeight;
   }
@@ -2992,7 +3000,20 @@ function keyPanelHeight() {
       return stored;
     }
   } catch {
-    // Fall through to the guess.
+    // No storage, or a blocked read. There is no measurement to report.
+  }
+  return 0;
+}
+
+/**
+ * What the panel should be. The measured keyboard first, then the last one this
+ * browser saw, then a guess — a fresh install has never raised a keyboard, and
+ * the panel still has to open at a sane size.
+ */
+function keyPanelHeight() {
+  const measured = measuredKeyboardHeightOrZero();
+  if (measured > 0) {
+    return measured;
   }
   const layoutHeight = window.innerHeight || 700;
   // A fine pointer has no soft keyboard, so there is no keyboard height for the
@@ -3132,7 +3153,15 @@ function setKeyPanelOpen(open) {
     );
     keyPanelElement.hidden = false;
     document.body.classList.add('key-panel-open');
-    // Hand the keyboard's space over rather than stacking on top of it.
+    // Hand the keyboard's space over rather than stacking on top of it. A
+    // stand-in keyboard is handed over the same way: they are the same pixels,
+    // and leaving it set would have the panel and the assumption both claiming
+    // them.
+    // `release: false` because this function drops the lock itself just below.
+    // Going through releaseKeyboardLayoutLock() instead would set
+    // keyboardDismissing and start its 50ms close poll while the panel is
+    // opening, for a keyboard that is being replaced rather than dismissed.
+    clearAssumedKeyboardHeight('key-panel', { release: false });
     if (terminalInputIsFocused()) {
       blurTerminalInput();
     }
@@ -3140,6 +3169,11 @@ function setKeyPanelOpen(open) {
     // now. Left to the blur, this only happens when the terminal had focus —
     // and any other route in leaves the app sized to a viewport the keyboard is
     // still shrinking, with the footer already carrying the panel.
+    // Ahead of the null, not between it and clearLockedAppGeometry: those two
+    // are asserted adjacent in test/keyboard-height.test.js, because anything
+    // that defers the clear sizes the app to a viewport the keyboard is still
+    // shrinking while the footer already carries the panel.
+    keyboardLockFromAssumption = false;
     keyboardLayoutLock = null;
     clearLockedAppGeometry({ force: true });
     // The strip is scoped to the view, and this is the moment it becomes
@@ -6425,7 +6459,8 @@ function formatLayoutDebugLine(snapshot) {
       `dvh=${px(s.dynamicHeight)} differs=${s.viewportDiffers ?? '?'}`,
     `app=${s.appHeight ?? 'css'} appTop=${s.appTop ?? 'css'} ` +
       `foot=${s.footerHeightVar ?? 'css'} applied=${px(s.lastAppliedHeight)}`,
-    `kb=${yn(s.keyboardOpen)} lock=${lock} sel=${selection} dis=${yn(s.dismissing)} ` +
+    `kb=${yn(s.keyboardOpen)}${s.assumedKeyboard ? `(assumed ${px(s.assumedKeyboard)})` : ''} ` +
+      `lock=${lock} sel=${selection} dis=${yn(s.dismissing)} ` +
       `focus=${yn(s.terminalFocused)} hold=${yn(s.holdForSelection)} ` +
       `panel=${panel} row2=${yn(s.rowTwoOpen)}`,
     `safe=${px(s.safeTop)}/${px(s.safeBottom)}/${px(s.layoutSafeBottom)}`,
@@ -6580,6 +6615,15 @@ function layoutDebugSnapshot(reason) {
     footerHeightVar: inline('--footer-height'),
     lastAppliedHeight: lastAppliedViewportHeight,
     keyboardOpen: root.classList.contains('keyboard-open'),
+    // The height the app is standing in with when the browser will not report a
+    // keyboard it can see. `kb=y(assumed 369)` says the whole state: the layout
+    // is the keyboard's, and no measurement is behind it.
+    // The effective substitution, not the stored number. A rotation can leave a
+    // height that assumedViewportHeight() now refuses — a portrait keyboard is
+    // most of a landscape viewport — and the line would then claim a stand-in
+    // that is doing nothing.
+    assumedKeyboard:
+      assumedVisualViewportHeight() === null ? null : assumedKeyboardHeight,
     layoutLock: Boolean(keyboardLayoutLock),
     layoutLockHeight: keyboardLayoutLock?.height ?? null,
     selectionLock: Boolean(selectionViewportLock),
@@ -9845,6 +9889,207 @@ function recordKeyboardRaiseVerdict(userSawKeyboard) {
   renderKeyPanel();
 }
 
+// ---- Start of the pure assumed keyboard block. ----
+/**
+ * The visual viewport the app stands in for when the browser will not report one.
+ *
+ * Measured on an iPhone, 2026-09-11 and again on the 12th: after a background
+ * and a resume, the keyboard rose and WebKit said nothing about it. Not a wrong
+ * number — silence. `visualViewport.height` stayed at the full 812 against a
+ * layout of 812, `innerHeight`, `100dvh`, `100svh` and `100lvh` all read 812,
+ * zero `visualViewport` resize events fired in the 700ms after the raise, and a
+ * forced re-layout read back 812 as well. The keyboard was on screen for all of
+ * it, confirmed from the phone with the Debug tab's own verdict button
+ * (`raise-verdict said=opened app=closed agree=false`).
+ *
+ * There is no reading left to recover, so the app stops waiting for one. The
+ * height it stands in with is the one this device has already shown: the
+ * keyboard height measured in an earlier rise and kept in localStorage, which is
+ * the same number the key panel sizes itself to.
+ *
+ * Null when the substitution would be nonsense — no stored height, or a keyboard
+ * that would leave too little of the screen to be a keyboard rather than a bad
+ * reading. `minimumVisible` is that floor.
+ */
+function assumedViewportHeight(layoutHeight, keyboardHeight, minimumVisible = 200) {
+  if (!Number.isFinite(layoutHeight) || !(layoutHeight > 0)) {
+    return null;
+  }
+  if (!Number.isFinite(keyboardHeight) || !(keyboardHeight > 0)) {
+    return null;
+  }
+  const height = Math.round(layoutHeight - keyboardHeight);
+  if (height < minimumVisible || height >= layoutHeight) {
+    return null;
+  }
+  return height;
+}
+
+/**
+ * Is this the signature of a keyboard the browser refused to report?
+ *
+ * Every term is required, and each rules out a different way of being wrong.
+ *
+ * `softKeyboard` and `storedHeight` together are the narrow part. A device that
+ * has never produced a keyboard has no height to stand in with and gets none
+ * invented: the Android Chrome in the keyboard bridge block never raised one
+ * from xterm's textarea, and inventing a viewport there would have hidden the
+ * fault the bridge exists to fix. `focused` means the field is still live, so
+ * there is something for a keyboard to serve.
+ *
+ * `viewportResizes === 0` is the discriminator. A keyboard that rose and was
+ * measured moves the viewport and fires a resize; a keyboard that rose behind a
+ * stale reading fires one carrying the wrong number; this failure fires none at
+ * all. A raise that simply did not work also fires none — which is why the
+ * stored height gates it, and why the substitution has to be as cheap to undo as
+ * one press of the button that put it there.
+ *
+ * A real lock or an open panel means the app already has the space accounted
+ * for, and a second answer would fight the first.
+ *
+ * `escalationExhausted` is the one that keeps this out of the way of the
+ * keyboard bridge. A silent raise on Android Chrome has a known fix — move
+ * typing to an input of the app's own — and that escalation runs from the same
+ * branch. Standing in there would hand the device a keyboard-shaped layout with
+ * no keyboard and never escalate, and because both the stored height and the
+ * bridge preference persist, one working keyboard early in the device's life
+ * would disable the fix for good. So the substitution waits until there is no
+ * escalation left: the Apple path, which has none, or a bridge that is already
+ * on and still getting nothing.
+ */
+function shouldAssumeKeyboard(state) {
+  return Boolean(
+    state &&
+      state.softKeyboard &&
+      state.escalationExhausted &&
+      state.focused &&
+      !state.opened &&
+      state.viewportResizes === 0 &&
+      Number.isFinite(state.storedHeight) &&
+      state.storedHeight > 0 &&
+      !state.alreadyAssumed &&
+      !state.layoutLock &&
+      !state.panelOpen
+  );
+}
+// ---- End of the pure assumed keyboard block. ----
+
+/**
+ * The keyboard height the app is standing in for, or null when it is not.
+ *
+ * Read by currentVisualViewportGeometry() and keyboardViewportIsReduced(), the
+ * two places every other keyboard behaviour in this file derives from. Putting
+ * it there rather than at each call site is what makes the substitution total:
+ * `.keyboard-open`, the layout lock, --app-height and the terminal lift all run
+ * exactly the code they run for a measured keyboard, and none of them knows the
+ * difference.
+ */
+let assumedKeyboardHeight = null;
+/**
+ * Was the frozen layout produced by the substitution rather than by a keyboard?
+ *
+ * Clearing the substitution is not enough on its own. By the time it is cleared,
+ * updateVisualViewport() has usually settled and frozen a keyboardLayoutLock at
+ * the assumed height, and keyboardOpenDecision() holds `keyboard-open` on for a
+ * lock alone — so the layout would stay short until the vanished-keyboard timer
+ * noticed, a quarter second later, and that path also flips the footer button to
+ * Show. This says which locks are the substitution's to take back.
+ */
+let keyboardLockFromAssumption = false;
+
+/**
+ * Stand in, if the height is one that can be stood in with.
+ *
+ * Validated here rather than only at the call site: a height that
+ * assumedViewportHeight() refuses leaves the variable set and changes nothing,
+ * which logs an assumption that did not happen and blocks the next one through
+ * `alreadyAssumed`.
+ */
+function setAssumedKeyboardHeight(height, reason) {
+  const layoutHeight = Math.round(
+    document.documentElement.clientHeight || window.innerHeight
+  );
+  if (assumedViewportHeight(layoutHeight, height) === null) {
+    keyboardDebug(
+      `assume-keyboard-refused ${reason} height=${height} lay=${layoutHeight}`
+    );
+    return false;
+  }
+  assumedKeyboardHeight = height;
+  keyboardDebug(`assume-keyboard ${reason} height=${height}`);
+  recordKeyboardTransition('assume-keyboard');
+  scheduleVisualViewportUpdate();
+  return true;
+}
+
+/**
+ * Stop standing in, and let whatever the browser says take over.
+ *
+ * Called wherever the assumption can no longer be true: focus leaving the field
+ * it was made for, the panel taking the keyboard's space, the lock being
+ * released, and a real viewport resize arriving — the browser waking up wins,
+ * always, because a measurement beats a substitution.
+ *
+ * Dropping the substitution is not the same as dropping the layout it produced.
+ * A reading that arrives showing a keyboard is a takeover, not a dismissal.
+ */
+function clearAssumedKeyboardHeight(reason, { release = true } = {}) {
+  if (assumedKeyboardHeight === null) {
+    return;
+  }
+  assumedKeyboardHeight = null;
+  keyboardDebug(`assume-keyboard-clear ${reason}`);
+  recordKeyboardTransition('assume-keyboard-clear');
+  if (!release || !keyboardLockFromAssumption || !keyboardLayoutLock) {
+    scheduleVisualViewportUpdate();
+    return;
+  }
+  // There is a frozen layout here that the substitution produced, and what the
+  // browser says now decides what becomes of it.
+  //
+  // Still reduced means the reading finally arrived and there is a real keyboard
+  // under it. The lock goes, and nothing else does: updateVisualViewport() then
+  // freezes the measured height through its own settle gate, which is the whole
+  // point of dropping it rather than re-freezing here. A reading that arrives
+  // mid-rise carries whatever the keyboard had reached — 200px of a 369px
+  // keyboard — and capturing it directly would freeze that for the session,
+  // because keyboardOpenDecision() declines to capture while a lock exists and
+  // so does the focus-settle timer.
+  //
+  // `keyboard-open` stays on across the gap with no lock at all: the decision
+  // reads `keyboardReduced && focused`, both true now. That is what keeps the
+  // footer from jumping, and it keeps the class on for rememberKeyboardHeight(),
+  // which runs on this same event and needs it to store the measurement.
+  // --app-height is left exactly where the stand-in put it until the real height
+  // settles, so the layout holds still through the handover.
+  if (!keyboardDismissing && keyboardViewportIsReduced()) {
+    keyboardLayoutLock = null;
+    keyboardLockFromAssumption = false;
+    scheduleVisualViewportUpdate();
+    return;
+  }
+  // No keyboard behind it after all. Without this the lock alone keeps
+  // `keyboard-open` on with focus still held, and nothing releases it until the
+  // vanished-keyboard timer fires — which leaves the layout short for a quarter
+  // second and puts the footer button on Show.
+  //
+  // Two callers pass `release: false`, both because they drop the lock
+  // themselves: releaseKeyboardLayoutLock(), which is this call one frame
+  // earlier, and setKeyPanelOpen(), which nulls it directly.
+  releaseKeyboardLayoutLock();
+}
+
+/** The stand-in geometry, or null when there is nothing to stand in for. */
+function assumedVisualViewportHeight() {
+  if (assumedKeyboardHeight === null) {
+    return null;
+  }
+  return assumedViewportHeight(
+    Math.round(document.documentElement.clientHeight || window.innerHeight),
+    assumedKeyboardHeight
+  );
+}
+
 function keyboardDebug(line) {
   keyboardDebugLines.push(
     `${String(Math.round(window.performance.now())).padStart(6)} ${line}`
@@ -10112,12 +10357,34 @@ function scheduleKeyboardRaiseCheck(reason) {
     // is what separates a stale reading from an honest one; the resize count is
     // what separates silence from a wrong number. See the 2026-09-11 iPhone log
     // in docs/qa.md, under "A keyboard the app cannot see".
+    const viewportResizes =
+      visualViewportResizeCount - startedCounts.visualResizes;
     if (usesSoftKeyboard()) {
       keyboardDebug(
         `raise-blind ${reason} since=${Math.round(
           window.performance.now() - startedAt
         )}ms ${viewportSignalLine({ reflow: true, since: startedCounts })}`
       );
+    }
+    const storedKeyboardHeight = measuredKeyboardHeightOrZero();
+    if (
+      shouldAssumeKeyboard({
+        softKeyboard: usesSoftKeyboard(),
+        // Below, the Apple path returns before the bridge and the bridge is the
+        // escalation for everything else. Both spellings mean the same thing
+        // here: there is no other way left to ask for a keyboard.
+        escalationExhausted: nativeTouchSelection || keyboardBridgeIsActive(),
+        focused,
+        opened,
+        viewportResizes,
+        storedHeight: storedKeyboardHeight,
+        alreadyAssumed: assumedKeyboardHeight !== null,
+        layoutLock: Boolean(keyboardLayoutLock),
+        panelOpen: keyPanelOpen
+      }) &&
+      setAssumedKeyboardHeight(storedKeyboardHeight, reason)
+    ) {
+      return;
     }
     // The Apple path is the one that already works, and a hardware keyboard is
     // not a failure to raise anything.
@@ -10434,6 +10701,12 @@ function traceTerminalInputFocusOut(event) {
       `to=${describeElementForDebug(event.relatedTarget)} ` +
       `gap=${keyboardViewportGap()}`
   );
+  // The stand-in was made for this field. With focus gone there is nothing for a
+  // keyboard to serve, so it goes here rather than waiting for a reading that is
+  // never coming. updateVisualViewport() then takes the release-stale-lock
+  // branch, which is the same path a Find field takes when the OS hides the
+  // keyboard under it.
+  clearAssumedKeyboardHeight('input-focusout');
 }
 
 /** The flags keyboardVanishedWithoutBlur() reads, without a second layout read. */
@@ -16112,6 +16385,10 @@ function captureKeyboardLayoutLock() {
   // — tapping the terminal behind the panel does it — takes its place back.
   setKeyPanelOpen(false);
   keyboardLayoutLock = currentVisualViewportGeometry();
+  // Remembered so clearAssumedKeyboardHeight() can take this lock back. A lock
+  // frozen while standing in has no keyboard behind it, and nothing else can
+  // tell it from one that has.
+  keyboardLockFromAssumption = assumedVisualViewportHeight() !== null;
   lastAppliedViewportHeight = keyboardLayoutLock.height;
   lastAppliedViewportTop = 0;
   keyboardLayoutLock.top = 0;
@@ -16225,6 +16502,8 @@ function releaseKeyboardLayoutLock() {
     return;
   }
   recordKeyboardTransition('release-begin');
+  clearAssumedKeyboardHeight('release', { release: false });
+  keyboardLockFromAssumption = false;
   keyboardLayoutLock = null;
   keyboardDismissing = true;
   clearTimeout(keyboardDismissPollTimer);
@@ -16416,6 +16695,13 @@ function lockSelectionViewportIfKeyboardOpen() {
 
 function currentVisualViewportGeometry() {
   const viewport = window.visualViewport;
+  // The stand-in comes first. When it is set the browser is reporting a full
+  // viewport under an open keyboard, so its own number is the wrong answer, not
+  // a fallback for one. See assumedViewportHeight().
+  const assumed = assumedVisualViewportHeight();
+  if (assumed !== null) {
+    return { height: assumed, top: 0 };
+  }
   const visual = Math.round(viewport?.height || window.innerHeight);
   return {
     // Never freeze a non-positive reading: the T060 log froze -62px and the
@@ -19611,9 +19897,12 @@ function showTerminalLinkChip(target, clientX, clientY) {
   // Keep it above the soft keyboard. The tap that offers the chip is usually the
   // tap that raises the keyboard, and the chip is positioned in client
   // coordinates, so without this it can be anchored underneath it.
-  const visibleBottom = window.visualViewport
-    ? window.visualViewport.offsetTop + window.visualViewport.height
-    : window.innerHeight;
+  // Through the guarded reader, not the raw viewport: under a keyboard the app
+  // is standing in for, window.visualViewport reports full height and the chip
+  // lands underneath the keyboard this clamp exists to clear.
+  const { height: visibleHeight, top: visibleTop } =
+    currentVisualViewportGeometry();
+  const visibleBottom = visibleTop + visibleHeight;
   const clampedY = Math.min(y, Math.max(margin, visibleBottom - margin));
   // Unhide before measuring: a hidden button has no width, and the row is
   // centred on the tap, so every width has to be known first.
@@ -21492,6 +21781,13 @@ window.addEventListener('resize', () => {
 });
 window.visualViewport?.addEventListener('resize', () => {
   visualViewportResizeCount += 1;
+  // The browser is reporting again, so there is nothing left to stand in for.
+  // The substitution goes unconditionally — whatever this event says, it is a
+  // measurement, and a measurement beats a substitution. What happens to the
+  // layout it produced is not unconditional: see clearAssumedKeyboardHeight().
+  // Before rememberKeyboardHeight() below, which needs the class this can put
+  // back.
+  clearAssumedKeyboardHeight('viewport-resize');
 });
 window.addEventListener('resize', handleViewportGeometryChange);
 window.addEventListener('orientationchange', handleViewportGeometryChange);
@@ -21504,6 +21800,12 @@ window.visualViewport?.addEventListener('scroll', () => {
 
 function keyboardViewportIsReduced() {
   const viewport = window.visualViewport;
+  // A keyboard the app is standing in for is a keyboard. Ahead of the reading
+  // checks because the reading is exactly what is missing: on the 2026-09-11
+  // iPhone every one of them said full height with the keyboard on screen.
+  if (assumedVisualViewportHeight() !== null) {
+    return true;
+  }
   // A height of zero or less is not a short viewport, it is a bad reading: iOS
   // reported -62 for nine seconds after a rotate while hidden (T060 log).
   if (
