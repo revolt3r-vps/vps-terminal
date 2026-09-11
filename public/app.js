@@ -5162,7 +5162,13 @@ function renderKeyPanelDebug(page) {
     'Keyboard',
     'Every tap on the key bar while typing logs bar-tap lines. focus is where ' +
       'typing went, gap is how much the keyboard covers, and gap=0 means no ' +
-      'keyboard.',
+      'keyboard. raise-signals lists every height the page can read; differs= ' +
+      'names the visual viewport when it disagrees with the layout one, and ' +
+      'differs=none with a keyboard on screen means the app is blind. ' +
+      'raise-blind adds ' +
+      'reflow= (the height after a forced re-layout) and vvResize= (how many ' +
+      'resize events the browser sent). If the keyboard came up and the app ' +
+      'said it did not, press "Kbd did open" below.',
     keyboardDebugLines,
     'Nothing recorded yet. Tap the terminal.'
   );
@@ -5207,10 +5213,22 @@ function renderKeyPanelDebug(page) {
           setStatus('Clipboard refused — long-press a log to select it');
         }
       }),
+      // The ground truth no measurement here can reach. Pressed after the fact,
+      // because opening this panel is what dismissed the keyboard being judged.
+      keyPanelAction('Kbd did open', () => recordKeyboardRaiseVerdict(true), {
+        title: 'The keyboard was on screen after the last raise'
+      }),
+      keyPanelAction('Kbd did not', () => recordKeyboardRaiseVerdict(false), {
+        title: 'No keyboard appeared after the last raise'
+      }),
       keyPanelAction('Clear', () => {
         layoutDebugLog.clear();
         keyboardDebugLines.length = 0;
         keyboardTransitionLog.clear();
+        // The verdict buttons label this record, so a cleared log must clear it
+        // too. Left behind, they wrote a raise-verdict for a raise whose own
+        // lines had just been thrown away.
+        lastKeyboardRaiseRecord = null;
         renderKeyPanel();
       })
     ),
@@ -6386,6 +6404,10 @@ function layoutDebugPixels(value) {
 function formatLayoutDebugLine(snapshot) {
   const s = snapshot || {};
   const yn = (value) => (value ? 'y' : 'n');
+  // Prints what it is given. Rounding belongs in the snapshot, which is also
+  // what recordLayoutDebug's change signature reads, and a blanket round here
+  // would erase cell=: that one is computed to a single decimal on purpose,
+  // because it is an input to the lift and 0.4px across 52 rows is 20px.
   const px = (value) => (value === null || value === undefined ? '?' : String(value));
   const lock = s.layoutLock ? px(s.layoutLockHeight) : 'n';
   const selection = s.selectionLock ? px(s.selectionLockHeight) : 'n';
@@ -6399,7 +6421,8 @@ function formatLayoutDebugLine(snapshot) {
     `vis=${s.visibility || '?'}`,
     `${s.displayMode || '?'} ${s.orientation || '?'}/${s.pointer || '?'} ${s.viewMode || '?'}`,
     `lay=${px(s.layoutHeight)} vv=${px(s.viewportHeight)} vvTop=${px(s.viewportTop)} ` +
-      `sc=${s.scale ?? '?'} in=${px(s.innerHeight)} scr=${px(s.screenHeight)}`,
+      `sc=${s.scale ?? '?'} in=${px(s.innerHeight)} scr=${px(s.screenHeight)} ` +
+      `dvh=${px(s.dynamicHeight)} differs=${s.viewportDiffers ?? '?'}`,
     `app=${s.appHeight ?? 'css'} appTop=${s.appTop ?? 'css'} ` +
       `foot=${s.footerHeightVar ?? 'css'} applied=${px(s.lastAppliedHeight)}`,
     `kb=${yn(s.keyboardOpen)} lock=${lock} sel=${selection} dis=${yn(s.dismissing)} ` +
@@ -6500,6 +6523,10 @@ function layoutDebugSnapshot(reason) {
   const root = document.documentElement;
   const rootStyle = window.getComputedStyle(root);
   const viewport = window.visualViewport;
+  // No reflow here. This runs on every layout change, and the forced re-layout
+  // is a measurement expensive enough to belong only on a raise that reported
+  // nothing.
+  const viewportSignals = readViewportSignals();
   const bodyBounds = document.body.getBoundingClientRect();
   const headerBounds = appHeaderElement.getBoundingClientRect();
   const mainBounds = document.querySelector('main').getBoundingClientRect();
@@ -6524,8 +6551,17 @@ function layoutDebugSnapshot(reason) {
     at: Math.round(window.performance?.now?.() || 0),
     visibility: document.visibilityState,
     viewportWidth: Math.round(viewport?.width || window.innerWidth),
-    viewportHeight: Math.round(viewport?.height || window.innerHeight),
+    viewportHeight: Math.round(viewport?.height ?? window.innerHeight),
     viewportTop: Math.round(viewport?.offsetTop || 0),
+    // The CSS viewport unit, and which readings disagree with the layout one.
+    // This log is the one a phone report pastes first, so the blind-keyboard
+    // case has to be visible in it without cross-reading the Keyboard log:
+    // `kb=n cover=0` with `differs=none` while a keyboard is on screen is the
+    // whole failure on one line. See the 2026-09-11 iPhone report.
+    dynamicHeight: Number.isFinite(viewportSignals.dynamicHeight)
+      ? Math.round(viewportSignals.dynamicHeight)
+      : null,
+    viewportDiffers: describeViewportDisagreement(viewportSignals),
     scale: (viewport?.scale ?? 1).toFixed(2),
     innerHeight: Math.round(window.innerHeight || 0),
     screenHeight: Math.round(window.screen?.height || 0),
@@ -9534,7 +9570,9 @@ function focusTerminalForTyping(keyboardRaiseReason = 'focus') {
  * turn recording on and reproduce, because the Debug tab lives in the panel that
  * stands in for the keyboard.
  */
-const keyboardDebugMaximumLines = 140;
+// Raised from 140 with raise-signals: every raise now writes a second line, and
+// a blind one writes a third, so the old cap held half the reproduce it used to.
+const keyboardDebugMaximumLines = 240;
 const keyboardDebugLines = [];
 // Long enough for a keyboard animation to finish and the viewport event to land.
 const keyboardRaiseCheckMilliseconds = 700;
@@ -9545,6 +9583,267 @@ const keyboardViewportGapPixels = 120;
 let keyboardRaiseCheckTimer = null;
 let keyboardOnscreenInputActive = false;
 let keyboardProbeRunning = false;
+/*
+ * Did the browser tell us anything at all?
+ *
+ * A raise that reports no keyboard has two shapes, and only the event count
+ * separates them: a keyboard that never rose fires no viewport resize, while a
+ * keyboard that rose behind a stale reading fires one that carries the wrong
+ * number — or, in the 2026-09-11 iPhone log, fires nothing while the keyboard is
+ * plainly on screen. Counted from page load and sampled at each raise.
+ */
+let visualViewportResizeCount = 0;
+let windowResizeCount = 0;
+/**
+ * What the last raise measured, kept so the Debug tab can label it afterwards.
+ *
+ * The tab lives in the panel that stands in for the keyboard, and opening the
+ * panel dismisses the keyboard, so the user cannot mark "it is up" while it is
+ * up. They mark the raise that just happened instead, and this is the record the
+ * mark attaches to.
+ */
+let lastKeyboardRaiseRecord = null;
+
+// ---- Start of the pure viewport signal block. ----
+/**
+ * Every height signal the page has, as one line.
+ *
+ * Written against a reading set rather than the globals so it can be tested, and
+ * because the point of the line is that the numbers disagree. On 2026-09-11 an
+ * iPhone opened its keyboard and `visualViewport.height` stayed at the full 812
+ * against a layout of 812, so the app measured no cover, cleared the terminal
+ * lift and left the footer under the keyboard. Every keyboard behaviour here is
+ * derived from that one number, and there was no second number in the log to
+ * check it against.
+ *
+ * `dvh`, `svh` and `lvh` are the CSS viewport units, read off a probe element.
+ * Under `interactive-widget=resizes-visual` the specification says a keyboard
+ * leaves them alone, so they are expected to match the layout viewport; they are
+ * here to prove that rather than to assume it. `reflow=` is the visual height
+ * read back after a forced re-layout, which is the documented heal for the
+ * mirror-image bug where the viewport sticks short:
+ * https://dev.to/cederhook/fixing-the-ios-standalone-pwa-keyboard-bug-that-shrinks-your-viewport-for-good-63d
+ * A value that differs from `vv=` means the reading was stale and a re-layout
+ * recovers it. `?` is a signal the browser does not expose.
+ */
+function formatViewportSignals(signals) {
+  const s = signals || {};
+  const px = (value) =>
+    Number.isFinite(value) ? String(Math.round(value)) : '?';
+  const parts = [
+    `vv=${px(s.visualHeight)}`,
+    `vvTop=${px(s.visualOffsetTop)}`,
+    `vvPage=${px(s.visualPageTop)}`,
+    `sc=${Number.isFinite(s.scale) ? s.scale.toFixed(2) : '?'}`,
+    `lay=${px(s.layoutHeight)}`,
+    `in=${px(s.innerHeight)}`,
+    `out=${px(s.outerHeight)}`,
+    `scr=${px(s.screenHeight)}`,
+    `dvh=${px(s.dynamicHeight)}`,
+    `svh=${px(s.smallHeight)}`,
+    `lvh=${px(s.largeHeight)}`
+  ];
+  if (Number.isFinite(s.reflowHeight)) {
+    parts.push(`reflow=${px(s.reflowHeight)}`);
+  }
+  if (Number.isFinite(s.visualResizes)) {
+    parts.push(`vvResize=${px(s.visualResizes)}`);
+  }
+  if (Number.isFinite(s.windowResizes)) {
+    parts.push(`winResize=${px(s.windowResizes)}`);
+  }
+  return parts.join(' ');
+}
+
+/**
+ * Which signals disagree with the layout viewport, named.
+ *
+ * The blind-keyboard case is exactly a disagreement: `lay=` and `vv=` equal,
+ * while the keyboard is on screen. Naming it — or saying there is none — turns
+ * twelve numbers into the one word a report needs.
+ *
+ * Only the visual viewport and its post-reflow re-read are compared, because
+ * those are the two readings every keyboard decision in this file is made from,
+ * and `interactive-widget=resizes-visual` promises they are the only ones a
+ * keyboard moves. The CSS units are printed beside them and deliberately not
+ * compared: `svh` is short of the layout viewport by the toolbar height in an
+ * ordinary browser tab, and `dvh` sits wherever the toolbar currently is, so
+ * including them would make `differs=` name something on every tab reading and
+ * `differs=none` unreachable outside a standalone PWA. They are here to be read,
+ * not to signal. `in=` is left out for the same reason.
+ */
+function describeViewportDisagreement(signals, tolerance = 8) {
+  const s = signals || {};
+  const layout = s.layoutHeight;
+  if (!Number.isFinite(layout) || !(layout > 0)) {
+    return 'no-layout';
+  }
+  const names = [];
+  const check = (name, value) => {
+    if (Number.isFinite(value) && Math.abs(value - layout) > tolerance) {
+      names.push(name);
+    }
+  };
+  check('vv', s.visualHeight);
+  check('reflow', s.reflowHeight);
+  return names.length ? names.join(',') : 'none';
+}
+// ---- End of the pure viewport signal block. ----
+
+/**
+ * A hidden element that spans the viewport, for measuring it.
+ *
+ * Three children carry the CSS viewport units so their computed heights can be
+ * read; the element itself spans the viewport so toggling its display forces
+ * WebKit to re-measure. `visibility: hidden` rather than `display: none` at rest,
+ * because a box with no layout has no height to read, and z-index and
+ * pointer-events keep it out of every hit test.
+ */
+let viewportProbeElement = null;
+
+function ensureViewportProbe() {
+  if (viewportProbeElement?.isConnected) {
+    return viewportProbeElement;
+  }
+  // The layout log runs on every geometry change, including ones that arrive
+  // before the body exists on a slow first paint. A probe is a diagnostic, so it
+  // gives up rather than throwing inside the logger.
+  if (!document.body) {
+    return null;
+  }
+  const probe = document.createElement('div');
+  probe.id = 'viewport-probe';
+  probe.setAttribute('aria-hidden', 'true');
+  // Deliberately uncontained. `contain: strict` reads well on a hidden probe and
+  // is the opposite of what the reflow needs: containment is the page telling the
+  // engine that changes in here cannot affect anything outside, which is exactly
+  // the re-measure being asked for.
+  probe.style.cssText =
+    'position:fixed;inset:0;overflow:hidden;visibility:hidden;' +
+    'pointer-events:none;z-index:-1;';
+  for (const unit of ['dvh', 'svh', 'lvh']) {
+    const child = document.createElement('div');
+    child.dataset.unit = unit;
+    child.style.cssText = `height:100${unit};`;
+    probe.append(child);
+  }
+  document.body.append(probe);
+  viewportProbeElement = probe;
+  return probe;
+}
+
+function viewportProbeUnit(probe, unit) {
+  const child = probe?.querySelector(`[data-unit="${unit}"]`);
+  return child ? child.getBoundingClientRect().height : null;
+}
+
+/**
+ * Force WebKit to re-measure the viewport, and say what it reads afterwards.
+ *
+ * A synchronous layout read between two display changes on a viewport-sized
+ * element is the documented heal for the mirror-image failure, where the visual
+ * viewport sticks short after the keyboard closes and never grows back. Applied
+ * to the probe rather than to `body`, so nothing in the app tree is torn down
+ * and rebuilt: the terminal, its scroll position and its selection are untouched.
+ * Nothing paints between the two assignments because both happen in one task.
+ *
+ * This measures. It does not act on what it finds — whether a re-layout recovers
+ * a stale reading is exactly the open question, and the answer belongs in a log
+ * before it belongs in the keyboard path.
+ */
+function reflowViewportHeight() {
+  const probe = ensureViewportProbe();
+  if (!probe) {
+    return null;
+  }
+  probe.style.display = 'none';
+  void probe.offsetHeight;
+  probe.style.display = '';
+  void probe.offsetHeight;
+  const height = window.visualViewport?.height;
+  return Number.isFinite(height) ? height : null;
+}
+
+/**
+ * Every height the page can ask for, at one instant.
+ *
+ * `since` is a count baseline taken earlier, and it is what turns the resize
+ * counters into "how many since then". Without one they are left out entirely
+ * rather than printed as a running total: a total says nothing about the raise
+ * the line is attached to, and it would read as a delta.
+ */
+function readViewportSignals({ reflow = false, since = null } = {}) {
+  const viewport = window.visualViewport;
+  const probe = ensureViewportProbe();
+  const signals = {
+    visualHeight: viewport?.height ?? null,
+    visualOffsetTop: viewport?.offsetTop ?? null,
+    visualPageTop: viewport?.pageTop ?? null,
+    scale: viewport?.scale ?? null,
+    layoutHeight:
+      document.documentElement.clientHeight || window.innerHeight || null,
+    innerHeight: window.innerHeight || null,
+    outerHeight: window.outerHeight || null,
+    screenHeight: window.screen?.height ?? null,
+    dynamicHeight: viewportProbeUnit(probe, 'dvh'),
+    smallHeight: viewportProbeUnit(probe, 'svh'),
+    largeHeight: viewportProbeUnit(probe, 'lvh'),
+    visualResizes: since
+      ? visualViewportResizeCount - since.visualResizes
+      : null,
+    windowResizes: since ? windowResizeCount - since.windowResizes : null
+  };
+  if (reflow) {
+    signals.reflowHeight = reflowViewportHeight();
+  }
+  return signals;
+}
+
+/** One line of every signal, with the disagreements named. */
+function viewportSignalLine(options) {
+  const signals = readViewportSignals(options);
+  return `${formatViewportSignals(signals)} differs=${describeViewportDisagreement(
+    signals
+  )}`;
+}
+
+/**
+ * Say whether the keyboard really came up, after the fact.
+ *
+ * The one thing the log could not carry. On 2026-09-11 an iPhone report read
+ * `raise-result opened=false gap=0 visual=812` twice, and the keyboard had been
+ * on screen for both: the app was measuring a viewport that never moved. From
+ * the log alone that is identical to a keyboard which never rose, and the two
+ * need opposite fixes — recover the reading, or ask for the keyboard a different
+ * way. Only the person holding the phone can tell them apart, so this is how they
+ * say it.
+ *
+ * Recorded against the raise rather than against now, because the panel this
+ * button lives in dismisses the keyboard to open.
+ */
+function recordKeyboardRaiseVerdict(userSawKeyboard) {
+  const record = lastKeyboardRaiseRecord;
+  if (!record) {
+    setStatus('No raise recorded yet');
+    return;
+  }
+  const said = userSawKeyboard ? 'opened' : 'closed';
+  const measured = record.opened ? 'opened' : 'closed';
+  keyboardDebug(
+    `raise-verdict said=${said} app=${measured} ` +
+      `agree=${record.opened === userSawKeyboard} reason=${record.reason} ` +
+      `age=${Math.round(window.performance.now() - record.at)}ms ` +
+      `gap=${record.gap} visual=${record.visual} focused=${record.focused} ` +
+      `vvResize=${record.viewportResizes}`
+  );
+  keyboardDebug(`raise-verdict-signals ${viewportSignalLine({ reflow: true })}`);
+  setStatus(
+    record.opened === userSawKeyboard
+      ? 'Logged — the app agreed'
+      : 'Logged — the app was wrong'
+  );
+  renderKeyPanel();
+}
 
 function keyboardDebug(line) {
   keyboardDebugLines.push(
@@ -9772,10 +10071,16 @@ function scheduleKeyboardRaiseCheck(reason) {
   window.clearTimeout(keyboardRaiseCheckTimer);
   const startedGap = keyboardViewportGap();
   const startedVisual = keyboardVisualHeight();
+  const startedCounts = {
+    visualResizes: visualViewportResizeCount,
+    windowResizes: windowResizeCount
+  };
+  const startedAt = window.performance.now();
   keyboardDebug(
     `raise ${reason} gap=${startedGap} visual=${startedVisual} ` +
       `active=${describeElementForDebug(document.activeElement)}`
   );
+  keyboardDebug(`raise-signals ${reason} ${viewportSignalLine()}`);
   keyboardRaiseCheckTimer = window.setTimeout(() => {
     keyboardRaiseCheckTimer = null;
     const gap = keyboardViewportGap();
@@ -9786,8 +10091,33 @@ function scheduleKeyboardRaiseCheck(reason) {
       `raise-result ${reason} opened=${opened} gap=${gap} visual=${visual} ` +
         `focused=${focused}`
     );
+    // Kept whatever the verdict, so the Debug tab's label lands on a raise that
+    // reported success as readily as on one that reported nothing. A wrong
+    // `opened=true` is as much a bug as a wrong `opened=false`.
+    lastKeyboardRaiseRecord = {
+      at: startedAt,
+      reason,
+      opened,
+      gap,
+      visual,
+      focused,
+      viewportResizes: visualViewportResizeCount - startedCounts.visualResizes
+    };
     if (opened || !focused || keyboardProbeRunning) {
       return;
+    }
+    // Nothing was measured, and focus is still held. That is either a keyboard
+    // that never rose or one that rose behind a viewport reading that did not
+    // move, and the two are indistinguishable from `gap=` alone. The reflow read
+    // is what separates a stale reading from an honest one; the resize count is
+    // what separates silence from a wrong number. See the 2026-09-11 iPhone log
+    // in docs/qa.md, under "A keyboard the app cannot see".
+    if (usesSoftKeyboard()) {
+      keyboardDebug(
+        `raise-blind ${reason} since=${Math.round(
+          window.performance.now() - startedAt
+        )}ms ${viewportSignalLine({ reflow: true, since: startedCounts })}`
+      );
     }
     // The Apple path is the one that already works, and a hardware keyboard is
     // not a failure to raise anything.
@@ -10150,7 +10480,7 @@ function noteBarTap(button, cancelable) {
   // identical from the terminal and are fixed in different places.
   //
   // The previous tap's samples are dropped first. Ordinary typing on the bar is a
-  // burst of taps and the log holds 140 lines, so the samples worth keeping are
+  // burst of taps and the log holds 240 lines, so the samples worth keeping are
   // the last tap's.
   for (const timer of barTapSampleTimers) {
     clearTimeout(timer);
@@ -21154,6 +21484,15 @@ const handleViewportGeometryChange = () => {
   scheduleVisualViewportUpdate();
   scheduleLayoutDebug('viewport');
 };
+// First, and on their own, so the counts are of what the browser reported rather
+// than of what the app decided to do about it. A listener that ran after a
+// handler which threw would undercount exactly the broken case it is for.
+window.addEventListener('resize', () => {
+  windowResizeCount += 1;
+});
+window.visualViewport?.addEventListener('resize', () => {
+  visualViewportResizeCount += 1;
+});
 window.addEventListener('resize', handleViewportGeometryChange);
 window.addEventListener('orientationchange', handleViewportGeometryChange);
 window.visualViewport?.addEventListener('resize', rememberKeyboardHeight);
