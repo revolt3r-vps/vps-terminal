@@ -6,7 +6,8 @@ const path = require('node:path');
 
 const preferencesVersion = 1;
 const maximumSessionPreferenceCount = 128;
-const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+// The final assertion rejects trailing newlines, which JavaScript $ accepts.
+const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}(?![\s\S])/;
 const profileIdPattern = /^(?:shell|profile-[a-z0-9]{8,48})$/;
 const themeNamePattern = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const maximumBookmarkCount = 30;

@@ -1171,7 +1171,7 @@ function normalizeModePlace(value) {
   const place = { session: null, files: null, view: null };
   if (
     typeof value.session === 'string' &&
-    /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(value.session)
+    /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}(?![\s\S])/.test(value.session)
   ) {
     place.session = value.session;
   }
@@ -1287,7 +1287,7 @@ function controlMessageIntent(raw) {
   }
   if (
     typeof value.session !== 'string' ||
-    !/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(value.session)
+    !/^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}(?![\s\S])/.test(value.session)
   ) {
     return null;
   }
@@ -11133,7 +11133,7 @@ function sanitizeSessionThemes(map) {
   for (const [sessionName, themeName] of Object.entries(map)) {
     const resolved = resolveThemeName(themeName);
     if (
-      /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/.test(sessionName) &&
+      /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}(?![\s\S])/.test(sessionName) &&
       Object.hasOwn(terminalThemes, resolved)
     ) {
       cleaned[sessionName] = resolved;

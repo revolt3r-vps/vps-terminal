@@ -4,7 +4,8 @@
 set -Eeuo pipefail
 
 readonly name="${1:-}"
-if [[ ! "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$ ]]; then
+readonly session_name_pattern='^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}$'
+if [[ ! "$name" =~ $session_name_pattern ]]; then
   printf '%s\n' 'vps-terminal: invalid session name' >&2
   exit 1
 fi

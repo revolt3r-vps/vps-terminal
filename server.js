@@ -395,7 +395,8 @@ const maximumConnections = 10;
 const maximumInputLength = 32768;
 const maximumSessionNameLength = 32;
 const websocketLifetimeMs = 60 * 60 * 1000;
-const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+// The final assertion rejects trailing newlines, which JavaScript $ accepts.
+const sessionNamePattern = /^[A-Za-z0-9][A-Za-z0-9 ._-]{0,31}(?![\s\S])/;
 const sessionLauncherCommands = Object.freeze({
   terminal: null,
   codex: 'codex',
@@ -3174,7 +3175,7 @@ const server = http.createServer(async (request, response) => {
         sendError(
           response,
           400,
-          'name must be 1-32 characters using letters, numbers, dot, dash or underscore'
+          'name must be 1-32 characters using letters, numbers, spaces, dot, dash or underscore'
         );
         return;
       }
@@ -3238,7 +3239,7 @@ const server = http.createServer(async (request, response) => {
         sendError(
           response,
           400,
-          'name must be 1-32 characters using letters, numbers, dot, dash or underscore'
+          'name must be 1-32 characters using letters, numbers, spaces, dot, dash or underscore'
         );
         return;
       }
